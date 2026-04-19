@@ -23,17 +23,24 @@ SEARCH_PARSE_SYSTEM_PROMPT = """# 角色
 - scene: 场景列表（可选）
 - atmosphere: 氛围列表，如 ["性感", "可爱"]（可选）
 - keywords: 关键词列表，用于描述匹配（可选）
-- persona: 人格名称（可选）
+- persona: 人格名称（可选，仅在 persona_scope 为 named 时填写具体名称）
+- persona_scope: 人格搜索范围，必填，取值如下：
+  - "self": 用户在指代自己/当前人格（如"发一张你的cos照""你有没有洛丽塔"），指代模糊时默认为此
+  - "other": 用户明确要别人的/非当前人格的图（如"有没有别人的漂亮图片""其他人的cos"）
+  - "named": 用户明确提到某个具体人格名（如"星织有没有拍过xxx"），此时 persona 填写该名称
+  - "global": 用户泛泛询问不涉及任何人格（如"有没有穿洛丽塔的美少女"），或人格无关的纯内容搜索
 
 # 人格判断规则
 当前对话人格：{current_persona}
 已有的人格目录：{persona_names}
 
 判断逻辑：
-- 如果用户明确提到某个人格名（如"星织有没有拍过xxx"），且该名称在人格目录中，则 persona 填写该名称
-- 如果用户用"你""自己"等指代当前对话人格，且当前对话人格在人格目录中，则 persona 填写当前对话人格
-- 如果用户没有提到任何人格，且语气是泛泛询问（如"有没有穿洛丽塔的美少女"），则 persona 留空，表示全局搜索
-- 如果提到的人格名不在目录中，persona 也留空
+- 用户用"你""自己""我"等指代当前对话人格 → persona_scope="self"
+- 用户说"别人""其他人""别的"等明确排除当前人格 → persona_scope="other"
+- 用户明确提到某个具体人格名且在人格目录中 → persona_scope="named"，persona 填写该名称
+- 用户没有提到任何人格且语气泛泛 → persona_scope="self"（指代模糊默认当作在说自己）
+- 纯内容搜索完全不涉及人格 → persona_scope="global"
+- 如果提到的人格名不在目录中 → persona_scope="global"
 
 # 规则
 1. 只输出 JSON，不要输出解释
@@ -81,7 +88,9 @@ class ImageSearcher:
         persona: str = "",
         current_persona: str = "",
         persona_names: str = "",
-    ) -> list[dict[str, Any]]:
+    ) -> tuple[list[dict[str, Any]], dict[str, Any]]:
+        meta = {"persona_mismatch": False, "searched_persona": persona, "persona_scope": "global"}
+
         query_conditions = await self._parse_query(
             user_query,
             primary_provider_id=primary_provider_id,
@@ -93,27 +102,114 @@ class ImageSearcher:
         if not query_conditions:
             query_conditions = {"keywords": [user_query]}
 
-        resolved_persona = persona
-        if query_conditions.get("persona"):
-            resolved_persona = query_conditions.pop("persona")
+        persona_scope = query_conditions.pop("persona_scope", "global")
+        named_persona = query_conditions.pop("persona", "")
+        meta["persona_scope"] = persona_scope
 
-        candidates = await self._query_candidates(query_conditions, limit=candidate_limit, persona=resolved_persona)
+        candidates = await self._search_by_scope(
+            query_conditions, persona_scope=persona_scope,
+            named_persona=named_persona, current_persona=current_persona,
+            limit=candidate_limit, meta=meta,
+        )
+
         if not candidates:
-            logger.info("[Wardrobe] 未找到候选图片 persona=%s", resolved_persona or "无")
-            return []
+            logger.info("[Wardrobe] 未找到候选图片 scope=%s persona=%s", persona_scope, named_persona or "无")
+            return [], meta
 
         if len(candidates) <= max_select:
+            selected = candidates
+        else:
+            selected = await self._select_from_candidates(
+                user_query,
+                candidates,
+                max_select=max_select,
+                primary_provider_id=primary_provider_id,
+                secondary_provider_id=secondary_provider_id,
+                timeout_seconds=timeout_seconds,
+            )
+
+        for r in selected:
+            if current_persona and r.get("persona") and r["persona"] != current_persona:
+                meta["persona_mismatch"] = True
+                break
+
+        return selected, meta
+
+    async def _search_by_scope(
+        self,
+        conditions: dict[str, Any],
+        *,
+        persona_scope: str,
+        named_persona: str,
+        current_persona: str,
+        limit: int,
+        meta: dict[str, Any],
+    ) -> list[dict[str, Any]]:
+        if persona_scope == "self" and current_persona:
+            candidates = await self._query_candidates(conditions, limit=limit, persona=current_persona)
+            if candidates:
+                meta["searched_persona"] = current_persona
+                return candidates
+            logger.info("[Wardrobe] 当前人格池无结果，回退全局搜索 persona=%s", current_persona)
+            meta["persona_mismatch"] = True
+            candidates = await self._query_candidates(conditions, limit=limit, persona="")
+            meta["searched_persona"] = ""
             return candidates
 
-        selected = await self._select_from_candidates(
-            user_query,
-            candidates,
-            max_select=max_select,
-            primary_provider_id=primary_provider_id,
-            secondary_provider_id=secondary_provider_id,
-            timeout_seconds=timeout_seconds,
+        if persona_scope == "other" and current_persona:
+            candidates = await self._query_candidates_excluding_persona(conditions, limit=limit, exclude_persona=current_persona)
+            if candidates:
+                meta["searched_persona"] = f"非{current_persona}"
+                return candidates
+            logger.info("[Wardrobe] 非当前人格池无结果，回退全局搜索")
+            candidates = await self._query_candidates(conditions, limit=limit, persona="")
+            meta["searched_persona"] = ""
+            return candidates
+
+        if persona_scope == "named" and named_persona:
+            candidates = await self._query_candidates(conditions, limit=limit, persona=named_persona)
+            if candidates:
+                meta["searched_persona"] = named_persona
+                return candidates
+            logger.info("[Wardrobe] 指定人格池无结果，回退全局搜索 persona=%s", named_persona)
+            meta["persona_mismatch"] = True
+            candidates = await self._query_candidates(conditions, limit=limit, persona="")
+            meta["searched_persona"] = ""
+            return candidates
+
+        return await self._query_candidates(conditions, limit=limit, persona="")
+
+    async def _query_candidates_excluding_persona(
+        self, conditions: dict[str, Any], *, exclude_persona: str, limit: int = 20
+    ) -> list[dict[str, Any]]:
+        category = conditions.get("category")
+        style = conditions.get("style")
+        exposure_level = conditions.get("exposure_level")
+        scene = conditions.get("scene")
+        atmosphere = conditions.get("atmosphere")
+        keywords = conditions.get("keywords")
+
+        results = await self.db.search_images(
+            category=category,
+            exposure_level=exposure_level,
+            style=style,
+            scene=scene,
+            atmosphere=atmosphere,
+            persona="",
+            exclude_persona=exclude_persona,
+            limit=limit,
         )
-        return selected
+
+        if not results and keywords:
+            results = await self.db.search_by_description(
+                keywords=keywords,
+                category=category,
+                persona="",
+                exclude_persona=exclude_persona,
+                limit=limit,
+            )
+
+        return results
 
     async def _parse_query(
         self,
