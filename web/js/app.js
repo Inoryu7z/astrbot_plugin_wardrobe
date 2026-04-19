@@ -2,9 +2,16 @@
   const $=s=>document.querySelector(s);
   const $$=s=>document.querySelectorAll(s);
 
+  const POOL_LABELS={
+    'style':'风格','clothing_type':'服装类型','exposure_level':'暴露程度',
+    'scene':'场景','atmosphere':'氛围','pose_type':'姿势',
+    'body_orientation':'朝向','dynamic_level':'动态程度','action_style':'动作风格',
+    'shot_size':'景别','camera_angle':'角度','expression':'表情',
+  };
+
   let state={
     page:1, perPage:24, total:0,
-    category:'', persona:'', style:'', scene:'', composition:'', atmosphere:'',
+    category:'', persona:'', style:'', scene:'', shot_size:'', atmosphere:'',
     searchQuery:'', batchMode:false,
     selectedIds:new Set(),
     currentImageId:null,
@@ -42,43 +49,46 @@
   }
 
   async function loadFilters(){
-    const resp=await api('/api/filters');
-    if(!resp)return;
-    const data=await resp.json();
-    const container=$('#personaFilters');
-    const existing=container.querySelector('[value=""]');
-    container.innerHTML='';
-    container.appendChild(existing);
-    (data.personas||[]).forEach(p=>{
-      const label=document.createElement('label');
-      label.className='filter-item';
-      label.innerHTML=`<input type="radio" name="persona" value="${esc(p)}"><span class="filter-label">${esc(p)}</span>`;
-      container.appendChild(label);
-    });
-    container.querySelectorAll('input[name="persona"]').forEach(inp=>{
-      inp.addEventListener('change',()=>{
-        state.persona=inp.value;state.page=1;loadImages();
-      });
-    });
+    try{
+      const resp=await api('/api/filters');
+      if(!resp)return;
+      const data=await resp.json();
 
-    const pools=data.pools||{};
-    const filterMap={
-      style:{sel:'#styleFilter',stateKey:'style'},
-      scene:{sel:'#sceneFilter',stateKey:'scene'},
-      composition:{sel:'#compositionFilter',stateKey:'composition'},
-      atmosphere:{sel:'#atmosphereFilter',stateKey:'atmosphere'},
-    };
-    Object.entries(filterMap).forEach(([poolKey,cfg])=>{
-      const sel=$(cfg.sel);
-      if(!sel)return;
-      sel.innerHTML='<option value="">全部</option>';
-      (pools[poolKey]||[]).forEach(v=>{
-        const opt=document.createElement('option');
-        opt.value=v;opt.textContent=v;
-        sel.appendChild(opt);
+      const container=$('#personaFilters');
+      container.innerHTML='<label class="filter-item"><input type="radio" name="persona" value="" checked><span class="filter-label">全部</span></label>';
+      (data.personas||[]).forEach(p=>{
+        const label=document.createElement('label');
+        label.className='filter-item';
+        label.innerHTML=`<input type="radio" name="persona" value="${esc(p)}"><span class="filter-label">${esc(p)}</span>`;
+        container.appendChild(label);
       });
-      sel.onchange=()=>{state[cfg.stateKey]=sel.value;state.page=1;loadImages();};
-    });
+      container.querySelectorAll('input[name="persona"]').forEach(inp=>{
+        inp.addEventListener('change',()=>{
+          state.persona=inp.value;state.page=1;loadImages();
+        });
+      });
+
+      const pools=data.pools||{};
+      const filterMap={
+        style:{sel:'#styleFilter',stateKey:'style'},
+        scene:{sel:'#sceneFilter',stateKey:'scene'},
+        shot_size:{sel:'#shotSizeFilter',stateKey:'shot_size'},
+        atmosphere:{sel:'#atmosphereFilter',stateKey:'atmosphere'},
+      };
+      Object.entries(filterMap).forEach(([poolKey,cfg])=>{
+        const sel=$(cfg.sel);
+        if(!sel)return;
+        sel.innerHTML='<option value="">全部</option>';
+        (pools[poolKey]||[]).forEach(v=>{
+          const opt=document.createElement('option');
+          opt.value=v;opt.textContent=v;
+          sel.appendChild(opt);
+        });
+        sel.onchange=()=>{state[cfg.stateKey]=sel.value;state.page=1;loadImages();};
+      });
+    }catch(e){
+      console.error('[Wardrobe] loadFilters error:',e);
+    }
   }
 
   async function loadImages(){
@@ -86,7 +96,7 @@
     if(state.searchQuery){
       url=`/api/search?q=${encodeURIComponent(state.searchQuery)}&persona=${encodeURIComponent(state.persona)}&category=${encodeURIComponent(state.category)}&limit=50`;
     }else{
-      url=`/api/images?page=${state.page}&per_page=${state.perPage}&category=${encodeURIComponent(state.category)}&persona=${encodeURIComponent(state.persona)}&style=${encodeURIComponent(state.style)}&scene=${encodeURIComponent(state.scene)}&composition=${encodeURIComponent(state.composition)}&atmosphere=${encodeURIComponent(state.atmosphere)}`;
+      url=`/api/images?page=${state.page}&per_page=${state.perPage}&category=${encodeURIComponent(state.category)}&persona=${encodeURIComponent(state.persona)}&style=${encodeURIComponent(state.style)}&scene=${encodeURIComponent(state.scene)}&shot_size=${encodeURIComponent(state.shot_size)}&atmosphere=${encodeURIComponent(state.atmosphere)}`;
     }
     const resp=await api(url);
     if(!resp)return;
@@ -317,6 +327,71 @@
     return d.innerHTML;
   }
 
+  function poolLabel(key){
+    return POOL_LABELS[key]||key;
+  }
+
+  async function loadPoolsModal(){
+    const resp=await api('/api/pools');
+    if(!resp)return;
+    const data=await resp.json();
+    const pools=data.pools||{};
+    const list=$('#poolsList');
+    list.innerHTML='';
+    Object.entries(pools).sort((a,b)=>(poolLabel(a[0])).localeCompare(poolLabel(b[0]))).forEach(([key,values])=>{
+      const group=document.createElement('div');
+      group.className='pool-group';
+      group.innerHTML=`
+        <div class="pool-group-header">
+          <span>${esc(poolLabel(key))} <span class="pool-group-count">(${values.length})</span></span>
+          <button class="pool-delete-btn" data-key="${esc(key)}">删除分类</button>
+        </div>
+        <div class="pool-group-body">
+          ${values.map(v=>`<span class="pool-tag">${esc(v)}<span class="pool-tag-remove" data-key="${esc(key)}" data-value="${esc(v)}">&times;</span></span>`).join('')}
+        </div>
+        <div class="pool-group-add">
+          <input type="text" class="login-input pool-inline-input" data-key="${esc(key)}" placeholder="输入新选项...">
+          <button class="btn btn-accent btn-sm pool-inline-add-btn" data-key="${esc(key)}">添加</button>
+        </div>
+      `;
+      list.appendChild(group);
+    });
+    list.querySelectorAll('.pool-tag-remove').forEach(btn=>{
+      btn.addEventListener('click',async()=>{
+        const key=btn.dataset.key;
+        const value=btn.dataset.value;
+        const resp=await api('/api/pools',{method:'POST',json:{key,action:'remove_value',value}});
+        if(resp&&resp.ok){toast('已移除','success');loadPoolsModal();loadFilters();}
+      });
+    });
+    list.querySelectorAll('.pool-delete-btn').forEach(btn=>{
+      btn.addEventListener('click',async()=>{
+        const key=btn.dataset.key;
+        if(!confirm(`确定删除分类「${poolLabel(key)}」？该分类下所有选项都会被移除。`))return;
+        const resp=await api('/api/pools',{method:'POST',json:{key,action:'remove_pool'}});
+        if(resp&&resp.ok){toast('已删除','success');loadPoolsModal();loadFilters();}
+      });
+    });
+    list.querySelectorAll('.pool-inline-add-btn').forEach(btn=>{
+      btn.addEventListener('click',async()=>{
+        const key=btn.dataset.key;
+        const input=btn.parentElement.querySelector('.pool-inline-input');
+        const val=input.value.trim();
+        if(!val){toast('请输入选项名称','error');return;}
+        const resp=await api('/api/pools',{method:'POST',json:{key,action:'add_value',value:val}});
+        if(resp&&resp.ok){toast('已添加','success');input.value='';loadPoolsModal();loadFilters();}
+      });
+    });
+    list.querySelectorAll('.pool-inline-input').forEach(input=>{
+      input.addEventListener('keydown',e=>{
+        if(e.key==='Enter'){
+          const btn=input.parentElement.querySelector('.pool-inline-add-btn');
+          if(btn)btn.click();
+        }
+      });
+    });
+  }
+
   function init(){
     $$('input[name="category"]').forEach(inp=>{
       inp.addEventListener('change',()=>{
@@ -324,27 +399,13 @@
       });
     });
 
-    $('#styleFilter').addEventListener('change',e=>{
-      state.style=e.target.value;state.page=1;loadImages();
-    });
-    $('#compositionFilter').addEventListener('change',e=>{
-      state.composition=e.target.value;state.page=1;loadImages();
-    });
-
     $('#poolsBtn').addEventListener('click',()=>{$('#poolsModal').classList.remove('hidden');loadPoolsModal();});
     $('#poolsModalClose').addEventListener('click',()=>{$('#poolsModal').classList.add('hidden');});
-    $('#poolAddValueBtn').addEventListener('click',async()=>{
-      const key=$('#poolKeySelect').value;
-      const val=$('#poolNewValue').value.trim();
-      if(!key||!val){toast('请选择池子并输入值','error');return;}
-      const resp=await api('/api/pools',{method:'POST',json:{key,action:'add_value',value:val}});
-      if(resp&&resp.ok){toast('已添加','success');$('#poolNewValue').value='';loadPoolsModal();loadFilters();}
-    });
     $('#poolAddKeyBtn').addEventListener('click',async()=>{
       const val=$('#poolNewKey').value.trim();
-      if(!val){toast('请输入池子名称','error');return;}
+      if(!val){toast('请输入分类名称','error');return;}
       const resp=await api('/api/pools',{method:'POST',json:{key:val,action:'add_pool',value:val}});
-      if(resp&&resp.ok){toast('已创建','success');$('#poolNewKey').value='';loadPoolsModal();loadFilters();}
+      if(resp&&resp.ok){toast('分类已创建，现在可以添加选项了','success');$('#poolNewKey').value='';loadPoolsModal();loadFilters();}
     });
 
     $('#searchBtn').addEventListener('click',doSearch);
@@ -402,51 +463,6 @@
     state.searchQuery=q;
     state.page=1;
     loadImages();
-  }
-
-  async function loadPoolsModal(){
-    const resp=await api('/api/pools');
-    if(!resp)return;
-    const data=await resp.json();
-    const pools=data.pools||{};
-    const list=$('#poolsList');
-    list.innerHTML='';
-    const sel=$('#poolKeySelect');
-    sel.innerHTML='';
-    Object.entries(pools).sort((a,b)=>a[0].localeCompare(b[0])).forEach(([key,values])=>{
-      const opt=document.createElement('option');
-      opt.value=key;opt.textContent=key;
-      sel.appendChild(opt);
-
-      const group=document.createElement('div');
-      group.className='pool-group';
-      group.innerHTML=`
-        <div class="pool-group-header">
-          <span>${esc(key)} <span class="pool-group-count">(${values.length})</span></span>
-          <button class="pool-delete-btn" data-key="${esc(key)}">删除池子</button>
-        </div>
-        <div class="pool-group-body">
-          ${values.map(v=>`<span class="pool-tag">${esc(v)}<span class="pool-tag-remove" data-key="${esc(key)}" data-value="${esc(v)}">&times;</span></span>`).join('')}
-        </div>
-      `;
-      list.appendChild(group);
-    });
-    list.querySelectorAll('.pool-tag-remove').forEach(btn=>{
-      btn.addEventListener('click',async()=>{
-        const key=btn.dataset.key;
-        const value=btn.dataset.value;
-        const resp=await api('/api/pools',{method:'POST',json:{key,action:'remove_value',value}});
-        if(resp&&resp.ok){toast('已移除','success');loadPoolsModal();loadFilters();}
-      });
-    });
-    list.querySelectorAll('.pool-delete-btn').forEach(btn=>{
-      btn.addEventListener('click',async()=>{
-        const key=btn.dataset.key;
-        if(!confirm(`确定删除池子「${key}」？`))return;
-        const resp=await api('/api/pools',{method:'POST',json:{key,action:'remove_pool'}});
-        if(resp&&resp.ok){toast('已删除','success');loadPoolsModal();loadFilters();}
-      });
-    });
   }
 
   document.addEventListener('DOMContentLoaded',init);

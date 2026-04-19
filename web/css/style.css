@@ -550,10 +550,8 @@ html, body {
   display:flex; align-items:center; justify-content:space-between;
   padding:10px 14px; background:#F8F4FC;
   font-family:var(--font-display); font-size:14px; font-weight:600;
-  color:var(--text); cursor:pointer;
+  color:var(--text); cursor:default;
 }
-
-.pool-group-header:hover { background:#F0E8F6; }
 
 .pool-group-count { font-size:12px; color:var(--text-muted); font-weight:400; }
 
@@ -585,14 +583,32 @@ html, body {
 
 .pool-delete-btn:hover { background:#FFE0E0; }
 
-.pools-add-section { border-top:1px solid var(--border); padding-top:16px; }
+.pool-group-add {
+  display:flex; gap:8px; align-items:center;
+  padding:8px 12px; border-top:1px solid var(--border);
+  background:#FDFAFF;
+}
 
-.pools-add-title { font-family:var(--font-display); font-size:14px; font-weight:600; color:var(--text); margin-bottom:10px; }
+.pool-inline-input {
+  flex:1; padding:6px 10px; font-size:12px;
+  border:1px solid var(--border); border-radius:8px;
+  outline:none; transition:border-color .2s;
+}
 
-.pools-add-row { display:flex; gap:8px; align-items:center; }
+.pool-inline-input:focus { border-color:var(--lavender); }
 
-.pools-add-select { width:120px; flex-shrink:0; }
-.pools-add-input { flex:1; padding:8px 12px; font-size:13px; }
+.pools-create-section { border-top:1px solid var(--border); padding-top:16px; }
+
+.pools-create-title {
+  font-family:var(--font-display); font-size:14px; font-weight:600;
+  color:var(--text); margin-bottom:4px;
+}
+
+.pools-create-desc { font-size:12px; color:var(--text-muted); margin-bottom:10px; line-height:1.4; }
+
+.pools-create-row { display:flex; gap:8px; align-items:center; }
+
+.pools-create-input { flex:1; padding:8px 12px; font-size:13px; }
 
 @media (max-width:768px) {
   .sidebar { display:none; }

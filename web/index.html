@@ -69,8 +69,8 @@
       </select>
     </div>
     <div class="sidebar-section">
-      <h3 class="sidebar-heading">构图</h3>
-      <select id="compositionFilter" class="sidebar-select">
+      <h3 class="sidebar-heading">景别</h3>
+      <select id="shotSizeFilter" class="sidebar-select">
         <option value="">全部</option>
       </select>
     </div>
@@ -156,19 +156,15 @@
 <div class="modal-overlay hidden" id="poolsModal">
   <div class="modal-card modal-card-md">
     <button class="modal-close" id="poolsModalClose">&times;</button>
-    <h2 class="modal-title">值池管理</h2>
-    <p class="pools-hint">管理 AI 分析图片时使用的预定义值池。添加自定义值后，存图时 AI 也能识别并归类。</p>
+    <h2 class="modal-title">标签分类管理</h2>
+    <p class="pools-hint">管理图片分析时使用的标签分类。向已有分类添加新选项后，AI 存图时也能识别归类。</p>
     <div id="poolsList" class="pools-list"></div>
-    <div class="pools-add-section">
-      <h3 class="pools-add-title">添加新值</h3>
-      <div class="pools-add-row">
-        <select id="poolKeySelect" class="sidebar-select pools-add-select"></select>
-        <input type="text" id="poolNewValue" class="login-input pools-add-input" placeholder="新值名称">
-        <button class="btn btn-accent btn-sm" id="poolAddValueBtn">添加</button>
-      </div>
-      <div class="pools-add-row" style="margin-top:8px">
-        <input type="text" id="poolNewKey" class="login-input pools-add-input" placeholder="新池子名称">
-        <button class="btn btn-secondary btn-sm" id="poolAddKeyBtn">新建池子</button>
+    <div class="pools-create-section">
+      <h3 class="pools-create-title">创建新分类</h3>
+      <p class="pools-create-desc">需要全新的标签分类时在此创建，创建后可在上方添加具体选项</p>
+      <div class="pools-create-row">
+        <input type="text" id="poolNewKey" class="login-input pools-create-input" placeholder="输入分类名称，如：色调">
+        <button class="btn btn-accent btn-sm" id="poolAddKeyBtn">创建</button>
       </div>
     </div>
   </div>
