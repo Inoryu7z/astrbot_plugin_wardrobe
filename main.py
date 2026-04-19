@@ -3,6 +3,7 @@ from typing import Optional
 
 from astrbot.api import AstrBotConfig, logger
 from astrbot.api.event import AstrMessageEvent, filter
+from astrbot.api.event.filter import on_llm_tool_respond
 from astrbot.api.message_components import Image
 from astrbot.api.star import Context, Star, register
 from astrbot.core.utils.astrbot_path import get_astrbot_data_path
@@ -15,6 +16,7 @@ from .core.utils import detect_image_mime, mime_to_ext
 
 _MAX_IMAGE_SIZE_MB = 10
 _MAX_DESCRIPTION_LEN = 2000
+_GITEE_IMAGE_TOOLS = frozenset({"gitee_draw_image", "gitee_edit_image", "aiimg_generate"})
 
 
 @register(
@@ -70,6 +72,11 @@ class WardrobePlugin(Star):
         await self._ensure_db()
         logger.info("[Wardrobe] 数据库已就绪")
 
+    @on_llm_tool_respond()
+    async def on_gitee_tool_respond(self, event: AstrMessageEvent, tool, tool_args, tool_result):
+        '''gitee 生图工具调用后的自动存图钩子'''
+        await self._auto_save_gitee_image(event, tool)
+
     @filter.llm_tool(name="save_wardrobe_image")
     async def save_wardrobe_image_tool(self, event: AstrMessageEvent, user_description: str = "", persona: str = "") -> str:
         '''将用户发送的图片保存到图片衣柜库中。当用户要求保存、收藏、存储图片时调用此工具。系统会自动分析图片内容并生成标签和描述。此工具仅用于保存已有图片，不能生成新图片。
@@ -94,8 +101,6 @@ class WardrobePlugin(Star):
     async def _do_save_image(
         self, event: AstrMessageEvent, user_description: str = "", persona: str = ""
     ) -> str:
-        await self._ensure_db()
-
         image_bytes = await self._extract_image_bytes(event)
         if not image_bytes:
             return "未检测到图片，请发送图片后再保存"
@@ -103,9 +108,56 @@ class WardrobePlugin(Star):
         persona = self._resolve_persona(persona)
         logger.info("[Wardrobe] 开始存图，图片大小=%.2fKB 人格=%s", len(image_bytes) / 1024, persona or "无")
 
+        created_by = str(event.get_sender_id() or "")
+        image_id, attrs = await self._save_image_from_bytes(
+            image_bytes, persona=persona, created_by=created_by, user_description=user_description
+        )
+
+        if not image_id:
+            primary = str(self._cfg("save_provider_id", "") or "").strip()
+            secondary = str(self._cfg("save_secondary_provider_id", "") or "").strip()
+            if not primary and not secondary:
+                return "未配置存图模型，请在插件设置中配置"
+            return "图片保存失败"
+
+        if not attrs:
+            return f"图片已保存（ID: {image_id}），但模型分析失败，仅保存了原始图片"
+
+        logger.info(
+            "[Wardrobe] 分析结果:\n  分类: %s\n  风格: %s\n  服装: %s\n  暴露: %s\n  场景: %s\n  氛围: %s\n  姿势: %s\n  表情: %s\n  景别: %s\n  角度: %s\n  描述: %s",
+            attrs.get("category", "人物"),
+            ", ".join(attrs.get("style", [])),
+            attrs.get("clothing_type", ""),
+            attrs.get("exposure_level", ""),
+            ", ".join(attrs.get("scene", [])),
+            ", ".join(attrs.get("atmosphere", [])),
+            attrs.get("pose_type", ""),
+            attrs.get("expression", ""),
+            attrs.get("shot_size", ""),
+            attrs.get("camera_angle", ""),
+            attrs.get("description", ""),
+        )
+
+        feedback_enabled = bool(self._cfg("save_feedback_enabled", False))
+        if feedback_enabled:
+            return self._format_save_feedback(image_id, attrs)
+
+        return f"图片已保存到衣柜库（ID: {image_id}）"
+
+    async def _save_image_from_bytes(
+        self,
+        image_bytes: bytes,
+        *,
+        persona: str = "",
+        created_by: str = "",
+        user_description: str = "",
+    ) -> tuple:
+        await self._ensure_db()
+
         max_size = int(self._cfg("max_image_size_mb", _MAX_IMAGE_SIZE_MB) or _MAX_IMAGE_SIZE_MB)
         if len(image_bytes) > max_size * 1024 * 1024:
-            return f"图片过大（{len(image_bytes) / 1024 / 1024:.1f}MB），超过限制（{max_size}MB）"
+            logger.warning("[Wardrobe] 图片过大 (%.1fMB)", len(image_bytes) / 1024 / 1024)
+            return None, None
 
         if user_description and len(user_description) > _MAX_DESCRIPTION_LEN:
             user_description = user_description[:_MAX_DESCRIPTION_LEN]
@@ -115,7 +167,7 @@ class WardrobePlugin(Star):
         timeout = float(self._cfg("save_timeout_seconds", 60.0) or 60.0)
 
         if not primary and not secondary:
-            return "未配置存图模型，请在插件设置中配置"
+            return None, None
 
         attrs = await self.analyzer.analyze_image(
             image_bytes,
@@ -147,29 +199,14 @@ class WardrobePlugin(Star):
                 background="",
                 description=user_description or "模型分析失败，无描述",
                 image_path=filename,
-                created_by=str(event.get_sender_id() or ""),
+                created_by=created_by,
                 persona=persona,
             )
-            return f"图片已保存（ID: {image_id}），但模型分析失败，仅保存了原始图片"
+            return image_id, None
 
         category = attrs.get("category", "人物")
         if category not in ("人物", "衣服"):
             category = "人物"
-
-        logger.info(
-            "[Wardrobe] 分析结果:\n  分类: %s\n  风格: %s\n  服装: %s\n  暴露: %s\n  场景: %s\n  氛围: %s\n  姿势: %s\n  表情: %s\n  景别: %s\n  角度: %s\n  描述: %s",
-            category,
-            ", ".join(attrs.get("style", [])),
-            attrs.get("clothing_type", ""),
-            attrs.get("exposure_level", ""),
-            ", ".join(attrs.get("scene", [])),
-            ", ".join(attrs.get("atmosphere", [])),
-            attrs.get("pose_type", ""),
-            attrs.get("expression", ""),
-            attrs.get("shot_size", ""),
-            attrs.get("camera_angle", ""),
-            attrs.get("description", ""),
-        )
 
         filename = await self.store.save_image(image_bytes)
 
@@ -192,15 +229,72 @@ class WardrobePlugin(Star):
             background=attrs.get("background", ""),
             description=attrs.get("description", ""),
             image_path=filename,
-            created_by=str(event.get_sender_id() or ""),
+            created_by=created_by,
             persona=persona,
         )
 
-        feedback_enabled = bool(self._cfg("save_feedback_enabled", False))
-        if feedback_enabled:
-            return self._format_save_feedback(image_id, attrs)
+        return image_id, attrs
 
-        return f"图片已保存到衣柜库（ID: {image_id}）"
+    async def _auto_save_gitee_image(self, event: AstrMessageEvent, tool):
+        if not self._cfg("auto_save_gitee_enabled", False):
+            return
+
+        tool_name = getattr(tool, "name", "") or ""
+        if tool_name not in _GITEE_IMAGE_TOOLS:
+            return
+
+        gitee_star = self.context.get_registered_star("astrbot_plugin_gitee_aiimg")
+        if not gitee_star or not gitee_star.activated or not gitee_star.star_cls:
+            return
+
+        gitee_instance = gitee_star.star_cls
+        user_id = str(event.get_sender_id() or "")
+        last_image_dict = getattr(gitee_instance, "_last_image_by_user", None)
+        if not last_image_dict:
+            return
+
+        image_path = last_image_dict.get(user_id)
+        if not image_path:
+            return
+
+        path = Path(image_path)
+        if not path.exists():
+            return
+
+        persona = str(self._cfg("auto_save_gitee_persona", "") or "").strip()
+        persona = self._resolve_persona(persona)
+
+        try:
+            import aiofiles
+            async with aiofiles.open(path, "rb") as f:
+                image_bytes = await f.read()
+
+            if not image_bytes:
+                return
+
+            logger.info(
+                "[Wardrobe] gitee 自动存图开始，图片大小=%.2fKB 人格=%s tool=%s",
+                len(image_bytes) / 1024, persona or "无", tool_name,
+            )
+
+            image_id, attrs = await self._save_image_from_bytes(
+                image_bytes, persona=persona, created_by=user_id,
+            )
+
+            if image_id:
+                if attrs:
+                    logger.info(
+                        "[Wardrobe] gitee 自动存图完成 ID=%s 分类=%s 描述=%s",
+                        image_id, attrs.get("category", ""),
+                        attrs.get("description", "")[:100],
+                    )
+                else:
+                    logger.info("[Wardrobe] gitee 自动存图完成（分析失败）ID=%s", image_id)
+            else:
+                logger.warning("[Wardrobe] gitee 自动存图失败")
+
+        except Exception as e:
+            logger.error("[Wardrobe] gitee 自动存图异常: %s", e)
 
     async def _do_delete_image(self, image_id: str) -> str:
         await self._ensure_db()
