@@ -98,12 +98,12 @@ class WardrobeWebServer:
             persona = request.args.get("persona", "")
             style = request.args.get("style", "")
             scene = request.args.get("scene", "")
-            composition = request.args.get("composition", "")
+            shot_size = request.args.get("shot_size", "")
             atmosphere = request.args.get("atmosphere", "")
 
             offset = (page - 1) * per_page
 
-            needs_search = style or scene or atmosphere or persona or category
+            needs_search = style or scene or atmosphere or shot_size or persona or category
             if needs_search:
                 style_list = [style] if style else None
                 scene_list = [scene] if scene else None
@@ -121,8 +121,8 @@ class WardrobeWebServer:
                     category=category or None, limit=per_page, offset=offset
                 )
 
-            if composition:
-                images = [img for img in images if composition in (img.get("composition") or "")]
+            if shot_size:
+                images = [img for img in images if shot_size == (img.get("shot_size") or "")]
 
             total_stats = await self.plugin.db.get_stats()
             result = {
