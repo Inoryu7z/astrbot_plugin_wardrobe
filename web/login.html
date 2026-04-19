@@ -1,0 +1,60 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>衣橱图鉴 - 登录</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Fredoka:wght@400;500;600;700&family=Nunito:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+<style>
+*{margin:0;padding:0;box-sizing:border-box}
+body{min-height:100vh;display:flex;align-items:center;justify-content:center;background:linear-gradient(135deg,#FFF5F7 0%,#FDE8EF 30%,#E8D5F5 70%,#E0F0FF 100%);font-family:'Nunito',sans-serif}
+.login-card{background:rgba(255,255,255,0.85);backdrop-filter:blur(20px);border-radius:24px;padding:48px 40px;width:380px;max-width:90vw;box-shadow:0 8px 32px rgba(255,182,193,0.25),0 2px 8px rgba(0,0,0,0.04);text-align:center;border:1px solid rgba(255,255,255,0.6)}
+.login-icon{font-size:56px;margin-bottom:12px;display:block}
+.login-title{font-family:'Fredoka',sans-serif;font-size:28px;color:#5D4E6D;margin-bottom:6px;font-weight:600}
+.login-subtitle{font-size:14px;color:#A898B8;margin-bottom:32px}
+.login-input{width:100%;padding:14px 18px;border:2px solid #F0E0E6;border-radius:14px;font-size:15px;font-family:'Nunito',sans-serif;background:rgba(255,255,255,0.7);color:#5D4E6D;outline:none;transition:border-color .2s,box-shadow .2s}
+.login-input:focus{border-color:#FFB6C1;box-shadow:0 0 0 3px rgba(255,182,193,0.2)}
+.login-input::placeholder{color:#C8B8D0}
+.login-btn{width:100%;padding:14px;margin-top:20px;border:none;border-radius:14px;font-size:16px;font-family:'Fredoka',sans-serif;font-weight:600;color:white;background:linear-gradient(135deg,#FFB6C1,#E8A0BF);cursor:pointer;transition:transform .15s,box-shadow .2s;box-shadow:0 4px 16px rgba(255,182,193,0.35)}
+.login-btn:hover{transform:translateY(-2px);box-shadow:0 6px 20px rgba(255,182,193,0.45)}
+.login-btn:active{transform:translateY(0)}
+.login-error{color:#E8747C;font-size:13px;margin-top:14px;min-height:20px}
+.login-hint{font-size:12px;color:#C8B8D0;margin-top:24px}
+</style>
+</head>
+<body>
+<div class="login-card">
+  <span class="login-icon">👗</span>
+  <div class="login-title">衣橱图鉴</div>
+  <div class="login-subtitle">Wardrobe Gallery</div>
+  <form id="loginForm" onsubmit="return handleLogin(event)">
+    <input type="password" id="password" class="login-input" placeholder="请输入密码" autofocus>
+    <button type="submit" class="login-btn">进入衣橱</button>
+  </form>
+  <div id="error" class="login-error"></div>
+  <div class="login-hint">默认密码: wardrobe，请及时修改</div>
+</div>
+<script>
+async function handleLogin(e){
+  e.preventDefault();
+  const pwd=document.getElementById('password').value;
+  const errEl=document.getElementById('error');
+  errEl.textContent='';
+  try{
+    const resp=await fetch('/api/login',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({password:pwd})});
+    const data=await resp.json();
+    if(data.success){
+      localStorage.setItem('wardrobe_token',data.token);
+      window.location.href='/';
+    }else{
+      errEl.textContent=data.error||'密码错误';
+    }
+  }catch(err){
+    errEl.textContent='连接失败';
+  }
+  return false;
+}
+</script>
+</body>
+</html>

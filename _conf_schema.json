@@ -80,5 +80,29 @@
     "hint": "gitee 自动存图时使用的人格名，需在人格名称列表中已配置；留空则不指定人格",
     "type": "string",
     "default": ""
+  },
+  "webui_enabled": {
+    "description": "启用 WebUI",
+    "hint": "开启后将在指定端口启动衣橱图鉴的 Web 管理界面",
+    "type": "bool",
+    "default": false
+  },
+  "webui_host": {
+    "description": "WebUI 监听地址",
+    "hint": "默认仅本机访问(127.0.0.1)，如需远程访问可改为 0.0.0.0",
+    "type": "string",
+    "default": "127.0.0.1"
+  },
+  "webui_port": {
+    "description": "WebUI 端口",
+    "hint": "WebUI 服务端口，默认 18921",
+    "type": "int",
+    "default": 18921
+  },
+  "webui_password": {
+    "description": "WebUI 密码",
+    "hint": "登录 WebUI 的密码，默认 wardrobe，请及时修改",
+    "type": "string",
+    "default": "wardrobe"
   }
 }
