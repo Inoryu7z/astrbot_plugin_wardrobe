@@ -98,6 +98,8 @@ class WardrobePlugin(Star):
         if not image_bytes:
             return "未检测到图片，请发送图片后再保存"
 
+        logger.info("[Wardrobe] 开始存图，图片大小=%.2fKB", len(image_bytes) / 1024)
+
         max_size = int(self._cfg("max_image_size_mb", _MAX_IMAGE_SIZE_MB) or _MAX_IMAGE_SIZE_MB)
         if len(image_bytes) > max_size * 1024 * 1024:
             return f"图片过大（{len(image_bytes) / 1024 / 1024:.1f}MB），超过限制（{max_size}MB）"
