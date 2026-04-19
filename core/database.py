@@ -190,6 +190,7 @@ class WardrobeDatabase:
         scene: Optional[list[str]] = None,
         atmosphere: Optional[list[str]] = None,
         persona: str = "",
+        exclude_persona: str = "",
         limit: int = 20,
     ) -> list[dict[str, Any]]:
         conditions = []
@@ -206,6 +207,10 @@ class WardrobeDatabase:
         if persona:
             conditions.append("persona = ?")
             params.append(persona)
+
+        if exclude_persona:
+            conditions.append("persona != ?")
+            params.append(exclude_persona)
 
         if style:
             style_conditions = []
@@ -247,6 +252,7 @@ class WardrobeDatabase:
         keywords: list[str],
         category: Optional[str] = None,
         persona: str = "",
+        exclude_persona: str = "",
         limit: int = 20,
     ) -> list[dict[str, Any]]:
         conditions = []
@@ -259,6 +265,10 @@ class WardrobeDatabase:
         if persona:
             conditions.append("persona = ?")
             params.append(persona)
+
+        if exclude_persona:
+            conditions.append("persona != ?")
+            params.append(exclude_persona)
 
         desc_conditions = []
         for kw in keywords:

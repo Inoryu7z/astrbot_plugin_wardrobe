@@ -414,7 +414,7 @@ class WardrobePlugin(Star):
         if not primary and not secondary:
             return "未配置取图模型，请在插件设置中配置"
 
-        results = await self.searcher.search(
+        results, search_meta = await self.searcher.search(
             query,
             primary_provider_id=primary,
             secondary_provider_id=secondary,
@@ -443,7 +443,30 @@ class WardrobePlugin(Star):
         mc = event.chain_result(chain)
         await self.context.send_message(event.unified_msg_origin, mc)
 
-        return f"已发送 {len(image_paths)} 张匹配的图片"
+        parts = [f"已发送 {len(image_paths)} 张匹配的图片"]
+
+        for i, r in enumerate(results[:3], 1):
+            desc = r.get("description", "")
+            if desc:
+                parts.append(f"图片{i}描述：{desc[:200]}")
+
+        if search_meta.get("persona_mismatch") and current_persona:
+            scope = search_meta.get("persona_scope", "global")
+            if scope == "self":
+                parts.append(
+                    f"注意：在{current_persona}的图库中未找到匹配图片，"
+                    f"以下图片来自其他人格的图库，并非{current_persona}本人的照片。"
+                    f"请在回复时向用户说明这一点。"
+                )
+            elif scope == "named":
+                named = search_meta.get("searched_persona", "")
+                if named:
+                    parts.append(
+                        f"注意：在指定人格「{named}」的图库中未找到匹配图片，"
+                        f"以下图片来自其他图库。请在回复时向用户说明。"
+                    )
+
+        return "\n".join(parts)
 
     async def _extract_image_bytes(self, event: AstrMessageEvent) -> Optional[bytes]:
         message_obj = getattr(event, "message_obj", None)
