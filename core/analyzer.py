@@ -1,6 +1,5 @@
 import asyncio
 import base64
-import json
 import time
 from typing import Any, Optional
 
@@ -78,17 +77,11 @@ class ImageAnalyzer:
 
         b64 = base64.b64encode(image_bytes).decode("utf-8")
         mime = detect_image_mime(image_bytes)
+        image_url = f"data:{mime};base64,{b64}"
 
-        user_content_parts = []
-        user_content_parts.append({
-            "type": "image_url",
-            "image_url": {"url": f"data:{mime};base64,{b64}"},
-        })
-
-        text_part = "请分析这张图片的属性。"
+        prompt_text = "请分析这张图片的属性。"
         if user_description.strip():
-            text_part += f"\n\n用户提供的描述：{user_description.strip()}\n请将用户描述融入 description 字段中。"
-        user_content_parts.append({"type": "text", "text": text_part})
+            prompt_text += f"\n\n用户提供的描述：{user_description.strip()}\n请将用户描述融入 description 字段中。"
 
         providers = [p for p in [primary_provider_id, secondary_provider_id] if p.strip()]
         if not providers:
@@ -99,7 +92,7 @@ class ImageAnalyzer:
             try:
                 t0 = time.perf_counter()
                 result = await asyncio.wait_for(
-                    self._call_vision_model(provider_id, system_prompt, user_content_parts),
+                    self._call_vision_model(provider_id, system_prompt, prompt_text, image_url),
                     timeout=timeout_seconds,
                 )
                 elapsed = time.perf_counter() - t0
@@ -117,15 +110,35 @@ class ImageAnalyzer:
         self,
         provider_id: str,
         system_prompt: str,
-        user_content: list,
+        prompt_text: str,
+        image_url: str,
     ) -> Optional[dict[str, Any]]:
-        prompt_text = json.dumps(user_content, ensure_ascii=False)
-
-        llm_resp = await self.context.llm_generate(
-            chat_provider_id=provider_id,
-            prompt=prompt_text,
-            system_prompt=system_prompt,
-        )
+        try:
+            llm_resp = await self.context.llm_generate(
+                chat_provider_id=provider_id,
+                prompt=prompt_text,
+                system_prompt=system_prompt,
+                image_urls=[image_url],
+            )
+        except Exception as e:
+            err = str(e).lower()
+            fallback_markers = (
+                "list object",
+                "startswith",
+                "image_urls",
+                "expected list",
+                "expected str",
+                "typeerror",
+            )
+            if not any(marker in err for marker in fallback_markers):
+                raise
+            logger.warning("[Wardrobe] image_urls 列表格式不兼容，回退字符串模式: %s", e)
+            llm_resp = await self.context.llm_generate(
+                chat_provider_id=provider_id,
+                prompt=prompt_text,
+                system_prompt=system_prompt,
+                image_urls=image_url,
+            )
 
         raw_text = (getattr(llm_resp, "completion_text", "") or "").strip()
         if not raw_text:
