@@ -145,8 +145,14 @@ class ImageSearcher:
         limit: int,
         meta: dict[str, Any],
     ) -> list[dict[str, Any]]:
+        logger.info(
+            "[Wardrobe] 搜索策略: scope=%s current_persona=%s named_persona=%s",
+            persona_scope, current_persona or "无", named_persona or "无",
+        )
+
         if persona_scope == "self" and current_persona:
             candidates = await self._query_candidates(conditions, limit=limit, persona=current_persona)
+            logger.info("[Wardrobe] 人格池搜索结果: %d张 persona=%s", len(candidates), current_persona)
             if candidates:
                 meta["searched_persona"] = current_persona
                 return candidates
@@ -158,6 +164,7 @@ class ImageSearcher:
 
         if persona_scope == "other" and current_persona:
             candidates = await self._query_candidates_excluding_persona(conditions, limit=limit, exclude_persona=current_persona)
+            logger.info("[Wardrobe] 排除人格搜索结果: %d张 exclude=%s", len(candidates), current_persona)
             if candidates:
                 meta["searched_persona"] = f"非{current_persona}"
                 return candidates
@@ -168,6 +175,7 @@ class ImageSearcher:
 
         if persona_scope == "named" and named_persona:
             candidates = await self._query_candidates(conditions, limit=limit, persona=named_persona)
+            logger.info("[Wardrobe] 指定人格搜索结果: %d张 persona=%s", len(candidates), named_persona)
             if candidates:
                 meta["searched_persona"] = named_persona
                 return candidates
@@ -177,6 +185,7 @@ class ImageSearcher:
             meta["searched_persona"] = ""
             return candidates
 
+        logger.info("[Wardrobe] 全局搜索")
         return await self._query_candidates(conditions, limit=limit, persona="")
 
     async def _query_candidates_excluding_persona(

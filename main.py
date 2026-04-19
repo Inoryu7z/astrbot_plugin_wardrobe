@@ -145,7 +145,7 @@ class WardrobePlugin(Star):
 
         Args:
             user_description(string): 用户对图片的额外描述（如有），必须原样写入
-            persona(string): 人格名称（如有）。当用户提到某个具体人格名（如星织、雪音）要存图时填写，必须与用户提到的名称完全一致；未提及则留空
+            persona(string): 当前对话人格名称。如果你正在扮演某个人格角色（如星织、雪音），必须填写你自己的人格名；如果用户提到了其他人格名，也填写该名称；如果当前没有扮演任何人格角色则留空
         '''
         result = await self._do_save_image(event, user_description=user_description, persona=persona)
         return result
@@ -156,7 +156,7 @@ class WardrobePlugin(Star):
 
         Args:
             query(string): 用户的图片需求描述
-            persona(string): 人格名称（如有）。当用户提到某个具体人格名（如星织、雪音）要取图时填写，必须与用户提到的名称完全一致；未提及则留空
+            persona(string): 当前对话人格名称。如果你正在扮演某个人格角色（如星织、雪音），必须填写你自己的人格名；如果用户提到了其他人格名（如"雪音有没有xxx"），也填写该名称；如果当前没有扮演任何人格角色则留空
         '''
         return await self._do_search_image(event, query=query, persona=persona)
 
@@ -401,9 +401,10 @@ class WardrobePlugin(Star):
     ) -> str:
         await self._ensure_db()
 
-        persona = self._resolve_persona(persona)
+        raw_persona = persona.strip()
+        resolved_persona = self._resolve_persona(raw_persona)
+        current_persona = resolved_persona or raw_persona
         persona_names = str(self._cfg("persona_names", "") or "").strip()
-        current_persona = persona
 
         primary = str(self._cfg("search_provider_id", "") or "").strip()
         secondary = str(self._cfg("search_secondary_provider_id", "") or "").strip()
@@ -414,6 +415,11 @@ class WardrobePlugin(Star):
         if not primary and not secondary:
             return "未配置取图模型，请在插件设置中配置"
 
+        logger.info(
+            "[Wardrobe] 取图请求: query=%s current_persona=%s resolved=%s",
+            query, current_persona or "无", resolved_persona or "无",
+        )
+
         results, search_meta = await self.searcher.search(
             query,
             primary_provider_id=primary,
@@ -421,9 +427,17 @@ class WardrobePlugin(Star):
             timeout_seconds=timeout,
             candidate_limit=candidate_limit,
             max_select=max_select,
-            persona=persona,
+            persona=resolved_persona,
             persona_names=persona_names,
             current_persona=current_persona,
+        )
+
+        logger.info(
+            "[Wardrobe] 取图结果: %d张 scope=%s mismatch=%s searched_persona=%s",
+            len(results),
+            search_meta.get("persona_scope", "?"),
+            search_meta.get("persona_mismatch", False),
+            search_meta.get("searched_persona", "?"),
         )
 
         if not results:
@@ -447,6 +461,7 @@ class WardrobePlugin(Star):
 
         for i, r in enumerate(results[:3], 1):
             desc = r.get("description", "")
+            img_persona = r.get("persona", "")
             if desc:
                 parts.append(f"图片{i}描述：{desc[:200]}")
 
@@ -455,7 +470,7 @@ class WardrobePlugin(Star):
             if scope == "self":
                 parts.append(
                     f"注意：在{current_persona}的图库中未找到匹配图片，"
-                    f"以下图片来自其他人格的图库，并非{current_persona}本人的照片。"
+                    f"以下图片来自其他图库，并非{current_persona}本人的照片。"
                     f"请在回复时向用户说明这一点。"
                 )
             elif scope == "named":
@@ -519,10 +534,24 @@ class WardrobePlugin(Star):
         configured = str(self._cfg("persona_names", "") or "").strip()
         if not configured:
             return ""
-        names = [n.strip() for n in configured.replace("，", ",").split(",") if n.strip()]
-        if persona in names:
-            return persona
+        for entry in configured.replace("，", ",").split(","):
+            entry = entry.strip()
+            if not entry:
+                continue
+            canonical, aliases = self._parse_persona_entry(entry)
+            if persona == canonical or persona in aliases:
+                return canonical
         return ""
+
+    @staticmethod
+    def _parse_persona_entry(entry: str) -> tuple[str, list[str]]:
+        import re
+        m = re.match(r'^(.+?)\[(.+?)\]\s*$', entry)
+        if m:
+            canonical = m.group(1).strip()
+            aliases = [a.strip() for a in m.group(2).replace("，", ",").split(",") if a.strip()]
+            return canonical, aliases
+        return entry.strip(), []
 
     @staticmethod
     def _format_save_feedback(image_id: str, attrs: dict) -> str:
