@@ -1,12 +1,13 @@
 import asyncio
-import base64
+import tempfile
 import time
+from pathlib import Path
 from typing import Any, Optional
 
 from astrbot.api import logger
 
 from .pools import ALL_POOLS
-from .utils import detect_image_mime, parse_json_response
+from .utils import detect_image_mime, mime_to_ext, parse_json_response
 
 
 ANALYZE_SYSTEM_PROMPT = """# 角色
@@ -75,9 +76,21 @@ class ImageAnalyzer:
         pools_text = self._build_pools_text()
         system_prompt = ANALYZE_SYSTEM_PROMPT.format(pools_text=pools_text)
 
-        b64 = base64.b64encode(image_bytes).decode("utf-8")
         mime = detect_image_mime(image_bytes)
-        image_url = f"data:{mime};base64,{b64}"
+        ext = mime_to_ext(mime)
+
+        try:
+            temp_fd, temp_path = tempfile.mkstemp(suffix=f".{ext}")
+            try:
+                import os
+                os.write(temp_fd, image_bytes)
+            finally:
+                import os
+                os.close(temp_fd)
+            file_url = Path(temp_path).resolve().as_uri()
+        except Exception as e:
+            logger.warning("[Wardrobe] 保存临时图片失败: %s", e)
+            return None
 
         prompt_text = "请分析这张图片的属性。"
         if user_description.strip():
@@ -86,17 +99,19 @@ class ImageAnalyzer:
         providers = [p for p in [primary_provider_id, secondary_provider_id] if p.strip()]
         if not providers:
             logger.warning("[Wardrobe] 未配置存图模型，无法分析图片")
+            self._cleanup_temp(temp_path)
             return None
 
         for provider_id in providers:
             try:
                 t0 = time.perf_counter()
                 result = await asyncio.wait_for(
-                    self._call_vision_model(provider_id, system_prompt, prompt_text, image_url),
+                    self._call_vision_model(provider_id, system_prompt, prompt_text, file_url),
                     timeout=timeout_seconds,
                 )
                 elapsed = time.perf_counter() - t0
                 logger.info("[Wardrobe] 图片分析完成 provider=%s 耗时=%.2fs", provider_id, elapsed)
+                self._cleanup_temp(temp_path)
                 return result
             except asyncio.TimeoutError:
                 logger.warning("[Wardrobe] 存图模型超时 provider=%s", provider_id)
@@ -104,21 +119,31 @@ class ImageAnalyzer:
                 logger.warning("[Wardrobe] 存图模型调用失败 provider=%s error=%s", provider_id, e)
 
         logger.error("[Wardrobe] 存图模型均不可用")
+        self._cleanup_temp(temp_path)
         return None
+
+    @staticmethod
+    def _cleanup_temp(temp_path: str):
+        try:
+            import os
+            if os.path.exists(temp_path):
+                os.remove(temp_path)
+        except Exception:
+            pass
 
     async def _call_vision_model(
         self,
         provider_id: str,
         system_prompt: str,
         prompt_text: str,
-        image_url: str,
+        file_url: str,
     ) -> Optional[dict[str, Any]]:
         try:
             llm_resp = await self.context.llm_generate(
                 chat_provider_id=provider_id,
                 prompt=prompt_text,
                 system_prompt=system_prompt,
-                image_urls=[image_url],
+                image_urls=[file_url],
             )
         except Exception as e:
             err = str(e).lower()
@@ -130,15 +155,25 @@ class ImageAnalyzer:
                 "expected str",
                 "typeerror",
             )
-            if not any(marker in err for marker in fallback_markers):
+            if any(marker in err for marker in fallback_markers):
+                logger.warning("[Wardrobe] image_urls 列表格式不兼容，回退字符串模式: %s", e)
+                llm_resp = await self.context.llm_generate(
+                    chat_provider_id=provider_id,
+                    prompt=prompt_text,
+                    system_prompt=system_prompt,
+                    image_urls=file_url,
+                )
+            elif "file" in err or "not found" in err or "errno" in err:
+                resolved = file_url.replace("file:///", "").replace("file://", "")
+                logger.warning("[Wardrobe] file URI 读取失败，回退本地路径: %s", resolved)
+                llm_resp = await self.context.llm_generate(
+                    chat_provider_id=provider_id,
+                    prompt=prompt_text,
+                    system_prompt=system_prompt,
+                    image_urls=[resolved],
+                )
+            else:
                 raise
-            logger.warning("[Wardrobe] image_urls 列表格式不兼容，回退字符串模式: %s", e)
-            llm_resp = await self.context.llm_generate(
-                chat_provider_id=provider_id,
-                prompt=prompt_text,
-                system_prompt=system_prompt,
-                image_urls=image_url,
-            )
 
         raw_text = (getattr(llm_resp, "completion_text", "") or "").strip()
         if not raw_text:
