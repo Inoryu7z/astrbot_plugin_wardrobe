@@ -106,7 +106,7 @@ class WardrobeDatabase:
                         dynamic_level, action_style, shot_size, camera_angle,
                         expression, color_tone, composition, background,
                         description, persona, image_path, created_at, updated_at, created_by
-                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
                     (
                         image_id,
                         category,
