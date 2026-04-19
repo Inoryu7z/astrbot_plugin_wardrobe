@@ -1,0 +1,134 @@
+import asyncio
+import base64
+import json
+import time
+from typing import Any, Optional
+
+from astrbot.api import logger
+
+from .pools import ALL_POOLS
+from .utils import detect_image_mime, parse_json_response
+
+
+ANALYZE_SYSTEM_PROMPT = """# 角色
+你是专业的图片分析助手，负责对图片进行详细的属性标注。
+
+# 任务
+分析给定的图片，提取以下属性信息。对于每个属性，从预定义值池中选择最匹配的值；如果没有合适的，可以自行填写。
+
+# 预定义值池
+{pools_text}
+
+# 输出格式
+输出 JSON 对象，字段如下：
+
+```json
+{{
+  "category": "人物 或 衣服",
+  "style": ["从风格池中选择，可多选"],
+  "clothing_type": "从服装类型池中选择",
+  "exposure_level": "从暴露程度池中选择",
+  "scene": ["从场景池中选择，可多选"],
+  "atmosphere": ["从氛围池中选择，可多选"],
+  "pose_type": "从姿势类型池中选择（仅人物分类需要）",
+  "body_orientation": "从身体朝向池中选择（仅人物分类需要）",
+  "dynamic_level": "从动态感池中选择（仅人物分类需要）",
+  "action_style": ["从动作风格池中选择，可多选（仅人物分类需要）"],
+  "shot_size": "从景别池中选择（仅人物分类需要）",
+  "camera_angle": "从拍摄角度池中选择（仅人物分类需要）",
+  "expression": "从表情池中选择（仅人物分类需要）",
+  "color_tone": "自由填写颜色描述",
+  "composition": "自由填写画面构图描述",
+  "background": "自由填写背景环境描述",
+  "description": "详细描述图片内容，用于语义检索"
+}}
+```
+
+# 规则
+1. category 判断：如果图片中有人物（脸部、身体），则填"人物"；否则填"衣服"
+2. 如果 category 是"衣服"，则 pose_type、body_orientation、dynamic_level、action_style、shot_size、camera_angle、expression 填空字符串或空数组
+3. description 必须详细，包含所有可见的视觉特征，以便后续语义检索
+4. 只输出 JSON，不要输出解释或其他内容"""
+
+
+class ImageAnalyzer:
+    def __init__(self, context):
+        self.context = context
+
+    def _build_pools_text(self) -> str:
+        lines = []
+        for key, values in ALL_POOLS.items():
+            lines.append(f"## {key}")
+            for v in values:
+                lines.append(f"- {v}")
+            lines.append("")
+        return "\n".join(lines)
+
+    async def analyze_image(
+        self,
+        image_bytes: bytes,
+        user_description: str = "",
+        *,
+        primary_provider_id: str,
+        secondary_provider_id: str = "",
+        timeout_seconds: float = 60.0,
+    ) -> Optional[dict[str, Any]]:
+        pools_text = self._build_pools_text()
+        system_prompt = ANALYZE_SYSTEM_PROMPT.format(pools_text=pools_text)
+
+        b64 = base64.b64encode(image_bytes).decode("utf-8")
+        mime = detect_image_mime(image_bytes)
+
+        user_content_parts = []
+        user_content_parts.append({
+            "type": "image_url",
+            "image_url": {"url": f"data:{mime};base64,{b64}"},
+        })
+
+        text_part = "请分析这张图片的属性。"
+        if user_description.strip():
+            text_part += f"\n\n用户提供的描述：{user_description.strip()}\n请将用户描述融入 description 字段中。"
+        user_content_parts.append({"type": "text", "text": text_part})
+
+        providers = [p for p in [primary_provider_id, secondary_provider_id] if p.strip()]
+        if not providers:
+            logger.warning("[Wardrobe] 未配置存图模型，无法分析图片")
+            return None
+
+        for provider_id in providers:
+            try:
+                t0 = time.perf_counter()
+                result = await asyncio.wait_for(
+                    self._call_vision_model(provider_id, system_prompt, user_content_parts),
+                    timeout=timeout_seconds,
+                )
+                elapsed = time.perf_counter() - t0
+                logger.info("[Wardrobe] 图片分析完成 provider=%s 耗时=%.2fs", provider_id, elapsed)
+                return result
+            except asyncio.TimeoutError:
+                logger.warning("[Wardrobe] 存图模型超时 provider=%s", provider_id)
+            except Exception as e:
+                logger.warning("[Wardrobe] 存图模型调用失败 provider=%s error=%s", provider_id, e)
+
+        logger.error("[Wardrobe] 存图模型均不可用")
+        return None
+
+    async def _call_vision_model(
+        self,
+        provider_id: str,
+        system_prompt: str,
+        user_content: list,
+    ) -> Optional[dict[str, Any]]:
+        prompt_text = json.dumps(user_content, ensure_ascii=False)
+
+        llm_resp = await self.context.llm_generate(
+            chat_provider_id=provider_id,
+            prompt=prompt_text,
+            system_prompt=system_prompt,
+        )
+
+        raw_text = (getattr(llm_resp, "completion_text", "") or "").strip()
+        if not raw_text:
+            return None
+
+        return parse_json_response(raw_text)
