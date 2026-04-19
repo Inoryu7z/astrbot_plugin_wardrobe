@@ -72,6 +72,7 @@ STYLE_POOL = [
     "波西米亚风",
     "维多利亚复古风",
     "赛博机械风",
+    "cosplay风",
 ]
 
 CLOTHING_TYPE_POOL = [
