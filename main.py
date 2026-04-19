@@ -123,6 +123,7 @@ class WardrobePlugin(Star):
         )
 
         if not attrs:
+            logger.warning("[Wardrobe] 模型分析失败，无返回结果")
             filename = await self.store.save_image(image_bytes)
             image_id = await self.db.add_image(
                 category="人物",
@@ -150,6 +151,17 @@ class WardrobePlugin(Star):
         category = attrs.get("category", "人物")
         if category not in ("人物", "衣服"):
             category = "人物"
+
+        logger.info(
+            "[Wardrobe] 分析结果: 分类=%s 风格=%s 服装=%s 暴露=%s 场景=%s 氛围=%s 描述=%s",
+            category,
+            attrs.get("style", []),
+            attrs.get("clothing_type", ""),
+            attrs.get("exposure_level", ""),
+            attrs.get("scene", []),
+            attrs.get("atmosphere", []),
+            attrs.get("description", "")[:100],
+        )
 
         filename = await self.store.save_image(image_bytes)
 
