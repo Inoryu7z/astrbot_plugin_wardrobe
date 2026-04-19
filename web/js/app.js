@@ -4,7 +4,7 @@
 
   let state={
     page:1, perPage:24, total:0,
-    category:'', persona:'',
+    category:'', persona:'', style:'', composition:'',
     searchQuery:'', batchMode:false,
     selectedIds:new Set(),
     currentImageId:null,
@@ -60,6 +60,21 @@
         state.persona=inp.value;state.page=1;loadImages();
       });
     });
+
+    const styleSel=$('#styleFilter');
+    const compSel=$('#compositionFilter');
+    styleSel.innerHTML='<option value="">全部</option>';
+    compSel.innerHTML='<option value="">全部</option>';
+    (data.styles||[]).forEach(s=>{
+      const opt=document.createElement('option');
+      opt.value=s;opt.textContent=s;
+      styleSel.appendChild(opt);
+    });
+    (data.compositions||[]).forEach(c=>{
+      const opt=document.createElement('option');
+      opt.value=c;opt.textContent=c;
+      compSel.appendChild(opt);
+    });
   }
 
   async function loadImages(){
@@ -67,7 +82,7 @@
     if(state.searchQuery){
       url=`/api/search?q=${encodeURIComponent(state.searchQuery)}&persona=${encodeURIComponent(state.persona)}&category=${encodeURIComponent(state.category)}&limit=50`;
     }else{
-      url=`/api/images?page=${state.page}&per_page=${state.perPage}&category=${encodeURIComponent(state.category)}&persona=${encodeURIComponent(state.persona)}`;
+      url=`/api/images?page=${state.page}&per_page=${state.perPage}&category=${encodeURIComponent(state.category)}&persona=${encodeURIComponent(state.persona)}&style=${encodeURIComponent(state.style)}&composition=${encodeURIComponent(state.composition)}`;
     }
     const resp=await api(url);
     if(!resp)return;
@@ -303,6 +318,13 @@
       inp.addEventListener('change',()=>{
         state.category=inp.value;state.page=1;loadImages();
       });
+    });
+
+    $('#styleFilter').addEventListener('change',e=>{
+      state.style=e.target.value;state.page=1;loadImages();
+    });
+    $('#compositionFilter').addEventListener('change',e=>{
+      state.composition=e.target.value;state.page=1;loadImages();
     });
 
     $('#searchBtn').addEventListener('click',doSearch);

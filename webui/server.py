@@ -44,7 +44,11 @@ class WardrobeWebServer:
                 return None
             if request.path == "/api/login":
                 return None
-            token = request.headers.get("X-Wardrobe-Token", "") or session.get("token", "")
+            token = (
+                request.headers.get("X-Wardrobe-Token", "")
+                or request.cookies.get("wardrobe_token", "")
+                or session.get("token", "")
+            )
             if token not in self._tokens:
                 if request.path.startswith("/api/"):
                     return jsonify({"error": "未授权"}), 401
@@ -66,14 +70,18 @@ class WardrobeWebServer:
                 token = secrets.token_hex(32)
                 self._tokens.add(token)
                 session["token"] = token
-                return jsonify({"success": True, "token": token})
+                resp = jsonify({"success": True, "token": token})
+                resp.set_cookie("wardrobe_token", token, max_age=86400 * 30, httponly=False, samesite="Lax")
+                return resp
             return jsonify({"success": False, "error": "密码错误"}), 403
 
         @app.route("/api/logout", methods=["POST"])
         async def api_logout():
-            token = session.pop("token", "")
+            token = session.pop("token", "") or request.cookies.get("wardrobe_token", "")
             self._tokens.discard(token)
-            return jsonify({"success": True})
+            resp = jsonify({"success": True})
+            resp.delete_cookie("wardrobe_token")
+            return resp
 
         @app.route("/api/stats")
         async def api_stats():
@@ -89,16 +97,25 @@ class WardrobeWebServer:
             category = request.args.get("category", "")
             persona = request.args.get("persona", "")
             style = request.args.get("style", "")
+            composition = request.args.get("composition", "")
 
             offset = (page - 1) * per_page
-            images = await self.plugin.db.list_images(
-                category=category or None, limit=per_page, offset=offset
-            )
 
-            if persona:
-                images = [img for img in images if img.get("persona") == persona]
-            if style:
-                images = [img for img in images if style in img.get("style", [])]
+            if style or persona or category:
+                style_list = [style] if style else None
+                images = await self.plugin.db.search_images(
+                    category=category or None,
+                    persona=persona or None,
+                    style=style_list,
+                    limit=per_page,
+                )
+            else:
+                images = await self.plugin.db.list_images(
+                    category=category or None, limit=per_page, offset=offset
+                )
+
+            if composition:
+                images = [img for img in images if composition in (img.get("composition") or "")]
 
             total_stats = await self.plugin.db.get_stats()
             result = {
@@ -200,9 +217,16 @@ class WardrobeWebServer:
             stats = await self.plugin.db.get_stats()
             persona_names = str(self.plugin._cfg("persona_names", "") or "").strip()
             personas = [n.strip() for n in persona_names.replace("，", ",").split(",") if n.strip()] if persona_names else []
+
+            from ..core.pools import ALL_POOLS
+            styles = list(ALL_POOLS.get("风格", []))
+            compositions = list(ALL_POOLS.get("构图", []))
+
             return jsonify({
                 "categories": list(stats.get("by_category", {}).keys()),
                 "personas": personas,
+                "styles": styles,
+                "compositions": compositions,
             })
 
         @app.route("/api/image-file/<image_id>")
