@@ -62,5 +62,11 @@
     "hint": "超过此大小的图片将被拒绝保存",
     "type": "int",
     "default": 10
+  },
+  "persona_names": {
+    "description": "人格名称列表",
+    "hint": "用逗号分隔的人格名，如：星织,雪音。存图时指定人格名会将图片归入对应人格目录，取图时按人格过滤",
+    "type": "string",
+    "default": ""
   }
 }

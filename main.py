@@ -47,9 +47,9 @@ class WardrobePlugin(Star):
 
     @filter.command("存图")
     @filter.permission_type(filter.PermissionType.ADMIN)
-    async def save_image_command(self, event: AstrMessageEvent):
-        '''保存图片到衣柜库（管理员专用）'''
-        result = await self._do_save_image(event, user_description="")
+    async def save_image_command(self, event: AstrMessageEvent, persona: str = ""):
+        '''保存图片到衣柜库（管理员专用），用法：/存图 [人格名]'''
+        result = await self._do_save_image(event, user_description="", persona=persona)
         yield event.plain_result(result)
 
     @filter.command("删图")
@@ -71,26 +71,28 @@ class WardrobePlugin(Star):
         logger.info("[Wardrobe] 数据库已就绪")
 
     @filter.llm_tool(name="save_wardrobe_image")
-    async def save_wardrobe_image_tool(self, event: AstrMessageEvent, user_description: str = "") -> str:
-        '''将用户发送的图片保存到图片衣柜库中。当用户要求保存、收藏、存储图片时调用此工具。系统会自动分析图片内容并生成标签和描述。
+    async def save_wardrobe_image_tool(self, event: AstrMessageEvent, user_description: str = "", persona: str = "") -> str:
+        '''将用户发送的图片保存到图片衣柜库中。当用户要求保存、收藏、存储图片时调用此工具。系统会自动分析图片内容并生成标签和描述。此工具仅用于保存已有图片，不能生成新图片。
 
         Args:
             user_description(string): 用户对图片的额外描述（如有），必须原样写入
+            persona(string): 人格名称（如有）。当用户提到某个具体人格名（如星织、雪音）要存图时填写，必须与用户提到的名称完全一致；未提及则留空
         '''
-        result = await self._do_save_image(event, user_description=user_description)
+        result = await self._do_save_image(event, user_description=user_description, persona=persona)
         return result
 
     @filter.llm_tool(name="search_wardrobe_image")
-    async def search_wardrobe_image_tool(self, event: AstrMessageEvent, query: str) -> str:
-        '''从图片衣柜库中搜索符合描述的图片。当用户想要查看、寻找、获取某类图片时调用此工具。例如：有没有洛丽塔发一张看看、发一张甜美一点的衣服来。
+    async def search_wardrobe_image_tool(self, event: AstrMessageEvent, query: str, persona: str = "") -> str:
+        '''从图片衣柜库中搜索已有的图片并发送给用户。此工具只能搜索和发送衣柜库中已保存的图片，绝对不能用来生成、绘制或创建新图片。当用户想要查看、寻找、获取某类图片，或要求"发一张以前拍过的/存过的图"时调用此工具。例如：有没有洛丽塔发一张看看、发一张甜美一点的衣服来、以前拍过的挂脖的图发一张。
 
         Args:
             query(string): 用户的图片需求描述
+            persona(string): 人格名称（如有）。当用户提到某个具体人格名（如星织、雪音）要取图时填写，必须与用户提到的名称完全一致；未提及则留空
         '''
-        return await self._do_search_image(event, query=query)
+        return await self._do_search_image(event, query=query, persona=persona)
 
     async def _do_save_image(
-        self, event: AstrMessageEvent, user_description: str = ""
+        self, event: AstrMessageEvent, user_description: str = "", persona: str = ""
     ) -> str:
         await self._ensure_db()
 
@@ -98,7 +100,8 @@ class WardrobePlugin(Star):
         if not image_bytes:
             return "未检测到图片，请发送图片后再保存"
 
-        logger.info("[Wardrobe] 开始存图，图片大小=%.2fKB", len(image_bytes) / 1024)
+        persona = self._resolve_persona(persona)
+        logger.info("[Wardrobe] 开始存图，图片大小=%.2fKB 人格=%s", len(image_bytes) / 1024, persona or "无")
 
         max_size = int(self._cfg("max_image_size_mb", _MAX_IMAGE_SIZE_MB) or _MAX_IMAGE_SIZE_MB)
         if len(image_bytes) > max_size * 1024 * 1024:
@@ -145,6 +148,7 @@ class WardrobePlugin(Star):
                 description=user_description or "模型分析失败，无描述",
                 image_path=filename,
                 created_by=str(event.get_sender_id() or ""),
+                persona=persona,
             )
             return f"图片已保存（ID: {image_id}），但模型分析失败，仅保存了原始图片"
 
@@ -160,7 +164,7 @@ class WardrobePlugin(Star):
             attrs.get("exposure_level", ""),
             attrs.get("scene", []),
             attrs.get("atmosphere", []),
-            attrs.get("description", "")[:100],
+            attrs.get("description", ""),
         )
 
         filename = await self.store.save_image(image_bytes)
@@ -185,6 +189,7 @@ class WardrobePlugin(Star):
             description=attrs.get("description", ""),
             image_path=filename,
             created_by=str(event.get_sender_id() or ""),
+            persona=persona,
         )
 
         feedback_enabled = bool(self._cfg("save_feedback_enabled", False))
@@ -228,9 +233,13 @@ class WardrobePlugin(Star):
         return "\n".join(lines)
 
     async def _do_search_image(
-        self, event: AstrMessageEvent, query: str
+        self, event: AstrMessageEvent, query: str, persona: str = ""
     ) -> str:
         await self._ensure_db()
+
+        persona = self._resolve_persona(persona)
+        persona_names = str(self._cfg("persona_names", "") or "").strip()
+        current_persona = persona
 
         primary = str(self._cfg("search_provider_id", "") or "").strip()
         secondary = str(self._cfg("search_secondary_provider_id", "") or "").strip()
@@ -248,6 +257,9 @@ class WardrobePlugin(Star):
             timeout_seconds=timeout,
             candidate_limit=candidate_limit,
             max_select=max_select,
+            persona=persona,
+            persona_names=persona_names,
+            current_persona=current_persona,
         )
 
         if not results:
@@ -312,6 +324,18 @@ class WardrobePlugin(Star):
                 return await f.read()
 
         return None
+
+    def _resolve_persona(self, persona: str) -> str:
+        persona = persona.strip()
+        if not persona:
+            return ""
+        configured = str(self._cfg("persona_names", "") or "").strip()
+        if not configured:
+            return ""
+        names = [n.strip() for n in configured.replace("，", ",").split(",") if n.strip()]
+        if persona in names:
+            return persona
+        return ""
 
     @staticmethod
     def _format_save_feedback(image_id: str, attrs: dict) -> str:
