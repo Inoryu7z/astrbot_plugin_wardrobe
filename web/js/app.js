@@ -4,7 +4,7 @@
 
   let state={
     page:1, perPage:24, total:0,
-    category:'', persona:'', style:'', composition:'',
+    category:'', persona:'', style:'', scene:'', composition:'', atmosphere:'',
     searchQuery:'', batchMode:false,
     selectedIds:new Set(),
     currentImageId:null,
@@ -61,19 +61,23 @@
       });
     });
 
-    const styleSel=$('#styleFilter');
-    const compSel=$('#compositionFilter');
-    styleSel.innerHTML='<option value="">全部</option>';
-    compSel.innerHTML='<option value="">全部</option>';
-    (data.styles||[]).forEach(s=>{
-      const opt=document.createElement('option');
-      opt.value=s;opt.textContent=s;
-      styleSel.appendChild(opt);
-    });
-    (data.compositions||[]).forEach(c=>{
-      const opt=document.createElement('option');
-      opt.value=c;opt.textContent=c;
-      compSel.appendChild(opt);
+    const pools=data.pools||{};
+    const filterMap={
+      style:{sel:'#styleFilter',stateKey:'style'},
+      scene:{sel:'#sceneFilter',stateKey:'scene'},
+      composition:{sel:'#compositionFilter',stateKey:'composition'},
+      atmosphere:{sel:'#atmosphereFilter',stateKey:'atmosphere'},
+    };
+    Object.entries(filterMap).forEach(([poolKey,cfg])=>{
+      const sel=$(cfg.sel);
+      if(!sel)return;
+      sel.innerHTML='<option value="">全部</option>';
+      (pools[poolKey]||[]).forEach(v=>{
+        const opt=document.createElement('option');
+        opt.value=v;opt.textContent=v;
+        sel.appendChild(opt);
+      });
+      sel.onchange=()=>{state[cfg.stateKey]=sel.value;state.page=1;loadImages();};
     });
   }
 
@@ -82,7 +86,7 @@
     if(state.searchQuery){
       url=`/api/search?q=${encodeURIComponent(state.searchQuery)}&persona=${encodeURIComponent(state.persona)}&category=${encodeURIComponent(state.category)}&limit=50`;
     }else{
-      url=`/api/images?page=${state.page}&per_page=${state.perPage}&category=${encodeURIComponent(state.category)}&persona=${encodeURIComponent(state.persona)}&style=${encodeURIComponent(state.style)}&composition=${encodeURIComponent(state.composition)}`;
+      url=`/api/images?page=${state.page}&per_page=${state.perPage}&category=${encodeURIComponent(state.category)}&persona=${encodeURIComponent(state.persona)}&style=${encodeURIComponent(state.style)}&scene=${encodeURIComponent(state.scene)}&composition=${encodeURIComponent(state.composition)}&atmosphere=${encodeURIComponent(state.atmosphere)}`;
     }
     const resp=await api(url);
     if(!resp)return;
@@ -327,6 +331,22 @@
       state.composition=e.target.value;state.page=1;loadImages();
     });
 
+    $('#poolsBtn').addEventListener('click',()=>{$('#poolsModal').classList.remove('hidden');loadPoolsModal();});
+    $('#poolsModalClose').addEventListener('click',()=>{$('#poolsModal').classList.add('hidden');});
+    $('#poolAddValueBtn').addEventListener('click',async()=>{
+      const key=$('#poolKeySelect').value;
+      const val=$('#poolNewValue').value.trim();
+      if(!key||!val){toast('请选择池子并输入值','error');return;}
+      const resp=await api('/api/pools',{method:'POST',json:{key,action:'add_value',value:val}});
+      if(resp&&resp.ok){toast('已添加','success');$('#poolNewValue').value='';loadPoolsModal();loadFilters();}
+    });
+    $('#poolAddKeyBtn').addEventListener('click',async()=>{
+      const val=$('#poolNewKey').value.trim();
+      if(!val){toast('请输入池子名称','error');return;}
+      const resp=await api('/api/pools',{method:'POST',json:{key:val,action:'add_pool',value:val}});
+      if(resp&&resp.ok){toast('已创建','success');$('#poolNewKey').value='';loadPoolsModal();loadFilters();}
+    });
+
     $('#searchBtn').addEventListener('click',doSearch);
     $('#searchInput').addEventListener('keydown',e=>{if(e.key==='Enter')doSearch();});
 
@@ -357,6 +377,12 @@
 
     $('#modalClose').addEventListener('click',closeDetail);
     $('#detailModal').addEventListener('click',e=>{if(e.target===e.currentTarget)closeDetail();});
+    $('#modalImage').addEventListener('click',e=>{
+      e.stopPropagation();
+      const src=$('#modalImage').src;
+      if(src){$('#lightboxImage').src=src;$('#lightbox').classList.remove('hidden');}
+    });
+    $('#lightbox').addEventListener('click',()=>{$('#lightbox').classList.add('hidden');});
     $('#modalDeleteBtn').addEventListener('click',()=>{if(state.currentImageId)deleteImage(state.currentImageId);});
 
     $('#logoutBtn').addEventListener('click',async()=>{
@@ -376,6 +402,51 @@
     state.searchQuery=q;
     state.page=1;
     loadImages();
+  }
+
+  async function loadPoolsModal(){
+    const resp=await api('/api/pools');
+    if(!resp)return;
+    const data=await resp.json();
+    const pools=data.pools||{};
+    const list=$('#poolsList');
+    list.innerHTML='';
+    const sel=$('#poolKeySelect');
+    sel.innerHTML='';
+    Object.entries(pools).sort((a,b)=>a[0].localeCompare(b[0])).forEach(([key,values])=>{
+      const opt=document.createElement('option');
+      opt.value=key;opt.textContent=key;
+      sel.appendChild(opt);
+
+      const group=document.createElement('div');
+      group.className='pool-group';
+      group.innerHTML=`
+        <div class="pool-group-header">
+          <span>${esc(key)} <span class="pool-group-count">(${values.length})</span></span>
+          <button class="pool-delete-btn" data-key="${esc(key)}">删除池子</button>
+        </div>
+        <div class="pool-group-body">
+          ${values.map(v=>`<span class="pool-tag">${esc(v)}<span class="pool-tag-remove" data-key="${esc(key)}" data-value="${esc(v)}">&times;</span></span>`).join('')}
+        </div>
+      `;
+      list.appendChild(group);
+    });
+    list.querySelectorAll('.pool-tag-remove').forEach(btn=>{
+      btn.addEventListener('click',async()=>{
+        const key=btn.dataset.key;
+        const value=btn.dataset.value;
+        const resp=await api('/api/pools',{method:'POST',json:{key,action:'remove_value',value}});
+        if(resp&&resp.ok){toast('已移除','success');loadPoolsModal();loadFilters();}
+      });
+    });
+    list.querySelectorAll('.pool-delete-btn').forEach(btn=>{
+      btn.addEventListener('click',async()=>{
+        const key=btn.dataset.key;
+        if(!confirm(`确定删除池子「${key}」？`))return;
+        const resp=await api('/api/pools',{method:'POST',json:{key,action:'remove_pool'}});
+        if(resp&&resp.ok){toast('已删除','success');loadPoolsModal();loadFilters();}
+      });
+    });
   }
 
   document.addEventListener('DOMContentLoaded',init);

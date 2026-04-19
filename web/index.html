@@ -26,6 +26,10 @@
       <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="18" height="18"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="17 8 12 3 7 8"/><line x1="12" y1="3" x2="12" y2="15"/></svg>
       上传
     </button>
+    <button id="poolsBtn" class="btn btn-secondary" title="池子管理">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="18" height="18"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83-2.83l.06-.06A1.65 1.65 0 0 0 4.68 15a1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 2.83-2.83l.06.06A1.65 1.65 0 0 0 9 4.68a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 2.83l-.06.06A1.65 1.65 0 0 0 19.4 9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg>
+      池子
+    </button>
     <button id="batchModeBtn" class="btn btn-secondary" title="批量操作">
       <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="18" height="18"><rect x="3" y="3" width="7" height="7"/><rect x="14" y="3" width="7" height="7"/><rect x="3" y="14" width="7" height="7"/><rect x="14" y="14" width="7" height="7"/></svg>
       批量
@@ -59,8 +63,20 @@
       </select>
     </div>
     <div class="sidebar-section">
+      <h3 class="sidebar-heading">场景</h3>
+      <select id="sceneFilter" class="sidebar-select">
+        <option value="">全部</option>
+      </select>
+    </div>
+    <div class="sidebar-section">
       <h3 class="sidebar-heading">构图</h3>
       <select id="compositionFilter" class="sidebar-select">
+        <option value="">全部</option>
+      </select>
+    </div>
+    <div class="sidebar-section">
+      <h3 class="sidebar-heading">氛围</h3>
+      <select id="atmosphereFilter" class="sidebar-select">
         <option value="">全部</option>
       </select>
     </div>
@@ -98,7 +114,7 @@
     <button class="modal-close" id="modalClose">&times;</button>
     <div class="modal-body">
       <div class="modal-image-wrap">
-        <img id="modalImage" class="modal-image" src="" alt="">
+        <img id="modalImage" class="modal-image modal-image-clickable" src="" alt="" title="点击放大">
       </div>
       <div class="modal-info">
         <div class="modal-tags" id="modalTags"></div>
@@ -108,6 +124,10 @@
       </div>
     </div>
   </div>
+</div>
+
+<div class="lightbox hidden" id="lightbox">
+  <img id="lightboxImage" class="lightbox-image" src="" alt="">
 </div>
 
 <div class="modal-overlay hidden" id="uploadModal">
@@ -130,6 +150,27 @@
     </div>
     <button class="btn btn-accent btn-block" id="uploadSubmit" disabled>保存到衣橱</button>
     <div id="uploadStatus" class="upload-status"></div>
+  </div>
+</div>
+
+<div class="modal-overlay hidden" id="poolsModal">
+  <div class="modal-card modal-card-md">
+    <button class="modal-close" id="poolsModalClose">&times;</button>
+    <h2 class="modal-title">值池管理</h2>
+    <p class="pools-hint">管理 AI 分析图片时使用的预定义值池。添加自定义值后，存图时 AI 也能识别并归类。</p>
+    <div id="poolsList" class="pools-list"></div>
+    <div class="pools-add-section">
+      <h3 class="pools-add-title">添加新值</h3>
+      <div class="pools-add-row">
+        <select id="poolKeySelect" class="sidebar-select pools-add-select"></select>
+        <input type="text" id="poolNewValue" class="login-input pools-add-input" placeholder="新值名称">
+        <button class="btn btn-accent btn-sm" id="poolAddValueBtn">添加</button>
+      </div>
+      <div class="pools-add-row" style="margin-top:8px">
+        <input type="text" id="poolNewKey" class="login-input pools-add-input" placeholder="新池子名称">
+        <button class="btn btn-secondary btn-sm" id="poolAddKeyBtn">新建池子</button>
+      </div>
+    </div>
   </div>
 </div>
 

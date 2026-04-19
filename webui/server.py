@@ -97,16 +97,23 @@ class WardrobeWebServer:
             category = request.args.get("category", "")
             persona = request.args.get("persona", "")
             style = request.args.get("style", "")
+            scene = request.args.get("scene", "")
             composition = request.args.get("composition", "")
+            atmosphere = request.args.get("atmosphere", "")
 
             offset = (page - 1) * per_page
 
-            if style or persona or category:
+            needs_search = style or scene or atmosphere or persona or category
+            if needs_search:
                 style_list = [style] if style else None
+                scene_list = [scene] if scene else None
+                atmosphere_list = [atmosphere] if atmosphere else None
                 images = await self.plugin.db.search_images(
                     category=category or None,
                     persona=persona or None,
                     style=style_list,
+                    scene=scene_list,
+                    atmosphere=atmosphere_list,
                     limit=per_page,
                 )
             else:
@@ -218,15 +225,12 @@ class WardrobeWebServer:
             persona_names = str(self.plugin._cfg("persona_names", "") or "").strip()
             personas = [n.strip() for n in persona_names.replace("，", ",").split(",") if n.strip()] if persona_names else []
 
-            from ..core.pools import ALL_POOLS
-            styles = list(ALL_POOLS.get("风格", []))
-            compositions = list(ALL_POOLS.get("构图", []))
+            pools = self.plugin.get_merged_pools()
 
             return jsonify({
                 "categories": list(stats.get("by_category", {}).keys()),
                 "personas": personas,
-                "styles": styles,
-                "compositions": compositions,
+                "pools": {k: list(v) for k, v in pools.items()},
             })
 
         @app.route("/api/image-file/<image_id>")
@@ -239,6 +243,48 @@ class WardrobeWebServer:
             if not image_path.exists():
                 return jsonify({"error": "文件不存在"}), 404
             return await send_from_directory(str(image_path.parent), image_path.name)
+
+        @app.route("/api/pools", methods=["GET"])
+        async def api_get_pools():
+            pools = self.plugin.get_merged_pools()
+            return jsonify({"pools": {k: list(v) for k, v in pools.items()}})
+
+        @app.route("/api/pools", methods=["POST"])
+        async def api_update_pool():
+            data = await request.get_json(silent=True) or {}
+            pool_key = data.get("key", "").strip()
+            action = data.get("action", "")
+            value = data.get("value", "").strip()
+
+            if not pool_key or not action:
+                return jsonify({"error": "参数不完整"}), 400
+
+            pools = self.plugin.get_merged_pools()
+
+            if action == "add_value":
+                if not value:
+                    return jsonify({"error": "值不能为空"}), 400
+                if pool_key not in pools:
+                    pools[pool_key] = []
+                if value not in pools[pool_key]:
+                    pools[pool_key].append(value)
+            elif action == "remove_value":
+                if pool_key in pools and value in pools[pool_key]:
+                    pools[pool_key].remove(value)
+            elif action == "add_pool":
+                if not value:
+                    return jsonify({"error": "池名不能为空"}), 400
+                if value not in pools:
+                    pools[value] = []
+                pool_key = value
+            elif action == "remove_pool":
+                if pool_key in pools:
+                    del pools[pool_key]
+            else:
+                return jsonify({"error": "未知操作"}), 400
+
+            await self.plugin.save_custom_pools(pools)
+            return jsonify({"success": True, "pools": {k: list(v) for k, v in pools.items()}})
 
         return app
 
