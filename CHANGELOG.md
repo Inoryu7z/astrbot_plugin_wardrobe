@@ -1,3 +1,10 @@
+### v1.1.3
+
+**🐛 修复：Docker 环境下 file URI 触发无效 token 错误**
+
+* 去掉 `file:///` URI 传图方式，直接传本地绝对路径给框架，由框架自动读取并编码为 base64。
+* 简化 `_call_vision_model` 回退逻辑，仅保留列表/字符串格式兼容。
+
 ### v1.1.2
 
 **🐛 修复：Docker/Linux 环境下 file URI 回退路径丢失前导 `/`**
