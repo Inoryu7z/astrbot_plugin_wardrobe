@@ -23,6 +23,17 @@ SEARCH_PARSE_SYSTEM_PROMPT = """# 角色
 - scene: 场景列表（可选）
 - atmosphere: 氛围列表，如 ["性感", "可爱"]（可选）
 - keywords: 关键词列表，用于描述匹配（可选）
+- persona: 人格名称（可选）
+
+# 人格判断规则
+当前对话人格：{current_persona}
+已有的人格目录：{persona_names}
+
+判断逻辑：
+- 如果用户明确提到某个人格名（如"星织有没有拍过xxx"），且该名称在人格目录中，则 persona 填写该名称
+- 如果用户用"你""自己"等指代当前对话人格，且当前对话人格在人格目录中，则 persona 填写当前对话人格
+- 如果用户没有提到任何人格，且语气是泛泛询问（如"有没有穿洛丽塔的美少女"），则 persona 留空，表示全局搜索
+- 如果提到的人格名不在目录中，persona 也留空
 
 # 规则
 1. 只输出 JSON，不要输出解释
@@ -67,19 +78,28 @@ class ImageSearcher:
         timeout_seconds: float = 30.0,
         candidate_limit: int = 20,
         max_select: int = 1,
+        persona: str = "",
+        current_persona: str = "",
+        persona_names: str = "",
     ) -> list[dict[str, Any]]:
         query_conditions = await self._parse_query(
             user_query,
             primary_provider_id=primary_provider_id,
             secondary_provider_id=secondary_provider_id,
             timeout_seconds=timeout_seconds,
+            current_persona=current_persona,
+            persona_names=persona_names,
         )
         if not query_conditions:
             query_conditions = {"keywords": [user_query]}
 
-        candidates = await self._query_candidates(query_conditions, limit=candidate_limit)
+        resolved_persona = persona
+        if query_conditions.get("persona"):
+            resolved_persona = query_conditions.pop("persona")
+
+        candidates = await self._query_candidates(query_conditions, limit=candidate_limit, persona=resolved_persona)
         if not candidates:
-            logger.info("[Wardrobe] 未找到候选图片")
+            logger.info("[Wardrobe] 未找到候选图片 persona=%s", resolved_persona or "无")
             return []
 
         if len(candidates) <= max_select:
@@ -102,10 +122,17 @@ class ImageSearcher:
         primary_provider_id: str,
         secondary_provider_id: str,
         timeout_seconds: float,
+        current_persona: str = "",
+        persona_names: str = "",
     ) -> Optional[dict[str, Any]]:
         providers = [p for p in [primary_provider_id, secondary_provider_id] if p.strip()]
         if not providers:
             return None
+
+        system_prompt = SEARCH_PARSE_SYSTEM_PROMPT.format(
+            current_persona=current_persona or "未设置",
+            persona_names=persona_names or "无",
+        )
 
         for provider_id in providers:
             try:
@@ -113,7 +140,7 @@ class ImageSearcher:
                     self.context.llm_generate(
                         chat_provider_id=provider_id,
                         prompt=user_query,
-                        system_prompt=SEARCH_PARSE_SYSTEM_PROMPT,
+                        system_prompt=system_prompt,
                     ),
                     timeout=timeout_seconds,
                 )
@@ -129,7 +156,7 @@ class ImageSearcher:
         return None
 
     async def _query_candidates(
-        self, conditions: dict[str, Any], limit: int = 20
+        self, conditions: dict[str, Any], limit: int = 20, persona: str = ""
     ) -> list[dict[str, Any]]:
         category = conditions.get("category")
         style = conditions.get("style")
@@ -144,6 +171,7 @@ class ImageSearcher:
             style=style,
             scene=scene,
             atmosphere=atmosphere,
+            persona=persona,
             limit=limit,
         )
 
@@ -151,6 +179,7 @@ class ImageSearcher:
             results = await self.db.search_by_description(
                 keywords=keywords,
                 category=category,
+                persona=persona,
                 limit=limit,
             )
 

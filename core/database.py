@@ -32,6 +32,7 @@ CREATE TABLE IF NOT EXISTS images (
     image_path TEXT NOT NULL,
     created_at TEXT NOT NULL,
     updated_at TEXT NOT NULL,
+    persona TEXT DEFAULT '',
     created_by TEXT DEFAULT ''
 );
 """
@@ -44,7 +45,7 @@ CREATE INDEX IF NOT EXISTS idx_scene ON images(scene);
 """
 
 _UPDATABLE_FIELDS = frozenset({
-    "category", "style", "clothing_type", "exposure_level",
+    "category", "style", "clothing_type", "exposure_level", "persona",
     "scene", "atmosphere", "pose_type", "body_orientation",
     "dynamic_level", "action_style", "shot_size", "camera_angle",
     "expression", "color_tone", "composition", "background",
@@ -63,6 +64,10 @@ class WardrobeDatabase:
             async with aiosqlite.connect(self.db_path) as db:
                 await db.executescript(_CREATE_TABLE_SQL)
                 await db.executescript(_CREATE_INDEX_SQL)
+                try:
+                    await db.execute("ALTER TABLE images ADD COLUMN persona TEXT DEFAULT ''")
+                except Exception:
+                    pass
                 await db.commit()
         logger.info("[Wardrobe] 数据库初始化完成")
 
@@ -86,6 +91,7 @@ class WardrobeDatabase:
         composition: str,
         background: str,
         description: str,
+        persona: str = "",
         image_path: str,
         created_by: str = "",
     ) -> str:
@@ -99,8 +105,8 @@ class WardrobeDatabase:
                         scene, atmosphere, pose_type, body_orientation,
                         dynamic_level, action_style, shot_size, camera_angle,
                         expression, color_tone, composition, background,
-                        description, image_path, created_at, updated_at, created_by
-                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+                        description, persona, image_path, created_at, updated_at, created_by
+                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
                     (
                         image_id,
                         category,
@@ -120,6 +126,7 @@ class WardrobeDatabase:
                         composition,
                         background,
                         description,
+                        persona,
                         image_path,
                         now,
                         now,
@@ -182,6 +189,7 @@ class WardrobeDatabase:
         style: Optional[list[str]] = None,
         scene: Optional[list[str]] = None,
         atmosphere: Optional[list[str]] = None,
+        persona: str = "",
         limit: int = 20,
     ) -> list[dict[str, Any]]:
         conditions = []
@@ -194,6 +202,10 @@ class WardrobeDatabase:
         if exposure_level:
             conditions.append("exposure_level = ?")
             params.append(exposure_level)
+
+        if persona:
+            conditions.append("persona = ?")
+            params.append(persona)
 
         if style:
             style_conditions = []
@@ -234,6 +246,7 @@ class WardrobeDatabase:
         *,
         keywords: list[str],
         category: Optional[str] = None,
+        persona: str = "",
         limit: int = 20,
     ) -> list[dict[str, Any]]:
         conditions = []
@@ -242,6 +255,10 @@ class WardrobeDatabase:
         if category:
             conditions.append("category = ?")
             params.append(category)
+
+        if persona:
+            conditions.append("persona = ?")
+            params.append(persona)
 
         desc_conditions = []
         for kw in keywords:
