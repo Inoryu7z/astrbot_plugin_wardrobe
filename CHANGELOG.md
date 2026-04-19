@@ -1,3 +1,10 @@
+### v1.1.2
+
+**🐛 修复：Docker/Linux 环境下 file URI 回退路径丢失前导 `/`**
+
+* file URI 回退时不再从 URI 字符串反推路径，改为直接使用原始绝对路径变量（参考 stealer 插件做法）。
+* 回退本地路径时也增加了列表/字符串格式兼容处理。
+
 ### v1.1.1
 
 **🐛 修复：image_urls 格式不兼容导致 File name too long**
