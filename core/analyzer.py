@@ -88,7 +88,6 @@ class ImageAnalyzer:
                 import os
                 os.close(temp_fd)
             resolved_path = str(Path(temp_path).resolve())
-            file_url = Path(resolved_path).as_uri()
         except Exception as e:
             logger.warning("[Wardrobe] 保存临时图片失败: %s", e)
             return None
@@ -107,7 +106,7 @@ class ImageAnalyzer:
             try:
                 t0 = time.perf_counter()
                 result = await asyncio.wait_for(
-                    self._call_vision_model(provider_id, system_prompt, prompt_text, file_url, resolved_path),
+                    self._call_vision_model(provider_id, system_prompt, prompt_text, resolved_path),
                     timeout=timeout_seconds,
                 )
                 elapsed = time.perf_counter() - t0
@@ -137,15 +136,14 @@ class ImageAnalyzer:
         provider_id: str,
         system_prompt: str,
         prompt_text: str,
-        file_url: str,
-        resolved_path: str,
+        image_path: str,
     ) -> Optional[dict[str, Any]]:
         try:
             llm_resp = await self.context.llm_generate(
                 chat_provider_id=provider_id,
                 prompt=prompt_text,
                 system_prompt=system_prompt,
-                image_urls=[file_url],
+                image_urls=[image_path],
             )
         except Exception as e:
             err = str(e).lower()
@@ -157,36 +155,15 @@ class ImageAnalyzer:
                 "expected str",
                 "typeerror",
             )
-            if any(marker in err for marker in fallback_markers):
-                logger.warning("[Wardrobe] image_urls 列表格式不兼容，回退字符串模式: %s", e)
-                llm_resp = await self.context.llm_generate(
-                    chat_provider_id=provider_id,
-                    prompt=prompt_text,
-                    system_prompt=system_prompt,
-                    image_urls=file_url,
-                )
-            elif "file" in err or "not found" in err or "errno" in err:
-                logger.warning("[Wardrobe] file URI 读取失败，回退本地路径: %s", resolved_path)
-                try:
-                    llm_resp = await self.context.llm_generate(
-                        chat_provider_id=provider_id,
-                        prompt=prompt_text,
-                        system_prompt=system_prompt,
-                        image_urls=[resolved_path],
-                    )
-                except Exception as e2:
-                    err2 = str(e2).lower()
-                    if any(marker in err2 for marker in fallback_markers):
-                        llm_resp = await self.context.llm_generate(
-                            chat_provider_id=provider_id,
-                            prompt=prompt_text,
-                            system_prompt=system_prompt,
-                            image_urls=resolved_path,
-                        )
-                    else:
-                        raise
-            else:
+            if not any(marker in err for marker in fallback_markers):
                 raise
+            logger.warning("[Wardrobe] image_urls 列表格式不兼容，回退字符串模式: %s", e)
+            llm_resp = await self.context.llm_generate(
+                chat_provider_id=provider_id,
+                prompt=prompt_text,
+                system_prompt=system_prompt,
+                image_urls=image_path,
+            )
 
         raw_text = (getattr(llm_resp, "completion_text", "") or "").strip()
         if not raw_text:
