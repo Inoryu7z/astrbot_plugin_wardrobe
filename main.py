@@ -1,5 +1,6 @@
 from pathlib import Path
 from typing import Optional
+import asyncio
 
 from astrbot.api import AstrBotConfig, logger
 from astrbot.api.event import AstrMessageEvent, filter
@@ -13,6 +14,7 @@ from .core.database import WardrobeDatabase
 from .core.image_store import ImageStore
 from .core.searcher import ImageSearcher
 from .core.utils import detect_image_mime, mime_to_ext
+from .webui import WardrobeWebServer
 
 _MAX_IMAGE_SIZE_MB = 10
 _MAX_DESCRIPTION_LEN = 2000
@@ -38,8 +40,28 @@ class WardrobePlugin(Star):
         self.analyzer = ImageAnalyzer(context)
         self.searcher = ImageSearcher(context, self.db, self.store)
         self.data_dir = data_dir
+        self._webui: Optional[WardrobeWebServer] = None
+
+        if self._cfg("webui_enabled", False):
+            try:
+                loop = asyncio.get_event_loop()
+                loop.create_task(self._start_webui())
+            except Exception as e:
+                logger.error("[Wardrobe] WebUI 启动调度失败: %s", e)
 
         logger.info("[Wardrobe] 插件初始化完成")
+
+    async def _start_webui(self):
+        await self._ensure_db()
+        try:
+            self._webui = WardrobeWebServer(self, self.config)
+            await self._webui.start()
+        except Exception as e:
+            logger.error("[Wardrobe] WebUI 启动失败: %s", e)
+
+    async def terminate(self):
+        if self._webui:
+            await self._webui.stop()
 
     async def _ensure_db(self):
         await self.db.init()
