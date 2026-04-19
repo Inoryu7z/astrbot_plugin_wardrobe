@@ -157,13 +157,13 @@ class WardrobePlugin(Star):
             category = "人物"
 
         logger.info(
-            "[Wardrobe] 分析结果: 分类=%s 风格=%s 服装=%s 暴露=%s 场景=%s 氛围=%s 姿势=%s 表情=%s 景别=%s 角度=%s 描述=%s",
+            "[Wardrobe] 分析结果:\n  分类: %s\n  风格: %s\n  服装: %s\n  暴露: %s\n  场景: %s\n  氛围: %s\n  姿势: %s\n  表情: %s\n  景别: %s\n  角度: %s\n  描述: %s",
             category,
-            attrs.get("style", []),
+            ", ".join(attrs.get("style", [])),
             attrs.get("clothing_type", ""),
             attrs.get("exposure_level", ""),
-            attrs.get("scene", []),
-            attrs.get("atmosphere", []),
+            ", ".join(attrs.get("scene", [])),
+            ", ".join(attrs.get("atmosphere", [])),
             attrs.get("pose_type", ""),
             attrs.get("expression", ""),
             attrs.get("shot_size", ""),
