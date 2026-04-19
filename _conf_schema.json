@@ -1,0 +1,66 @@
+{
+  "save_provider_id": {
+    "description": "存图主模型",
+    "hint": "用于分析图片内容、提取属性标签的模型（需支持视觉能力）",
+    "type": "string",
+    "default": "",
+    "_special": "select_provider"
+  },
+  "save_secondary_provider_id": {
+    "description": "存图备用模型",
+    "hint": "主模型超时或失败时自动切换",
+    "type": "string",
+    "default": "",
+    "_special": "select_provider"
+  },
+  "search_provider_id": {
+    "description": "取图主模型",
+    "hint": "用于解析检索意图和从候选图片中选择的模型（需支持视觉能力）",
+    "type": "string",
+    "default": "",
+    "_special": "select_provider"
+  },
+  "search_secondary_provider_id": {
+    "description": "取图备用模型",
+    "hint": "主模型超时或失败时自动切换",
+    "type": "string",
+    "default": "",
+    "_special": "select_provider"
+  },
+  "save_timeout_seconds": {
+    "description": "存图模型超时秒数",
+    "hint": "单次调用超过此时长即切换模型",
+    "type": "float",
+    "default": 60.0
+  },
+  "search_timeout_seconds": {
+    "description": "取图模型超时秒数",
+    "hint": "单次调用超过此时长即切换模型",
+    "type": "float",
+    "default": 30.0
+  },
+  "save_feedback_enabled": {
+    "description": "存图反馈",
+    "hint": "开启后，存图时会向用户发送图片的描述和属性信息；关闭则静默保存",
+    "type": "bool",
+    "default": false
+  },
+  "search_candidate_limit": {
+    "description": "候选图片数量",
+    "hint": "从数据库中取出的候选图片数量，供取图模型从中选择",
+    "type": "int",
+    "default": 20
+  },
+  "search_max_select": {
+    "description": "最大返回图片数",
+    "hint": "取图模型最多选择的图片数量",
+    "type": "int",
+    "default": 1
+  },
+  "max_image_size_mb": {
+    "description": "图片大小限制(MB)",
+    "hint": "超过此大小的图片将被拒绝保存",
+    "type": "int",
+    "default": 10
+  }
+}
