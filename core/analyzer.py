@@ -52,12 +52,14 @@ ANALYZE_SYSTEM_PROMPT = """# 角色
 
 
 class ImageAnalyzer:
-    def __init__(self, context):
+    def __init__(self, context, plugin=None):
         self.context = context
+        self.plugin = plugin
 
     def _build_pools_text(self) -> str:
+        pools = self.plugin.get_merged_pools() if self.plugin else ALL_POOLS
         lines = []
-        for key, values in ALL_POOLS.items():
+        for key, values in pools.items():
             lines.append(f"## {key}")
             for v in values:
                 lines.append(f"- {v}")

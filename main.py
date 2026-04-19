@@ -19,6 +19,7 @@ from .webui import WardrobeWebServer
 _MAX_IMAGE_SIZE_MB = 10
 _MAX_DESCRIPTION_LEN = 2000
 _GITEE_IMAGE_TOOLS = frozenset({"gitee_draw_image", "gitee_edit_image", "aiimg_generate"})
+_AIIMG_IMAGE_TOOLS = frozenset({"aiimg_draw", "aiimg_edit", "aiimg_generate"})
 
 
 @register(
@@ -37,7 +38,7 @@ class WardrobePlugin(Star):
 
         self.db = WardrobeDatabase(data_dir)
         self.store = ImageStore(data_dir)
-        self.analyzer = ImageAnalyzer(context)
+        self.analyzer = ImageAnalyzer(context, plugin=self)
         self.searcher = ImageSearcher(context, self.db, self.store)
         self.data_dir = data_dir
         self._webui: Optional[WardrobeWebServer] = None
@@ -62,6 +63,45 @@ class WardrobePlugin(Star):
     async def terminate(self):
         if self._webui:
             await self._webui.stop()
+
+    def get_merged_pools(self) -> dict:
+        from .core.pools import ALL_POOLS
+        merged = {k: list(v) for k, v in ALL_POOLS.items()}
+        custom = self._load_custom_pools()
+        for k, v in custom.items():
+            if k in merged:
+                for item in v:
+                    if item not in merged[k]:
+                        merged[k].append(item)
+            else:
+                merged[k] = list(v)
+        return merged
+
+    def _load_custom_pools(self) -> dict:
+        import json
+        path = self.data_dir / "custom_pools.json"
+        if path.exists():
+            try:
+                with open(path, "r", encoding="utf-8") as f:
+                    return json.load(f)
+            except Exception:
+                pass
+        return {}
+
+    async def save_custom_pools(self, merged_pools: dict):
+        import json
+        from .core.pools import ALL_POOLS
+        custom = {}
+        for k, v in merged_pools.items():
+            default = ALL_POOLS.get(k, [])
+            extra = [item for item in v if item not in default]
+            if extra or k not in ALL_POOLS:
+                custom[k] = extra if k in ALL_POOLS else list(v)
+        path = self.data_dir / "custom_pools.json"
+        path.parent.mkdir(parents=True, exist_ok=True)
+        with open(path, "w", encoding="utf-8") as f:
+            json.dump(custom, f, ensure_ascii=False, indent=2)
+        logger.info("[Wardrobe] 自定义池子已保存")
 
     async def _ensure_db(self):
         await self.db.init()
@@ -95,9 +135,9 @@ class WardrobePlugin(Star):
         logger.info("[Wardrobe] 数据库已就绪")
 
     @on_llm_tool_respond()
-    async def on_gitee_tool_respond(self, event: AstrMessageEvent, tool, tool_args, tool_result):
-        '''gitee 生图工具调用后的自动存图钩子'''
-        await self._auto_save_gitee_image(event, tool)
+    async def on_aiimg_tool_respond(self, event: AstrMessageEvent, tool, tool_args, tool_result):
+        '''AiImg 生图工具调用后的自动存图钩子'''
+        await self._auto_save_aiimg_image(event, tool)
 
     @filter.llm_tool(name="save_wardrobe_image")
     async def save_wardrobe_image_tool(self, event: AstrMessageEvent, user_description: str = "", persona: str = "") -> str:
@@ -257,21 +297,25 @@ class WardrobePlugin(Star):
 
         return image_id, attrs
 
-    async def _auto_save_gitee_image(self, event: AstrMessageEvent, tool):
+    async def _auto_save_aiimg_image(self, event: AstrMessageEvent, tool):
         if not self._cfg("auto_save_gitee_enabled", False):
             return
 
         tool_name = getattr(tool, "name", "") or ""
-        if tool_name not in _GITEE_IMAGE_TOOLS:
+        if tool_name not in _AIIMG_IMAGE_TOOLS and tool_name not in _GITEE_IMAGE_TOOLS:
             return
 
-        gitee_star = self.context.get_registered_star("astrbot_plugin_gitee_aiimg")
-        if not gitee_star or not gitee_star.activated or not gitee_star.star_cls:
+        instance = None
+        for star_name in ("astrbot_plugin_aiimg", "astrbot_plugin_gitee_aiimg"):
+            star = self.context.get_registered_star(star_name)
+            if star and star.activated and star.star_cls:
+                instance = star.star_cls
+                break
+        if not instance:
             return
 
-        gitee_instance = gitee_star.star_cls
         user_id = str(event.get_sender_id() or "")
-        last_image_dict = getattr(gitee_instance, "_last_image_by_user", None)
+        last_image_dict = getattr(instance, "_last_image_by_user", None)
         if not last_image_dict:
             return
 
@@ -295,7 +339,7 @@ class WardrobePlugin(Star):
                 return
 
             logger.info(
-                "[Wardrobe] gitee 自动存图开始，图片大小=%.2fKB 人格=%s tool=%s",
+                "[Wardrobe] AiImg 自动存图开始，图片大小=%.2fKB 人格=%s tool=%s",
                 len(image_bytes) / 1024, persona or "无", tool_name,
             )
 
@@ -306,17 +350,17 @@ class WardrobePlugin(Star):
             if image_id:
                 if attrs:
                     logger.info(
-                        "[Wardrobe] gitee 自动存图完成 ID=%s 分类=%s 描述=%s",
+                        "[Wardrobe] AiImg 自动存图完成 ID=%s 分类=%s 描述=%s",
                         image_id, attrs.get("category", ""),
                         attrs.get("description", "")[:100],
                     )
                 else:
-                    logger.info("[Wardrobe] gitee 自动存图完成（分析失败）ID=%s", image_id)
+                    logger.info("[Wardrobe] AiImg 自动存图完成（分析失败）ID=%s", image_id)
             else:
-                logger.warning("[Wardrobe] gitee 自动存图失败")
+                logger.warning("[Wardrobe] AiImg 自动存图失败")
 
         except Exception as e:
-            logger.error("[Wardrobe] gitee 自动存图异常: %s", e)
+            logger.error("[Wardrobe] AiImg 自动存图异常: %s", e)
 
     async def _do_delete_image(self, image_id: str) -> str:
         await self._ensure_db()
