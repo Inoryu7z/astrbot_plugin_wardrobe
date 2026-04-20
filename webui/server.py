@@ -209,9 +209,10 @@ class WardrobeWebServer:
             if not image_bytes:
                 return jsonify({"error": "图片为空"}), 400
 
-            persona = request.form.get("persona", "")
+            form = await request.form
+            persona = form.get("persona", "")
             persona = self.plugin._resolve_persona(persona)
-            description = request.form.get("description", "")
+            description = form.get("description", "")
 
             max_size = int(self.plugin._cfg("max_image_size_mb", 10) or 10)
             if len(image_bytes) > max_size * 1024 * 1024:

@@ -288,6 +288,7 @@
       fd.append('description',$('#uploadDescription').value);
       try{
         const resp=await api('/api/images/upload',{method:'POST',body:fd});
+        if(!resp){toast('上传失败','error');$('#uploadStatus').textContent='服务器错误';submitBtn.disabled=false;return;}
         const data=await resp.json();
         if(data.success){
           toast('上传成功，正在分析...','success');
