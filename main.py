@@ -196,7 +196,7 @@ class WardrobePlugin(Star):
             return "未检测到图片，请发送图片后再保存"
 
         persona = self._resolve_persona(persona)
-        logger.info("[Wardrobe] 开始存图，图片大小=%.2fKB 人格=%s", len(image_bytes) / 1024, persona or "无")
+        logger.info("[Wardrobe] 开始存图，图片大小=%.2fKB 人格=%s 用户描述=%s", len(image_bytes) / 1024, persona or "无", user_description or "无")
 
         created_by = str(event.get_sender_id() or "")
         image_id, attrs = await self._save_image_from_bytes(
