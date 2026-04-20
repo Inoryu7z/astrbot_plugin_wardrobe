@@ -25,7 +25,7 @@ _AIIMG_GENERATE_TOOLS = frozenset({"aiimg_generate"})
     "astrbot_plugin_wardrobe",
     "Inoryu7z",
     "图片衣柜管理插件，支持智能分类、语义检索和参考图接口",
-    "1.6.4",
+    "1.6.1",
 )
 class WardrobePlugin(Star):
     def __init__(self, context: Context, config: AstrBotConfig = None):
@@ -350,10 +350,7 @@ class WardrobePlugin(Star):
         if not path.exists():
             return
 
-        persona = str(self._cfg("auto_save_aiimg_persona") or "").strip()
-        if not persona:
-            persona = str(self._cfg("auto_save_gitee_persona", "") or "").strip()
-        persona = self._resolve_persona(persona)
+        persona = await self._get_auto_save_persona(event)
 
         try:
             import aiofiles
@@ -386,6 +383,41 @@ class WardrobePlugin(Star):
 
         except Exception as e:
             logger.error("[Wardrobe] AiImg 自动存图异常: %s", e)
+
+    async def _get_auto_save_persona(self, event: AstrMessageEvent) -> str:
+        follow_conversation = self._cfg("auto_save_aiimg_follow_conversation", True)
+        if follow_conversation:
+            conv_persona = await self._get_current_persona_name(event)
+            if conv_persona:
+                return self._resolve_persona(conv_persona)
+
+        default_persona = str(self._cfg("auto_save_aiimg_default_persona") or "").strip()
+        if not default_persona:
+            default_persona = str(self._cfg("auto_save_aiimg_persona", "") or "").strip()
+        if not default_persona:
+            default_persona = str(self._cfg("auto_save_gitee_persona", "") or "").strip()
+        return self._resolve_persona(default_persona)
+
+    async def _get_current_persona_name(self, event: AstrMessageEvent) -> str | None:
+        try:
+            conv_mgr = getattr(self.context, "conversation_manager", None)
+            if not conv_mgr:
+                return None
+            umo = str(getattr(event, "unified_msg_origin", "") or "").strip()
+            if not umo:
+                return None
+            curr_cid = await conv_mgr.get_curr_conversation_id(umo)
+            if not curr_cid:
+                return None
+            conversation = await conv_mgr.get_conversation(umo, curr_cid)
+            if not conversation:
+                return None
+            persona_id = getattr(conversation, "persona_id", None)
+            if persona_id:
+                return str(persona_id).strip() or None
+        except Exception as e:
+            logger.debug("[Wardrobe] 获取当前人格失败: %s", e)
+        return None
 
     async def _do_delete_image(self, image_id: str) -> str:
         await self._ensure_db()
@@ -436,7 +468,7 @@ class WardrobePlugin(Star):
             return None
 
         resolved_persona = self._resolve_persona(current_persona)
-        persona_names = str(self._cfg("persona_names", "") or "").strip()
+        persona_names = self._get_persona_names_str()
 
         logger.info(
             "[Wardrobe] 参考图搜索: query=%s exclude_persona=%s",
@@ -486,7 +518,7 @@ class WardrobePlugin(Star):
         raw_persona = persona.strip()
         resolved_persona = self._resolve_persona(raw_persona)
         current_persona = resolved_persona or raw_persona
-        persona_names = str(self._cfg("persona_names", "") or "").strip()
+        persona_names = self._get_persona_names_str()
 
         primary = str(self._cfg("search_provider_id", "") or "").strip()
         secondary = str(self._cfg("search_secondary_provider_id", "") or "").strip()
@@ -608,18 +640,40 @@ class WardrobePlugin(Star):
 
         return None
 
+    def _get_personas_config(self) -> list[dict]:
+        personas = self._cfg("personas", [])
+        if personas and isinstance(personas, list):
+            return personas
+        legacy = str(self._cfg("persona_names", "") or "").strip()
+        if legacy:
+            result = []
+            for entry in self._split_persona_entries(legacy):
+                entry = entry.strip()
+                if not entry:
+                    continue
+                canonical, aliases = self._parse_persona_entry(entry)
+                if canonical:
+                    result.append({"name": canonical, "aliases": aliases})
+            return result
+        return []
+
+    def _get_persona_names_str(self) -> str:
+        personas = self._get_personas_config()
+        if not personas:
+            return ""
+        names = [p.get("name", "") for p in personas if p.get("name")]
+        return ", ".join(names)
+
     def _match_configured_persona(self, text: str) -> str:
         text = text.strip()
         if not text:
             return ""
-        configured = str(self._cfg("persona_names", "") or "").strip()
-        if not configured:
+        personas = self._get_personas_config()
+        if not personas:
             return ""
-        for entry in self._split_persona_entries(configured):
-            entry = entry.strip()
-            if not entry:
-                continue
-            canonical, aliases = self._parse_persona_entry(entry)
+        for p in personas:
+            canonical = p.get("name", "").strip()
+            aliases = p.get("aliases", []) or []
             if text == canonical or text in aliases:
                 return canonical
         return ""
@@ -628,14 +682,12 @@ class WardrobePlugin(Star):
         persona = persona.strip()
         if not persona:
             return ""
-        configured = str(self._cfg("persona_names", "") or "").strip()
-        if not configured:
+        personas = self._get_personas_config()
+        if not personas:
             return persona
-        for entry in self._split_persona_entries(configured):
-            entry = entry.strip()
-            if not entry:
-                continue
-            canonical, aliases = self._parse_persona_entry(entry)
+        for p in personas:
+            canonical = p.get("name", "").strip()
+            aliases = p.get("aliases", []) or []
             if persona == canonical or persona in aliases:
                 return canonical
         return persona
