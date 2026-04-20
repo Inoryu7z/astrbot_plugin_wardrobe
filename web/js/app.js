@@ -204,6 +204,13 @@
       tags.appendChild(span);
     });
     $('#modalDesc').textContent=img.description||'无描述';
+    const userTags=$('#modalUserTags');
+    if(img.user_tags){
+      userTags.textContent='用户标签: '+img.user_tags;
+      userTags.classList.remove('hidden');
+    }else{
+      userTags.classList.add('hidden');
+    }
     const meta=$('#modalMeta');
     const lines=[];
     if(img.exposure_level)lines.push(`暴露程度: ${img.exposure_level}`);
