@@ -18,15 +18,14 @@ from .webui import WardrobeWebServer
 
 _MAX_IMAGE_SIZE_MB = 10
 _MAX_DESCRIPTION_LEN = 2000
-_GITEE_IMAGE_TOOLS = frozenset({"gitee_draw_image", "gitee_edit_image", "aiimg_generate"})
-_AIIMG_IMAGE_TOOLS = frozenset({"aiimg_draw", "aiimg_edit", "aiimg_generate"})
+_AIIMG_GENERATE_TOOLS = frozenset({"aiimg_generate"})
 
 
 @register(
     "astrbot_plugin_wardrobe",
     "Inoryu7z",
     "图片衣柜管理插件，支持智能分类、语义检索和参考图接口",
-    "1.5.7",
+    "1.6.0",
 )
 class WardrobePlugin(Star):
     def __init__(self, context: Context, config: AstrBotConfig = None):
@@ -316,21 +315,20 @@ class WardrobePlugin(Star):
         return image_id, attrs
 
     async def _auto_save_aiimg_image(self, event: AstrMessageEvent, tool):
-        if not self._cfg("auto_save_gitee_enabled", False):
+        enabled = self._cfg("auto_save_aiimg_enabled")
+        if enabled is None:
+            enabled = self._cfg("auto_save_gitee_enabled", False)
+        if not enabled:
             return
 
         tool_name = getattr(tool, "name", "") or ""
-        if tool_name not in _AIIMG_IMAGE_TOOLS and tool_name not in _GITEE_IMAGE_TOOLS:
+        if tool_name not in _AIIMG_GENERATE_TOOLS:
             return
 
-        instance = None
-        for star_name in ("astrbot_plugin_aiimg", "astrbot_plugin_gitee_aiimg"):
-            star = self.context.get_registered_star(star_name)
-            if star and star.activated and star.star_cls:
-                instance = star.star_cls
-                break
-        if not instance:
+        star = self.context.get_registered_star("astrbot_plugin_aiimg")
+        if not star or not star.activated or not star.star_cls:
             return
+        instance = star.star_cls
 
         user_id = str(event.get_sender_id() or "")
         last_image_dict = getattr(instance, "_last_image_by_user", None)
@@ -345,7 +343,9 @@ class WardrobePlugin(Star):
         if not path.exists():
             return
 
-        persona = str(self._cfg("auto_save_gitee_persona", "") or "").strip()
+        persona = str(self._cfg("auto_save_aiimg_persona") or "").strip()
+        if not persona:
+            persona = str(self._cfg("auto_save_gitee_persona", "") or "").strip()
         persona = self._resolve_persona(persona)
 
         try:
@@ -413,6 +413,63 @@ class WardrobePlugin(Star):
             lines.append(f"暴露程度：{', '.join(exp_parts)}")
 
         return "\n".join(lines)
+
+    async def get_reference_image(
+        self, query: str, current_persona: str = ""
+    ) -> Optional[dict]:
+        await self._ensure_db()
+
+        primary = str(self._cfg("search_provider_id", "") or "").strip()
+        secondary = str(self._cfg("search_secondary_provider_id", "") or "").strip()
+        timeout = float(self._cfg("search_timeout_seconds", 30.0) or 30.0)
+        candidate_limit = int(self._cfg("search_candidate_limit", 20) or 20)
+
+        if not primary and not secondary:
+            logger.warning("[Wardrobe] 参考图搜索：未配置取图模型")
+            return None
+
+        resolved_persona = self._resolve_persona(current_persona)
+        persona_names = str(self._cfg("persona_names", "") or "").strip()
+
+        logger.info(
+            "[Wardrobe] 参考图搜索: query=%s exclude_persona=%s",
+            query, resolved_persona or "无",
+        )
+
+        results, search_meta = await self.searcher.search(
+            query,
+            primary_provider_id=primary,
+            secondary_provider_id=secondary,
+            timeout_seconds=timeout,
+            candidate_limit=candidate_limit,
+            max_select=1,
+            persona="",
+            persona_names=persona_names,
+            current_persona=resolved_persona,
+            exclude_current_persona=True,
+        )
+
+        if not results:
+            logger.info("[Wardrobe] 参考图搜索：未找到匹配图片（已排除当前人格）")
+            return None
+
+        best = results[0]
+        image_path = self.store.get_image_path(best["image_path"])
+        if not image_path.exists():
+            logger.warning("[Wardrobe] 参考图搜索：图片文件不存在 %s", best["image_path"])
+            return None
+
+        logger.info(
+            "[Wardrobe] 参考图搜索完成: ID=%s 描述=%s",
+            best["id"], best.get("description", "")[:100],
+        )
+
+        return {
+            "image_path": str(image_path),
+            "description": best.get("description", ""),
+            "persona": best.get("persona", ""),
+            "image_id": best["id"],
+        }
 
     async def _do_search_image(
         self, event: AstrMessageEvent, query: str, persona: str = ""

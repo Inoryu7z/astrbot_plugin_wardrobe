@@ -69,15 +69,15 @@
     "type": "string",
     "default": ""
   },
-  "auto_save_gitee_enabled": {
-    "description": "gitee 生图自动存图",
-    "hint": "开启后，当 gitee_aiimg 插件生成图片时，衣橱图鉴会自动将图片存入衣柜库",
+  "auto_save_aiimg_enabled": {
+    "description": "AiImg 生图自动存图",
+    "hint": "开启后，当 AiImg 插件生成自拍图片时，衣橱图鉴会自动将图片存入衣柜库",
     "type": "bool",
     "default": false
   },
-  "auto_save_gitee_persona": {
-    "description": "gitee 自动存图人格",
-    "hint": "gitee 自动存图时使用的人格名，需在人格名称列表中已配置；留空则不指定人格",
+  "auto_save_aiimg_persona": {
+    "description": "AiImg 自动存图人格",
+    "hint": "AiImg 自动存图时使用的人格名，需在人格名称列表中已配置；留空则不指定人格",
     "type": "string",
     "default": ""
   },
