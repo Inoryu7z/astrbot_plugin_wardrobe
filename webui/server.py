@@ -184,13 +184,14 @@ class WardrobeWebServer:
 
             persona = request.form.get("persona", "")
             persona = self.plugin._resolve_persona(persona)
+            description = request.form.get("description", "")
 
             max_size = int(self.plugin._cfg("max_image_size_mb", 10) or 10)
             if len(image_bytes) > max_size * 1024 * 1024:
                 return jsonify({"error": f"图片过大，限制{max_size}MB"}), 400
 
             image_id, attrs = await self.plugin._save_image_from_bytes(
-                image_bytes, persona=persona, created_by="webui"
+                image_bytes, persona=persona, created_by="webui", user_description=description
             )
 
             if not image_id:
@@ -226,6 +227,8 @@ class WardrobeWebServer:
             personas = [n.strip() for n in persona_names.replace("，", ",").split(",") if n.strip()] if persona_names else []
 
             pools = self.plugin.get_merged_pools()
+            logger.info("[Wardrobe] /api/filters pools keys: %s", list(pools.keys()))
+            logger.info("[Wardrobe] /api/filters style count: %d, shot_size count: %d", len(pools.get("style", [])), len(pools.get("shot_size", [])))
 
             return jsonify({
                 "categories": list(stats.get("by_category", {}).keys()),
