@@ -58,37 +58,24 @@ class WardrobeDatabase:
     def __init__(self, data_dir: Path):
         self.db_path = data_dir / "wardrobe.db"
         self._lock = asyncio.Lock()
-        self._db: Optional[aiosqlite.Connection] = None
 
     async def init(self):
         self.db_path.parent.mkdir(parents=True, exist_ok=True)
-        self._db = await aiosqlite.connect(self.db_path)
-        self._db.row_factory = aiosqlite.Row
         async with self._lock:
-            await self._db.executescript(_CREATE_TABLE_SQL)
-            await self._db.executescript(_CREATE_INDEX_SQL)
-            for col, default in [
-                ("persona", "TEXT DEFAULT ''"),
-                ("created_by", "TEXT DEFAULT ''"),
-                ("user_tags", "TEXT DEFAULT ''"),
-            ]:
-                try:
-                    await self._db.execute(f"ALTER TABLE images ADD COLUMN {col} {default}")
-                except aiosqlite.OperationalError as e:
-                    if "duplicate column" not in str(e).lower():
-                        logger.warning("[Wardrobe] ALTER TABLE 添加列 %s 失败: %s", col, e)
-            await self._db.commit()
+            async with aiosqlite.connect(self.db_path) as db:
+                await db.executescript(_CREATE_TABLE_SQL)
+                await db.executescript(_CREATE_INDEX_SQL)
+                for col, default in [
+                    ("persona", "TEXT DEFAULT ''"),
+                    ("created_by", "TEXT DEFAULT ''"),
+                    ("user_tags", "TEXT DEFAULT ''"),
+                ]:
+                    try:
+                        await db.execute(f"ALTER TABLE images ADD COLUMN {col} {default}")
+                    except Exception:
+                        pass
+                await db.commit()
         logger.info("[Wardrobe] 数据库初始化完成")
-
-    async def close(self):
-        if self._db:
-            await self._db.close()
-            self._db = None
-
-    def _get_db(self) -> aiosqlite.Connection:
-        if self._db is None:
-            raise RuntimeError("[Wardrobe] 数据库未初始化，请先调用 init()")
-        return self._db
 
     async def add_image(
         self,
@@ -117,55 +104,56 @@ class WardrobeDatabase:
     ) -> str:
         now = datetime.now(timezone.utc).isoformat()
         image_id = str(uuid.uuid4())
-        db = self._get_db()
         async with self._lock:
-            await db.execute(
-                """INSERT INTO images (
-                    id, category, style, clothing_type, exposure_level,
-                    scene, atmosphere, pose_type, body_orientation,
-                    dynamic_level, action_style, shot_size, camera_angle,
-                    expression, color_tone, composition, background,
-                    description, user_tags, persona, image_path, created_at, updated_at, created_by
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
-                (
-                    image_id,
-                    category,
-                    json.dumps(style, ensure_ascii=False),
-                    clothing_type,
-                    exposure_level,
-                    json.dumps(scene, ensure_ascii=False),
-                    json.dumps(atmosphere, ensure_ascii=False),
-                    pose_type,
-                    body_orientation,
-                    dynamic_level,
-                    json.dumps(action_style, ensure_ascii=False),
-                    shot_size,
-                    camera_angle,
-                    expression,
-                    color_tone,
-                    composition,
-                    background,
-                    description,
-                    user_tags,
-                    persona,
-                    image_path,
-                    now,
-                    now,
-                    created_by,
-                ),
-            )
-            await db.commit()
+            async with aiosqlite.connect(self.db_path) as db:
+                await db.execute(
+                    """INSERT INTO images (
+                        id, category, style, clothing_type, exposure_level,
+                        scene, atmosphere, pose_type, body_orientation,
+                        dynamic_level, action_style, shot_size, camera_angle,
+                        expression, color_tone, composition, background,
+                        description, user_tags, persona, image_path, created_at, updated_at, created_by
+                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+                    (
+                        image_id,
+                        category,
+                        json.dumps(style, ensure_ascii=False),
+                        clothing_type,
+                        exposure_level,
+                        json.dumps(scene, ensure_ascii=False),
+                        json.dumps(atmosphere, ensure_ascii=False),
+                        pose_type,
+                        body_orientation,
+                        dynamic_level,
+                        json.dumps(action_style, ensure_ascii=False),
+                        shot_size,
+                        camera_angle,
+                        expression,
+                        color_tone,
+                        composition,
+                        background,
+                        description,
+                        user_tags,
+                        persona,
+                        image_path,
+                        now,
+                        now,
+                        created_by,
+                    ),
+                )
+                await db.commit()
         return image_id
 
     async def get_image(self, image_id: str) -> Optional[dict[str, Any]]:
-        db = self._get_db()
-        async with db.execute(
-            "SELECT * FROM images WHERE id = ?", (image_id,)
-        ) as cursor:
-            row = await cursor.fetchone()
-            if row is None:
-                return None
-            return self._row_to_dict(row)
+        async with aiosqlite.connect(self.db_path) as db:
+            db.row_factory = aiosqlite.Row
+            async with db.execute(
+                "SELECT * FROM images WHERE id = ?", (image_id,)
+            ) as cursor:
+                row = await cursor.fetchone()
+                if row is None:
+                    return None
+                return self._row_to_dict(row)
 
     async def update_image(self, image_id: str, **kwargs) -> bool:
         if not kwargs:
@@ -183,23 +171,23 @@ class WardrobeDatabase:
         if not sets:
             return False
         values.append(image_id)
-        db = self._get_db()
         async with self._lock:
-            await db.execute(
-                f"UPDATE images SET {', '.join(sets)} WHERE id = ?",
-                values,
-            )
-            await db.commit()
+            async with aiosqlite.connect(self.db_path) as db:
+                await db.execute(
+                    f"UPDATE images SET {', '.join(sets)} WHERE id = ?",
+                    values,
+                )
+                await db.commit()
         return True
 
     async def delete_image(self, image_id: str) -> bool:
-        db = self._get_db()
         async with self._lock:
-            cursor = await db.execute(
-                "DELETE FROM images WHERE id = ?", (image_id,)
-            )
-            await db.commit()
-            return cursor.rowcount > 0
+            async with aiosqlite.connect(self.db_path) as db:
+                cursor = await db.execute(
+                    "DELETE FROM images WHERE id = ?", (image_id,)
+                )
+                await db.commit()
+                return cursor.rowcount > 0
 
     @staticmethod
     def _escape_like(value: str) -> str:
@@ -286,11 +274,12 @@ class WardrobeDatabase:
         params.append(limit)
         params.append(offset)
 
-        db = self._get_db()
-        sql = f"SELECT * FROM images {where_clause} ORDER BY created_at DESC LIMIT ? OFFSET ?"
-        async with db.execute(sql, params) as cursor:
-            rows = await cursor.fetchall()
-            return [self._row_to_dict(row) for row in rows]
+        async with aiosqlite.connect(self.db_path) as db:
+            db.row_factory = aiosqlite.Row
+            sql = f"SELECT * FROM images {where_clause} ORDER BY created_at DESC LIMIT ? OFFSET ?"
+            async with db.execute(sql, params) as cursor:
+                rows = await cursor.fetchall()
+                return [self._row_to_dict(row) for row in rows]
 
     async def search_count(
         self,
@@ -315,9 +304,9 @@ class WardrobeDatabase:
         if conditions:
             where_clause = "WHERE " + " AND ".join(conditions)
 
-        db = self._get_db()
-        async with db.execute(f"SELECT COUNT(*) FROM images {where_clause}", params) as cursor:
-            return (await cursor.fetchone())[0]
+        async with aiosqlite.connect(self.db_path) as db:
+            async with db.execute(f"SELECT COUNT(*) FROM images {where_clause}", params) as cursor:
+                return (await cursor.fetchone())[0]
 
     async def search_by_description(
         self,
@@ -341,24 +330,25 @@ class WardrobeDatabase:
         params.append(limit)
         params.append(offset)
 
-        db = self._get_db()
-        sql = f"SELECT * FROM images {where_clause} ORDER BY created_at DESC LIMIT ? OFFSET ?"
-        async with db.execute(sql, params) as cursor:
-            rows = await cursor.fetchall()
-            return [self._row_to_dict(row) for row in rows]
+        async with aiosqlite.connect(self.db_path) as db:
+            db.row_factory = aiosqlite.Row
+            sql = f"SELECT * FROM images {where_clause} ORDER BY created_at DESC LIMIT ? OFFSET ?"
+            async with db.execute(sql, params) as cursor:
+                rows = await cursor.fetchall()
+                return [self._row_to_dict(row) for row in rows]
 
     async def get_stats(self) -> dict[str, Any]:
-        db = self._get_db()
-        async with db.execute("SELECT COUNT(*) FROM images") as cursor:
-            total = (await cursor.fetchone())[0]
-        async with db.execute(
-            "SELECT category, COUNT(*) FROM images GROUP BY category"
-        ) as cursor:
-            category_counts = dict(await cursor.fetchall())
-        async with db.execute(
-            "SELECT exposure_level, COUNT(*) FROM images GROUP BY exposure_level"
-        ) as cursor:
-            exposure_counts = dict(await cursor.fetchall())
+        async with aiosqlite.connect(self.db_path) as db:
+            async with db.execute("SELECT COUNT(*) FROM images") as cursor:
+                total = (await cursor.fetchone())[0]
+            async with db.execute(
+                "SELECT category, COUNT(*) FROM images GROUP BY category"
+            ) as cursor:
+                category_counts = dict(await cursor.fetchall())
+            async with db.execute(
+                "SELECT exposure_level, COUNT(*) FROM images GROUP BY exposure_level"
+            ) as cursor:
+                exposure_counts = dict(await cursor.fetchall())
         return {
             "total": total,
             "by_category": category_counts,
@@ -385,11 +375,12 @@ class WardrobeDatabase:
         if conditions:
             where_clause = "WHERE " + " AND ".join(conditions)
         params.extend([limit, offset])
-        db = self._get_db()
-        sql = f"SELECT * FROM images {where_clause} ORDER BY created_at DESC LIMIT ? OFFSET ?"
-        async with db.execute(sql, params) as cursor:
-            rows = await cursor.fetchall()
-            return [self._row_to_dict(row) for row in rows]
+        async with aiosqlite.connect(self.db_path) as db:
+            db.row_factory = aiosqlite.Row
+            sql = f"SELECT * FROM images {where_clause} ORDER BY created_at DESC LIMIT ? OFFSET ?"
+            async with db.execute(sql, params) as cursor:
+                rows = await cursor.fetchall()
+                return [self._row_to_dict(row) for row in rows]
 
     @staticmethod
     def _row_to_dict(row: aiosqlite.Row) -> dict[str, Any]:

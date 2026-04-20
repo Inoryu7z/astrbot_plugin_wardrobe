@@ -89,8 +89,8 @@
     }
   },
   "auto_save_aiimg_enabled": {
-    "description": "AiImg 生图自动存图",
-    "hint": "开启后，当 AiImg 插件生成自拍图片时，衣橱图鉴会自动将图片存入当前对话人格的图库",
+    "description": "AiImg 自拍自动存图",
+    "hint": "开启后，当 AiImg 插件生成自拍图片时，衣橱图鉴会自动将图片存入当前对话人格的图库。仅保存自拍模式，文生图/改图不会自动存入。",
     "type": "bool",
     "default": false
   },

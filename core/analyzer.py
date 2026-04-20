@@ -1,5 +1,4 @@
 import asyncio
-import os
 import tempfile
 import time
 from pathlib import Path
@@ -91,9 +90,12 @@ class ImageAnalyzer:
         temp_path = ""
         try:
             temp_fd, temp_path = tempfile.mkstemp(suffix=f".{ext}")
-            os.close(temp_fd)
-            with open(temp_path, "wb") as f:
-                f.write(image_bytes)
+            try:
+                import os
+                os.write(temp_fd, image_bytes)
+            finally:
+                import os
+                os.close(temp_fd)
             resolved_path = str(Path(temp_path).resolve())
         except Exception as e:
             logger.warning("[Wardrobe] 保存临时图片失败: %s", e)
@@ -133,6 +135,7 @@ class ImageAnalyzer:
     @staticmethod
     def _cleanup_temp(temp_path: str):
         try:
+            import os
             if os.path.exists(temp_path):
                 os.remove(temp_path)
         except Exception:
