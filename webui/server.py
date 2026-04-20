@@ -199,33 +199,38 @@ class WardrobeWebServer:
 
         @app.route("/api/images/upload", methods=["POST"])
         async def api_image_upload():
-            await self.plugin._ensure_db()
-            files = await request.files
-            file = files.get("image")
-            if not file:
-                return jsonify({"error": "未选择图片"}), 400
+            try:
+                await self.plugin._ensure_db()
+                files = await request.files
+                file = files.get("image")
+                if not file:
+                    return jsonify({"error": "未选择图片"}), 400
 
-            image_bytes = file.read()
-            if not image_bytes:
-                return jsonify({"error": "图片为空"}), 400
+                image_bytes = file.read()
+                if not image_bytes:
+                    return jsonify({"error": "图片为空"}), 400
 
-            form = await request.form
-            persona = form.get("persona", "")
-            persona = self.plugin._resolve_persona(persona)
-            description = form.get("description", "")
+                form = await request.form
+                persona = form.get("persona", "")
+                persona = self.plugin._resolve_persona(persona)
+                description = form.get("description", "")
 
-            max_size = int(self.plugin._cfg("max_image_size_mb", 10) or 10)
-            if len(image_bytes) > max_size * 1024 * 1024:
-                return jsonify({"error": f"图片过大，限制{max_size}MB"}), 400
+                max_size = int(self.plugin._cfg("max_image_size_mb", 10) or 10)
+                if len(image_bytes) > max_size * 1024 * 1024:
+                    return jsonify({"error": f"图片过大，限制{max_size}MB"}), 400
 
-            image_id, attrs = await self.plugin._save_image_from_bytes(
-                image_bytes, persona=persona, created_by="webui", user_description=description
-            )
+                logger.info("[Wardrobe] WebUI上传图片: 大小=%.2fKB 人格=%s 描述=%s", len(image_bytes) / 1024, persona or "无", description or "无")
+                image_id, attrs = await self.plugin._save_image_from_bytes(
+                    image_bytes, persona=persona, created_by="webui", user_description=description
+                )
 
-            if not image_id:
-                return jsonify({"error": "保存失败"}), 500
+                if not image_id:
+                    return jsonify({"error": "保存失败，请检查存图模型是否已配置"}), 500
 
-            return jsonify({"success": True, "image_id": image_id})
+                return jsonify({"success": True, "image_id": image_id})
+            except Exception as e:
+                logger.error("[Wardrobe] WebUI上传异常: %s", e, exc_info=True)
+                return jsonify({"error": f"服务器内部错误: {e}"}), 500
 
         @app.route("/api/search")
         async def api_search():

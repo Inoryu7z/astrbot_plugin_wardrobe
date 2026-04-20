@@ -28,7 +28,12 @@
     opts.headers=headers;
     const resp=await fetch(path,opts);
     if(resp.status===401){localStorage.removeItem('wardrobe_token');window.location.href='/login';return null;}
-    if(!resp.ok){console.error('[Wardrobe] API error:',resp.status,resp.statusText,path);return null;}
+    if(!resp.ok){
+      let errMsg=resp.status+' '+resp.statusText;
+      try{const d=await resp.json();if(d.error)errMsg=d.error;}catch(e){}
+      console.error('[Wardrobe] API error:',errMsg,path);
+      return {ok:false,error:errMsg};
+    }
     return resp;
   }
 
@@ -288,7 +293,8 @@
       fd.append('description',$('#uploadDescription').value);
       try{
         const resp=await api('/api/images/upload',{method:'POST',body:fd});
-        if(!resp){toast('上传失败','error');$('#uploadStatus').textContent='服务器错误';submitBtn.disabled=false;return;}
+        if(!resp){toast('上传失败','error');$('#uploadStatus').textContent='请求失败';submitBtn.disabled=false;return;}
+        if(resp.error){toast(resp.error,'error');$('#uploadStatus').textContent=resp.error;submitBtn.disabled=false;return;}
         const data=await resp.json();
         if(data.success){
           toast('上传成功，正在分析...','success');
