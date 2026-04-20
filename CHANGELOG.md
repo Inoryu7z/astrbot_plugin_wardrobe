@@ -1,3 +1,22 @@
+### v1.6.3
+
+**🔧 修复与优化**
+
+* 简化自动存图配置：删除冗余的 `auto_save_aiimg_follow_conversation` 和 `auto_save_aiimg_default_persona`，自动存图直接使用当前对话人格
+* 日志增强：存图日志增加「用户描述」字段，便于调试
+* WebUI 显示用户标签：图片详情弹窗新增 `user_tags` 字段显示
+
+### v1.6.2
+
+**🔧 修复与优化**
+
+* WebUI 端口占用自动解决：当默认端口被占用时，自动尝试递增端口（最多10个），并在日志中提示实际使用端口
+* API 错误处理增强：`/api/filters` 和 `/api/pools` 增加异常捕获，防止损坏数据导致 500 错误
+* 前端错误处理：`api()` 函数增加非 200 状态码检查，避免静默失败
+* 数据库初始化优化：增加 `_db_initialized` 标志，避免每次请求重复执行 `ALTER TABLE`
+* 文件 I/O 异步化：`_load_custom_pools` 和 `save_custom_pools` 改为异步，避免阻塞事件循环
+* 数据校验：自定义池子 JSON 数据增加类型校验，防止非 list 值导致崩溃
+
 ### v1.6.1
 
 **🔧 配置界面优化**
