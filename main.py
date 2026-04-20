@@ -273,26 +273,40 @@ class WardrobePlugin(Star):
         if category not in ("人物", "衣服"):
             category = "人物"
 
+        def _ensure_list(v):
+            if isinstance(v, list):
+                return v
+            if isinstance(v, str) and v:
+                return [v]
+            return []
+
+        def _ensure_str(v):
+            if isinstance(v, str):
+                return v
+            if isinstance(v, list) and v:
+                return v[0]
+            return ""
+
         filename = await self.store.save_image(image_bytes)
 
         image_id = await self.db.add_image(
             category=category,
-            style=attrs.get("style", []),
-            clothing_type=attrs.get("clothing_type", ""),
-            exposure_level=attrs.get("exposure_level", ""),
-            scene=attrs.get("scene", []),
-            atmosphere=attrs.get("atmosphere", []),
-            pose_type=attrs.get("pose_type", ""),
-            body_orientation=attrs.get("body_orientation", ""),
-            dynamic_level=attrs.get("dynamic_level", ""),
-            action_style=attrs.get("action_style", []),
-            shot_size=attrs.get("shot_size", ""),
-            camera_angle=attrs.get("camera_angle", ""),
-            expression=attrs.get("expression", ""),
-            color_tone=attrs.get("color_tone", ""),
-            composition=attrs.get("composition", ""),
-            background=attrs.get("background", ""),
-            description=attrs.get("description", ""),
+            style=_ensure_list(attrs.get("style")),
+            clothing_type=_ensure_str(attrs.get("clothing_type")),
+            exposure_level=_ensure_str(attrs.get("exposure_level")),
+            scene=_ensure_list(attrs.get("scene")),
+            atmosphere=_ensure_list(attrs.get("atmosphere")),
+            pose_type=_ensure_str(attrs.get("pose_type")),
+            body_orientation=_ensure_str(attrs.get("body_orientation")),
+            dynamic_level=_ensure_str(attrs.get("dynamic_level")),
+            action_style=_ensure_list(attrs.get("action_style")),
+            shot_size=_ensure_str(attrs.get("shot_size")),
+            camera_angle=_ensure_str(attrs.get("camera_angle")),
+            expression=_ensure_str(attrs.get("expression")),
+            color_tone=_ensure_str(attrs.get("color_tone")),
+            composition=_ensure_str(attrs.get("composition")),
+            background=_ensure_str(attrs.get("background")),
+            description=_ensure_str(attrs.get("description")),
             user_tags=user_description,
             image_path=filename,
             created_by=created_by,
