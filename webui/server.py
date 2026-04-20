@@ -55,6 +55,18 @@ class WardrobeWebServer:
             static_url_path="/static",
         )
         app.secret_key = secrets.token_hex(32)
+        app.config["MAX_CONTENT_LENGTH"] = 64 * 1024 * 1024
+        app.config["BODY_TIMEOUT"] = 300
+
+        @app.errorhandler(Exception)
+        async def handle_exception(e):
+            logger.error("[Wardrobe] WebUI未捕获异常: %s", e, exc_info=True)
+            return jsonify({"error": f"服务器内部错误: {e}"}), 500
+
+        @app.errorhandler(413)
+        async def handle_413(e):
+            logger.warning("[Wardrobe] WebUI请求体过大: %s", e)
+            return jsonify({"error": "上传文件过大，请压缩后重试"}), 413
 
         @app.before_request
         async def auth_check():
