@@ -42,6 +42,13 @@ class WardrobePlugin(Star):
         self.data_dir = data_dir
         self._webui: Optional[WardrobeWebServer] = None
 
+        if self._cfg("webui_enabled", False):
+            try:
+                loop = asyncio.get_running_loop()
+                loop.create_task(self._start_webui())
+            except RuntimeError:
+                pass
+
         logger.info("[Wardrobe] 插件初始化完成")
 
     async def _start_webui(self):
@@ -129,7 +136,7 @@ class WardrobePlugin(Star):
         await self._ensure_db()
         logger.info("[Wardrobe] 数据库已就绪")
 
-        if self._cfg("webui_enabled", False):
+        if self._cfg("webui_enabled", False) and not self._webui:
             try:
                 await self._start_webui()
             except Exception as e:
