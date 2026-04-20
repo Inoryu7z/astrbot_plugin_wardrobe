@@ -111,9 +111,11 @@ class WardrobePlugin(Star):
 
     @filter.command("存图")
     @filter.permission_type(filter.PermissionType.ADMIN)
-    async def save_image_command(self, event: AstrMessageEvent, persona: str = ""):
-        '''保存图片到衣柜库（管理员专用），用法：/存图 [人格名]'''
-        result = await self._do_save_image(event, user_description="", persona=persona)
+    async def save_image_command(self, event: AstrMessageEvent, description: str = ""):
+        '''保存图片到衣柜库（管理员专用），用法：/存图 [描述或人格名]'''
+        persona = self._match_configured_persona(description)
+        user_description = "" if persona else description
+        result = await self._do_save_image(event, user_description=user_description, persona=persona)
         yield event.plain_result(result)
 
     @filter.command("删图")
@@ -526,6 +528,22 @@ class WardrobePlugin(Star):
                 return await f.read()
 
         return None
+
+    def _match_configured_persona(self, text: str) -> str:
+        text = text.strip()
+        if not text:
+            return ""
+        configured = str(self._cfg("persona_names", "") or "").strip()
+        if not configured:
+            return ""
+        for entry in self._split_persona_entries(configured):
+            entry = entry.strip()
+            if not entry:
+                continue
+            canonical, aliases = self._parse_persona_entry(entry)
+            if text == canonical or text in aliases:
+                return canonical
+        return ""
 
     def _resolve_persona(self, persona: str) -> str:
         persona = persona.strip()
