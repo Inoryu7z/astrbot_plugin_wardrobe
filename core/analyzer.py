@@ -87,6 +87,7 @@ class ImageAnalyzer:
         mime = detect_image_mime(image_bytes)
         ext = mime_to_ext(mime)
 
+        temp_path = ""
         try:
             temp_fd, temp_path = tempfile.mkstemp(suffix=f".{ext}")
             try:
@@ -98,6 +99,7 @@ class ImageAnalyzer:
             resolved_path = str(Path(temp_path).resolve())
         except Exception as e:
             logger.warning("[Wardrobe] 保存临时图片失败: %s", e)
+            self._cleanup_temp(temp_path)
             return None
 
         prompt_text = "请分析这张图片的属性。"

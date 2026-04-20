@@ -199,6 +199,7 @@ class WardrobeDatabase:
         atmosphere: Optional[list[str]] = None,
         persona: str = "",
         exclude_persona: str = "",
+        shot_size: Optional[str] = None,
         limit: int = 20,
         offset: int = 0,
     ) -> list[dict[str, Any]]:
@@ -220,6 +221,10 @@ class WardrobeDatabase:
         if exclude_persona:
             conditions.append("persona != ?")
             params.append(exclude_persona)
+
+        if shot_size:
+            conditions.append("shot_size = ?")
+            params.append(shot_size)
 
         if style:
             style_conditions = []
@@ -266,6 +271,7 @@ class WardrobeDatabase:
         atmosphere: Optional[list[str]] = None,
         persona: str = "",
         exclude_persona: str = "",
+        shot_size: Optional[str] = None,
     ) -> int:
         conditions = []
         params: list[Any] = []
@@ -285,6 +291,10 @@ class WardrobeDatabase:
         if exclude_persona:
             conditions.append("persona != ?")
             params.append(exclude_persona)
+
+        if shot_size:
+            conditions.append("shot_size = ?")
+            params.append(shot_size)
 
         if style:
             style_conditions = []
@@ -377,6 +387,7 @@ class WardrobeDatabase:
         self,
         *,
         category: Optional[str] = None,
+        shot_size: Optional[str] = None,
         limit: int = 50,
         offset: int = 0,
     ) -> list[dict[str, Any]]:
@@ -385,6 +396,9 @@ class WardrobeDatabase:
         if category:
             conditions.append("category = ?")
             params.append(category)
+        if shot_size:
+            conditions.append("shot_size = ?")
+            params.append(shot_size)
         where_clause = ""
         if conditions:
             where_clause = "WHERE " + " AND ".join(conditions)

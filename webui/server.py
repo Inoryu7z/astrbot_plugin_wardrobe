@@ -132,6 +132,7 @@ class WardrobeWebServer:
                     style=style_list,
                     scene=scene_list,
                     atmosphere=atmosphere_list,
+                    shot_size=shot_size or None,
                     limit=per_page,
                     offset=offset,
                 )
@@ -141,16 +142,14 @@ class WardrobeWebServer:
                     style=style_list,
                     scene=scene_list,
                     atmosphere=atmosphere_list,
+                    shot_size=shot_size or None,
                 )
             else:
                 images = await self.plugin.db.list_images(
-                    category=category or None, limit=per_page, offset=offset
+                    category=category or None, shot_size=shot_size or None, limit=per_page, offset=offset
                 )
                 total_stats = await self.plugin.db.get_stats()
                 total = total_stats["total"]
-
-            if shot_size:
-                images = [img for img in images if shot_size == (img.get("shot_size") or "")]
 
             result = {
                 "images": images,
@@ -251,7 +250,12 @@ class WardrobeWebServer:
             await self.plugin._ensure_db()
             stats = await self.plugin.db.get_stats()
             persona_names = str(self.plugin._cfg("persona_names", "") or "").strip()
-            personas = [n.strip() for n in persona_names.replace("，", ",").split(",") if n.strip()] if persona_names else []
+            personas = []
+            if persona_names:
+                for entry in self.plugin._split_persona_entries(persona_names):
+                    canonical, _ = self.plugin._parse_persona_entry(entry.strip())
+                    if canonical:
+                        personas.append(canonical)
 
             pools = self.plugin.get_merged_pools()
             logger.info("[Wardrobe] /api/filters pools keys: %s", list(pools.keys()))
