@@ -25,7 +25,7 @@ _AIIMG_GENERATE_TOOLS = frozenset({"aiimg_generate"})
     "astrbot_plugin_wardrobe",
     "Inoryu7z",
     "图片衣柜管理插件，支持智能分类、语义检索和参考图接口",
-    "1.6.3",
+    "1.6.4",
 )
 class WardrobePlugin(Star):
     def __init__(self, context: Context, config: AstrBotConfig = None):
@@ -41,13 +41,6 @@ class WardrobePlugin(Star):
         self.searcher = ImageSearcher(context, self.db, self.store)
         self.data_dir = data_dir
         self._webui: Optional[WardrobeWebServer] = None
-
-        if self._cfg("webui_enabled", False):
-            try:
-                loop = asyncio.get_running_loop()
-                loop.create_task(self._start_webui())
-            except RuntimeError:
-                pass
 
         logger.info("[Wardrobe] 插件初始化完成")
 
