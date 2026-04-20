@@ -25,7 +25,7 @@ _AIIMG_GENERATE_TOOLS = frozenset({"aiimg_generate"})
     "astrbot_plugin_wardrobe",
     "Inoryu7z",
     "图片衣柜管理插件，支持智能分类、语义检索和参考图接口",
-    "1.6.3",
+    "1.6.4",
 )
 class WardrobePlugin(Star):
     def __init__(self, context: Context, config: AstrBotConfig = None):
@@ -166,6 +166,11 @@ class WardrobePlugin(Star):
     async def on_aiimg_tool_respond(self, event: AstrMessageEvent, tool, tool_args, tool_result):
         '''AiImg 生图工具调用后的自动存图钩子'''
         await self._auto_save_aiimg_image(event, tool)
+
+    @filter.after_message_sent()
+    async def on_after_message_sent(self, event: AstrMessageEvent):
+        '''消息发送后钩子：检测 AiImg 命令方式生成的图片并自动存图'''
+        await self._auto_save_aiimg_image(event, tool=None)
 
     @filter.llm_tool(name="save_wardrobe_image")
     async def save_wardrobe_image_tool(self, event: AstrMessageEvent, user_description: str = "", persona: str = "") -> str:
@@ -341,16 +346,18 @@ class WardrobePlugin(Star):
 
         return image_id, attrs
 
-    async def _auto_save_aiimg_image(self, event: AstrMessageEvent, tool):
+    async def _auto_save_aiimg_image(self, event: AstrMessageEvent, tool=None):
         enabled = self._cfg("auto_save_aiimg_enabled")
         if enabled is None:
             enabled = self._cfg("auto_save_gitee_enabled", False)
         if not enabled:
             return
 
-        tool_name = getattr(tool, "name", "") or ""
-        if tool_name not in _AIIMG_GENERATE_TOOLS:
-            return
+        tool_name = ""
+        if tool is not None:
+            tool_name = getattr(tool, "name", "") or ""
+            if tool_name not in _AIIMG_GENERATE_TOOLS:
+                return
 
         star = self.context.get_registered_star("astrbot_plugin_aiimg")
         if not star or not star.activated or not star.star_cls:
@@ -382,7 +389,7 @@ class WardrobePlugin(Star):
 
             logger.info(
                 "[Wardrobe] AiImg 自动存图开始，图片大小=%.2fKB 人格=%s tool=%s",
-                len(image_bytes) / 1024, persona or "无", tool_name,
+                len(image_bytes) / 1024, persona or "无", tool_name or "command",
             )
 
             image_id, attrs = await self._save_image_from_bytes(
@@ -412,23 +419,59 @@ class WardrobePlugin(Star):
 
     async def _get_current_persona_name(self, event: AstrMessageEvent) -> str | None:
         try:
-            conv_mgr = getattr(self.context, "conversation_manager", None)
-            if not conv_mgr:
-                return None
             umo = str(getattr(event, "unified_msg_origin", "") or "").strip()
             if not umo:
                 return None
-            curr_cid = await conv_mgr.get_curr_conversation_id(umo)
-            if not curr_cid:
-                return None
-            conversation = await conv_mgr.get_conversation(umo, curr_cid)
-            if not conversation:
-                return None
-            persona_id = getattr(conversation, "persona_id", None)
+
+            persona_id = None
+
+            # 优先从 conversation_manager 获取
+            conv_mgr = getattr(self.context, "conversation_manager", None)
+            if conv_mgr:
+                try:
+                    curr_cid = await conv_mgr.get_curr_conversation_id(umo)
+                    if curr_cid:
+                        conversation = await conv_mgr.get_conversation(umo, curr_cid)
+                        if conversation:
+                            persona_id = getattr(conversation, "persona_id", None)
+                except Exception as e:
+                    logger.debug("[Wardrobe] 从 conversation_manager 获取 persona_id 失败: %s", e)
+
             if persona_id:
                 return str(persona_id).strip() or None
+
+            # 回退：从 persona_manager 获取默认人格
+            persona_mgr = getattr(self.context, "persona_manager", None)
+            if persona_mgr:
+                try:
+                    persona_obj = None
+                    if hasattr(persona_mgr, "get_default_persona_v3"):
+                        persona_obj = await persona_mgr.get_default_persona_v3(umo)
+                    if persona_obj:
+                        name = self._extract_persona_name(persona_obj)
+                        if name:
+                            return name
+                except Exception as e:
+                    logger.debug("[Wardrobe] 从 persona_manager 获取默认人格失败: %s", e)
         except Exception as e:
             logger.debug("[Wardrobe] 获取当前人格失败: %s", e)
+        return None
+
+    @staticmethod
+    def _extract_persona_name(persona_obj) -> str | None:
+        if not persona_obj:
+            return None
+        if isinstance(persona_obj, dict):
+            for key in ("name", "persona_id", "id"):
+                val = persona_obj.get(key)
+                if val and str(val).strip():
+                    return str(val).strip()
+            return None
+        for attr in ("name", "persona_id", "id"):
+            if hasattr(persona_obj, attr):
+                val = getattr(persona_obj, attr, None)
+                if val and str(val).strip():
+                    return str(val).strip()
         return None
 
     async def _do_delete_image(self, image_id: str) -> str:

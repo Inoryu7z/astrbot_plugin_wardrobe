@@ -1,3 +1,11 @@
+### v1.6.4
+
+**🔧 修复与优化**
+
+* 修复人格获取失败问题：`_get_current_persona_name` 增加 `persona_manager` 回退逻辑，当 `conversation_manager` 获取不到人格时，尝试从 `persona_manager.get_default_persona_v3()` 获取
+* 修复 `/自拍` 命令不自动存图问题：新增 `after_message_sent` 钩子，捕获命令方式生成的图片并自动存图（原仅支持 LLM 工具调用路径）
+* 增加人格获取调试日志，便于排查人格识别问题
+
 ### v1.6.3
 
 **🔧 修复与优化**
