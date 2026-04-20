@@ -23,8 +23,8 @@ class WardrobeWebServer:
     def __init__(self, plugin, config: dict):
         self.plugin = plugin
         self.config = config
-        self.host = str(config.get("webui_host", "127.0.0.1"))
-        self.port = int(config.get("webui_port", 18921))
+        self.host = str(plugin._cfg("webui_host", "127.0.0.1") or "127.0.0.1")
+        self.port = int(plugin._cfg("webui_port", 18921) or 18921)
         self._tokens: dict[str, float] = {}
         self._server_task: asyncio.Task | None = None
         self._web_dir = Path(__file__).parent.parent / "web"
