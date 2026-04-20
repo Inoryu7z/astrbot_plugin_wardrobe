@@ -277,6 +277,7 @@
       const fd=new FormData();
       fd.append('image',selectedFile);
       fd.append('persona',$('#uploadPersona').value);
+      fd.append('description',$('#uploadDescription').value);
       try{
         const resp=await api('/api/images/upload',{method:'POST',body:fd});
         const data=await resp.json();

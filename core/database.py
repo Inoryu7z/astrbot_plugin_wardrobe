@@ -29,6 +29,7 @@ CREATE TABLE IF NOT EXISTS images (
     composition TEXT DEFAULT '',
     background TEXT DEFAULT '',
     description TEXT DEFAULT '',
+    user_tags TEXT DEFAULT '',
     image_path TEXT NOT NULL,
     created_at TEXT NOT NULL,
     updated_at TEXT NOT NULL,
@@ -49,7 +50,7 @@ _UPDATABLE_FIELDS = frozenset({
     "scene", "atmosphere", "pose_type", "body_orientation",
     "dynamic_level", "action_style", "shot_size", "camera_angle",
     "expression", "color_tone", "composition", "background",
-    "description", "image_path", "updated_at",
+    "description", "user_tags", "image_path", "updated_at",
 })
 
 
@@ -91,6 +92,7 @@ class WardrobeDatabase:
         composition: str,
         background: str,
         description: str,
+        user_tags: str = "",
         persona: str = "",
         image_path: str,
         created_by: str = "",
@@ -105,8 +107,8 @@ class WardrobeDatabase:
                         scene, atmosphere, pose_type, body_orientation,
                         dynamic_level, action_style, shot_size, camera_angle,
                         expression, color_tone, composition, background,
-                        description, persona, image_path, created_at, updated_at, created_by
-                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+                        description, user_tags, persona, image_path, created_at, updated_at, created_by
+                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
                     (
                         image_id,
                         category,
@@ -126,6 +128,7 @@ class WardrobeDatabase:
                         composition,
                         background,
                         description,
+                        user_tags,
                         persona,
                         image_path,
                         now,

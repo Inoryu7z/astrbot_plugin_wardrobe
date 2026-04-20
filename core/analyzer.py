@@ -48,7 +48,13 @@ ANALYZE_SYSTEM_PROMPT = """# 角色
 1. category 判断：如果图片中有人物（脸部、身体），则填"人物"；否则填"衣服"
 2. 如果 category 是"衣服"，则 pose_type、body_orientation、dynamic_level、action_style、shot_size、camera_angle、expression 填空字符串或空数组
 3. description 必须详细，包含所有可见的视觉特征，以便后续语义检索
-4. 只输出 JSON，不要输出解释或其他内容"""
+4. 只输出 JSON，不要输出解释或其他内容
+
+# 用户描述处理
+如果用户提供了描述，请参考以下规则：
+1. 用户描述中可能包含服装/单品的专有名称，请原样保留这些名称，不要尝试解释或发散
+2. 用户描述中的信息应融入 description 字段，但保持专有名称不变
+3. 如果用户描述提到具体特征，请在描述中体现这些特征"""
 
 
 class ImageAnalyzer:
@@ -96,7 +102,7 @@ class ImageAnalyzer:
 
         prompt_text = "请分析这张图片的属性。"
         if user_description.strip():
-            prompt_text += f"\n\n用户提供的描述：{user_description.strip()}\n请将用户描述融入 description 字段中。"
+            prompt_text += f"\n\n【用户描述】{user_description.strip()}\n\n请参考用户描述进行分析，注意：用户描述中的专有名词（如服装名称）请原样保留，不要发散解释。"
 
         providers = [p for p in [primary_provider_id, secondary_provider_id] if p.strip()]
         if not providers:
