@@ -249,13 +249,18 @@ class WardrobeWebServer:
         @app.route("/api/filters")
         async def api_filters():
             await self.plugin._ensure_db()
-            stats = await self.plugin.db.get_stats()
+            try:
+                stats = await self.plugin.db.get_stats()
+            except Exception:
+                stats = {"total": 0, "by_category": {}, "by_exposure": {}}
             personas = self.plugin._get_personas_config()
             persona_names = [p.get("name", "") for p in personas if p.get("name")]
 
-            pools = self.plugin.get_merged_pools()
-            logger.info("[Wardrobe] /api/filters pools keys: %s", list(pools.keys()))
-            logger.info("[Wardrobe] /api/filters style count: %d, shot_size count: %d", len(pools.get("style", [])), len(pools.get("shot_size", [])))
+            try:
+                pools = await self.plugin.get_merged_pools()
+            except Exception as e:
+                logger.warning("[Wardrobe] /api/filters get_merged_pools 失败: %s", e)
+                pools = {}
 
             return jsonify({
                 "categories": list(stats.get("by_category", {}).keys()),
@@ -276,7 +281,11 @@ class WardrobeWebServer:
 
         @app.route("/api/pools", methods=["GET"])
         async def api_get_pools():
-            pools = self.plugin.get_merged_pools()
+            try:
+                pools = await self.plugin.get_merged_pools()
+            except Exception as e:
+                logger.warning("[Wardrobe] /api/pools get_merged_pools 失败: %s", e)
+                pools = {}
             return jsonify({"pools": {k: list(v) for k, v in pools.items()}})
 
         @app.route("/api/pools", methods=["POST"])
@@ -289,7 +298,7 @@ class WardrobeWebServer:
             if not pool_key or not action:
                 return jsonify({"error": "参数不完整"}), 400
 
-            pools = self.plugin.get_merged_pools()
+            pools = await self.plugin.get_merged_pools()
 
             if action == "add_value":
                 if not value:
@@ -319,48 +328,59 @@ class WardrobeWebServer:
         return app
 
     async def start(self):
-        app = self._create_app()
-        config = HypercornConfig()
-        config.bind = [f"{self.host}:{self.port}"]
-        config.graceful_timeout = 5
-
         self._shutdown_event.clear()
-        logger.info("[Wardrobe] WebUI 启动中: %s:%d", self.host, self.port)
 
-        max_retries = 3
-        for attempt in range(max_retries):
-            try:
-                self._server_task = asyncio.create_task(
-                    hypercorn.asyncio.serve(
-                        app, config,
-                        shutdown_trigger=self._shutdown_event.wait,
-                    )
+        base_port = self.port
+        max_port_attempts = 10
+
+        for port_offset in range(max_port_attempts):
+            candidate_port = base_port + port_offset
+            config = HypercornConfig()
+            config.bind = [f"{self.host}:{candidate_port}"]
+            config.graceful_timeout = 5
+
+            started = asyncio.Event()
+
+            async def _shutdown_trigger():
+                await self._shutdown_event.wait()
+
+            app = self._create_app()
+
+            self._server_task = asyncio.create_task(
+                hypercorn.asyncio.serve(
+                    app, config,
+                    shutdown_trigger=_shutdown_trigger,
                 )
-            except OSError:
-                if attempt < max_retries - 1:
-                    logger.warning("[Wardrobe] 端口 %d 被占用，1秒后重试 (%d/%d)", self.port, attempt + 1, max_retries)
-                    await asyncio.sleep(1)
-                    continue
-                logger.error("[Wardrobe] WebUI 启动失败: 端口 %d 被占用", self.port)
-                return
+            )
 
-            await asyncio.sleep(0.5)
+            await asyncio.sleep(0.8)
 
             if self._server_task.done():
                 try:
                     self._server_task.result()
                 except Exception as e:
-                    if attempt < max_retries - 1 and "Address already in use" in str(e):
-                        logger.warning("[Wardrobe] 端口 %d 被占用，1秒后重试 (%d/%d)", self.port, attempt + 1, max_retries)
-                        await asyncio.sleep(1)
+                    if "Address already in use" in str(e) or isinstance(e, OSError):
+                        logger.warning(
+                            "[Wardrobe] 端口 %d 被占用，尝试下一个端口", candidate_port
+                        )
                         continue
                     logger.error("[Wardrobe] WebUI 启动失败: %s", e)
                     return
+            else:
+                self.port = candidate_port
+                logger.info("[Wardrobe] WebUI 已启动: http://%s:%d", self.host, self.port)
+                if self.password == "wardrobe":
+                    logger.warning("[Wardrobe] WebUI 使用默认密码 'wardrobe'，请及时修改！")
+                if candidate_port != base_port:
+                    logger.info(
+                        "[Wardrobe] 注意：原端口 %d 被占用，实际使用端口 %d", base_port, candidate_port
+                    )
+                return
 
-            logger.info("[Wardrobe] WebUI 已启动: http://%s:%d", self.host, self.port)
-            if self.password == "wardrobe":
-                logger.warning("[Wardrobe] WebUI 使用默认密码 'wardrobe'，请及时修改！")
-            return
+        logger.error(
+            "[Wardrobe] WebUI 启动失败: 端口 %d-%d 均被占用",
+            base_port, base_port + max_port_attempts - 1,
+        )
 
     async def stop(self):
         self._shutdown_event.set()

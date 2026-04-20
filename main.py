@@ -25,7 +25,7 @@ _AIIMG_GENERATE_TOOLS = frozenset({"aiimg_generate"})
     "astrbot_plugin_wardrobe",
     "Inoryu7z",
     "图片衣柜管理插件，支持智能分类、语义检索和参考图接口",
-    "1.6.1",
+    "1.6.2",
 )
 class WardrobePlugin(Star):
     def __init__(self, context: Context, config: AstrBotConfig = None):
@@ -40,6 +40,7 @@ class WardrobePlugin(Star):
         self.analyzer = ImageAnalyzer(context, plugin=self)
         self.searcher = ImageSearcher(context, self.db, self.store)
         self.data_dir = data_dir
+        self._db_initialized = False
         self._webui: Optional[WardrobeWebServer] = None
 
         if self._cfg("webui_enabled", False):
@@ -64,10 +65,10 @@ class WardrobePlugin(Star):
             await self._webui.stop()
         logger.info("[Wardrobe] 插件已卸载")
 
-    def get_merged_pools(self) -> dict:
+    async def get_merged_pools(self) -> dict:
         from .core.pools import ALL_POOLS
         merged = {k: list(v) for k, v in ALL_POOLS.items()}
-        custom = self._load_custom_pools()
+        custom = await self._load_custom_pools()
         for k, v in custom.items():
             if k in merged:
                 for item in v:
@@ -77,16 +78,27 @@ class WardrobePlugin(Star):
                 merged[k] = list(v)
         return merged
 
-    def _load_custom_pools(self) -> dict:
+    async def _load_custom_pools(self) -> dict:
         import json
         path = self.data_dir / "custom_pools.json"
         if path.exists():
             try:
-                with open(path, "r", encoding="utf-8") as f:
-                    return json.load(f)
+                data = await asyncio.to_thread(self._read_custom_pools_file, path)
+                if not isinstance(data, dict):
+                    return {}
+                for k, v in data.items():
+                    if not isinstance(v, list):
+                        data[k] = []
+                return data
             except Exception:
                 pass
         return {}
+
+    @staticmethod
+    def _read_custom_pools_file(path: Path):
+        import json
+        with open(path, "r", encoding="utf-8") as f:
+            return json.load(f)
 
     async def save_custom_pools(self, merged_pools: dict):
         import json
@@ -99,12 +111,20 @@ class WardrobePlugin(Star):
                 custom[k] = extra if k in ALL_POOLS else list(v)
         path = self.data_dir / "custom_pools.json"
         path.parent.mkdir(parents=True, exist_ok=True)
-        with open(path, "w", encoding="utf-8") as f:
-            json.dump(custom, f, ensure_ascii=False, indent=2)
+        content = json.dumps(custom, ensure_ascii=False, indent=2)
+        await asyncio.to_thread(self._write_custom_pools_file, path, content)
         logger.info("[Wardrobe] 自定义池子已保存")
 
+    @staticmethod
+    def _write_custom_pools_file(path: Path, content: str):
+        with open(path, "w", encoding="utf-8") as f:
+            f.write(content)
+
     async def _ensure_db(self):
+        if self._db_initialized:
+            return
         await self.db.init()
+        self._db_initialized = True
 
     def _cfg(self, key: str, default=None):
         return self.config.get(key, default)
