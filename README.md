@@ -73,8 +73,6 @@ Wardrobe 支持与 AiImg 插件双向联动：
 - 返回图片路径 + 描述信息，AiImg 可用描述辅助生成更精准的提示词
 - 参考图追加到所有人设参考图后面，顺序可控
 
-详见 [AIIMG_INTERFACE.md](AIIMG_INTERFACE.md) 接口文档。
-
 ---
 
 ## 🎮 可用指令
