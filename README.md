@@ -106,8 +106,20 @@ Wardrobe 支持与 AiImg 插件双向联动：
 | `search_candidate_limit` | 从数据库取出的候选图片数量（默认 20） |
 | `search_max_select` | 取图模型最多选择的图片数量（默认 1） |
 | `max_image_size_mb` | 图片大小限制 MB（默认 10） |
+| `personas` | 人格配置列表，每个人格包含规范名和别名列表 |
 | `auto_save_aiimg_enabled` | AiImg 生图自动存图开关（默认关闭） |
-| `auto_save_aiimg_persona` | 自动存图时归入的人格名（可选） |
+| `auto_save_aiimg_follow_conversation` | 自动存图跟随对话人格（默认开启） |
+| `auto_save_aiimg_default_persona` | 自动存图默认人格（无法获取对话人格时使用） |
+
+### 人格配置说明
+
+在「人格配置列表」中添加人格，每个人格包含：
+- **人格名称（规范名）**：存入数据库时使用的标准名称，如：星织、雪音
+- **别名列表**：LLM 可能使用的其他称呼，如：星、小星、星织酱
+
+配置后，存图/取图时会根据当前对话人格自动筛选图片。
+
+**多人格自动存图**：开启「自动存图跟随对话人格」后，AiImg 生成的图片会自动存入当前对话人格的图库。
 
 ---
 

@@ -63,11 +63,30 @@
     "type": "int",
     "default": 10
   },
-  "persona_names": {
-    "description": "人格名称列表",
-    "hint": "逗号分隔，支持别名格式：规范名[别名1,别名2]。例如：a[b,c],d 表示人格a也可叫b或c，人格d无别名。别名用于匹配LLM角色名与数据库中的规范人格名",
-    "type": "string",
-    "default": ""
+  "personas": {
+    "description": "人格配置列表",
+    "hint": "配置所有人格及其别名，用于匹配 LLM 角色名与数据库中的规范人格名。存图/取图时会根据当前对话人格自动筛选图片。",
+    "type": "template_list",
+    "default": [],
+    "templates": {
+      "persona": {
+        "name": "人格",
+        "items": {
+          "name": {
+            "type": "string",
+            "description": "人格名称（规范名）",
+            "hint": "存入数据库时使用的标准名称，如：星织、雪音",
+            "default": ""
+          },
+          "aliases": {
+            "type": "list",
+            "description": "别名列表",
+            "hint": "LLM 可能使用的其他称呼，如：星、小星、星织酱",
+            "default": []
+          }
+        }
+      }
+    }
   },
   "auto_save_aiimg_enabled": {
     "description": "AiImg 生图自动存图",
@@ -75,9 +94,15 @@
     "type": "bool",
     "default": false
   },
-  "auto_save_aiimg_persona": {
-    "description": "AiImg 自动存图人格",
-    "hint": "AiImg 自动存图时使用的人格名，需在人格名称列表中已配置；留空则不指定人格",
+  "auto_save_aiimg_follow_conversation": {
+    "description": "自动存图跟随对话人格",
+    "hint": "开启后，自动存图会使用当前对话的人格；关闭则使用下方配置的默认人格",
+    "type": "bool",
+    "default": true
+  },
+  "auto_save_aiimg_default_persona": {
+    "description": "自动存图默认人格",
+    "hint": "当无法获取当前对话人格时使用的默认人格，留空则不指定人格",
     "type": "string",
     "default": ""
   },
