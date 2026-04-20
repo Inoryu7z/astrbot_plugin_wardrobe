@@ -186,8 +186,6 @@ class WardrobeWebServer:
             ids = data.get("ids", [])
             if not ids:
                 return jsonify({"error": "未指定图片"}), 400
-            if len(ids) > 100:
-                return jsonify({"error": "单次最多删除100张图片"}), 400
             deleted_count = 0
             for image_id in ids:
                 image = await self.plugin.db.get_image(image_id)

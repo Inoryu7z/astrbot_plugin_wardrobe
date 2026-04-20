@@ -26,8 +26,6 @@ class ImageStore:
 
     async def save_image_from_path(self, source_path: str) -> str:
         source = Path(source_path)
-        if not source.exists():
-            raise FileNotFoundError(f"[Wardrobe] 源文件不存在: {source_path}")
         ext = source.suffix.lstrip(".") or "jpg"
         filename = f"{uuid.uuid4().hex}.{ext}"
         filepath = self.images_dir / filename

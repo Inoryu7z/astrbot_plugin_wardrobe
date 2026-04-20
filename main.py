@@ -1,4 +1,3 @@
-# 仅供 Inoryu7z 一人使用，无需考虑多用户安全攻击场景
 from pathlib import Path
 from typing import Optional
 import asyncio
@@ -19,6 +18,9 @@ from .webui import WardrobeWebServer
 
 _MAX_IMAGE_SIZE_MB = 10
 _MAX_DESCRIPTION_LEN = 2000
+# 仅监听 aiimg_generate 这一个统一入口工具。
+# aiimg_draw / aiimg_edit 内部最终都走 aiimg_generate，所以只需监听这一个即可覆盖所有 LLM 工具调用路径。
+# 命令路径（/自拍 /aiimg 等）则由 on_after_message_sent 钩子兜底。
 _AIIMG_GENERATE_TOOLS = frozenset({"aiimg_generate"})
 
 
@@ -44,17 +46,8 @@ class WardrobePlugin(Star):
         self._db_initialized = False
         self._db_init_event = asyncio.Event()
         self._db_init_event.set()
-        self._db_init_fail_count = 0
-        self._db_init_max_retries = 5
         self._webui: Optional[WardrobeWebServer] = None
         self._last_auto_saved: dict[str, str] = {}
-
-        if self._cfg("webui_enabled", False):
-            try:
-                loop = asyncio.get_running_loop()
-                loop.create_task(self._start_webui())
-            except RuntimeError:
-                pass
 
         logger.info("[Wardrobe] 插件初始化完成")
 
@@ -69,7 +62,6 @@ class WardrobePlugin(Star):
     async def terminate(self):
         if self._webui:
             await self._webui.stop()
-        await self.db.close()
         logger.info("[Wardrobe] 插件已卸载")
 
     async def get_merged_pools(self) -> dict:
@@ -130,9 +122,6 @@ class WardrobePlugin(Star):
     async def _ensure_db(self):
         if self._db_initialized:
             return
-        if self._db_init_fail_count >= self._db_init_max_retries:
-            logger.error("[Wardrobe] 数据库初始化已失败 %d 次，不再重试", self._db_init_fail_count)
-            return
         if not self._db_init_event.is_set():
             await self._db_init_event.wait()
             return
@@ -140,10 +129,6 @@ class WardrobePlugin(Star):
         try:
             await self.db.init()
             self._db_initialized = True
-            self._db_init_fail_count = 0
-        except Exception as e:
-            self._db_init_fail_count += 1
-            logger.error("[Wardrobe] 数据库初始化失败 (%d/%d): %s", self._db_init_fail_count, self._db_init_max_retries, e)
         finally:
             self._db_init_event.set()
 
@@ -191,11 +176,6 @@ class WardrobePlugin(Star):
     @filter.after_message_sent()
     async def on_after_message_sent(self, event: AstrMessageEvent):
         '''消息发送后钩子：检测 AiImg 命令方式生成的图片并自动存图'''
-        enabled = self._cfg("auto_save_aiimg_enabled")
-        if enabled is None:
-            enabled = self._cfg("auto_save_gitee_enabled", False)
-        if not enabled:
-            return
         await self._auto_save_aiimg_image(event, tool=None)
 
     @filter.llm_tool(name="save_wardrobe_image")
@@ -373,6 +353,7 @@ class WardrobePlugin(Star):
         return image_id, attrs
 
     async def _auto_save_aiimg_image(self, event: AstrMessageEvent, tool=None):
+        # 仅自动保存自拍模式生成的图片；文生图/改图不自动存入衣橱。
         enabled = self._cfg("auto_save_aiimg_enabled")
         if enabled is None:
             enabled = self._cfg("auto_save_gitee_enabled", False)
@@ -395,8 +376,26 @@ class WardrobePlugin(Star):
         if not last_image_dict:
             return
 
-        image_path = last_image_dict.get(user_id)
+        entry = last_image_dict.get(user_id)
+        if not entry:
+            return
+
+        # _last_image_by_user 的值格式：{"path": Path, "mode": str}
+        # 仅保存自拍模式 (mode="selfie") 的图片
+        if isinstance(entry, dict):
+            image_path = entry.get("path")
+            image_mode = entry.get("mode", "")
+        else:
+            image_path = entry
+            image_mode = ""
+
         if not image_path:
+            return
+
+        if image_mode != "selfie":
+            logger.debug(
+                "[Wardrobe] AiImg 自动存图跳过：非自拍模式 (mode=%s)", image_mode or "unknown"
+            )
             return
 
         str_path = str(image_path)
@@ -423,6 +422,9 @@ class WardrobePlugin(Star):
                 len(image_bytes) / 1024, persona or "无", tool_name or "command",
             )
 
+            # 自动存图不传 user_description：此时没有用户主动提供的描述，
+            # AI 分析模型会根据图片内容自动生成描述，无需额外文本。
+            # 仅 /存图 命令路径才会传入用户描述。
             image_id, attrs = await self._save_image_from_bytes(
                 image_bytes, persona=persona, created_by=user_id,
             )
@@ -683,6 +685,7 @@ class WardrobePlugin(Star):
         return "\n".join(parts)
 
     async def _extract_image_bytes(self, event: AstrMessageEvent) -> Optional[bytes]:
+        # 仅提取第一张图片。多图场景下用户可逐张保存，或通过 WebUI 批量管理。
         message_obj = getattr(event, "message_obj", None)
         if not message_obj:
             return None
@@ -691,14 +694,11 @@ class WardrobePlugin(Star):
         if not message_chain:
             return None
 
-        image_comps = [comp for comp in message_chain if isinstance(comp, Image)]
-        if len(image_comps) > 1:
-            logger.warning("[Wardrobe] 检测到 %d 张图片，仅保存第一张", len(image_comps))
-
-        for comp in image_comps:
-            image_url = getattr(comp, "url", None) or getattr(comp, "path", None)
-            if image_url:
-                return await self._download_or_read_image(image_url)
+        for comp in message_chain:
+            if isinstance(comp, Image):
+                image_url = getattr(comp, "url", None) or getattr(comp, "path", None)
+                if image_url:
+                    return await self._download_or_read_image(image_url)
 
         return None
 
