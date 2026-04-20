@@ -385,18 +385,10 @@ class WardrobePlugin(Star):
             logger.error("[Wardrobe] AiImg 自动存图异常: %s", e)
 
     async def _get_auto_save_persona(self, event: AstrMessageEvent) -> str:
-        follow_conversation = self._cfg("auto_save_aiimg_follow_conversation", True)
-        if follow_conversation:
-            conv_persona = await self._get_current_persona_name(event)
-            if conv_persona:
-                return self._resolve_persona(conv_persona)
-
-        default_persona = str(self._cfg("auto_save_aiimg_default_persona") or "").strip()
-        if not default_persona:
-            default_persona = str(self._cfg("auto_save_aiimg_persona", "") or "").strip()
-        if not default_persona:
-            default_persona = str(self._cfg("auto_save_gitee_persona", "") or "").strip()
-        return self._resolve_persona(default_persona)
+        conv_persona = await self._get_current_persona_name(event)
+        if conv_persona:
+            return self._resolve_persona(conv_persona)
+        return ""
 
     async def _get_current_persona_name(self, event: AstrMessageEvent) -> str | None:
         try:
