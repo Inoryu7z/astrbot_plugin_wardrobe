@@ -65,10 +65,15 @@ class WardrobeDatabase:
             async with aiosqlite.connect(self.db_path) as db:
                 await db.executescript(_CREATE_TABLE_SQL)
                 await db.executescript(_CREATE_INDEX_SQL)
-                try:
-                    await db.execute("ALTER TABLE images ADD COLUMN persona TEXT DEFAULT ''")
-                except Exception:
-                    pass
+                for col, default in [
+                    ("persona", "TEXT DEFAULT ''"),
+                    ("created_by", "TEXT DEFAULT ''"),
+                    ("user_tags", "TEXT DEFAULT ''"),
+                ]:
+                    try:
+                        await db.execute(f"ALTER TABLE images ADD COLUMN {col} {default}")
+                    except Exception:
+                        pass
                 await db.commit()
         logger.info("[Wardrobe] 数据库初始化完成")
 
