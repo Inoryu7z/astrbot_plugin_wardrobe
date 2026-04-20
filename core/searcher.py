@@ -88,6 +88,7 @@ class ImageSearcher:
         persona: str = "",
         current_persona: str = "",
         persona_names: str = "",
+        exclude_current_persona: bool = False,
     ) -> tuple[list[dict[str, Any]], dict[str, Any]]:
         meta = {"persona_mismatch": False, "searched_persona": persona, "persona_scope": "global"}
 
@@ -106,11 +107,22 @@ class ImageSearcher:
         named_persona = query_conditions.pop("persona", "")
         meta["persona_scope"] = persona_scope
 
-        candidates = await self._search_by_scope(
-            query_conditions, persona_scope=persona_scope,
-            named_persona=named_persona, current_persona=current_persona,
-            limit=candidate_limit, meta=meta,
-        )
+        if exclude_current_persona and current_persona:
+            candidates = await self._query_candidates_excluding_persona(
+                query_conditions, exclude_persona=current_persona, limit=candidate_limit,
+            )
+            logger.info(
+                "[Wardrobe] 排除人格搜索结果: %d张 exclude=%s",
+                len(candidates), current_persona,
+            )
+            if not candidates:
+                return [], meta
+        else:
+            candidates = await self._search_by_scope(
+                query_conditions, persona_scope=persona_scope,
+                named_persona=named_persona, current_persona=current_persona,
+                limit=candidate_limit, meta=meta,
+            )
 
         if not candidates:
             logger.info("[Wardrobe] 未找到候选图片 scope=%s persona=%s", persona_scope, named_persona or "无")

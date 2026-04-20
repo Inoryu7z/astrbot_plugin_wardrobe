@@ -1,3 +1,21 @@
+### v1.6.0
+
+**✨ 新功能：AiImg 双向联动**
+
+* 参考图接口：新增 `get_reference_image(query, current_persona)` 公开方法，供 AiImg 插件在生图时调用获取参考图
+  - 搜索时硬排除当前人格的图库，避免同质化（如人格A生图时只从其他人格图库找参考图）
+  - 复用现有混合搜索逻辑（标签筛选 + AI 精选）
+  - 返回图片路径 + 描述信息，AiImg 可用描述辅助生成提示词
+  - 排除当前人格后无结果则不提供参考图，不回退全局搜索
+* 自动存图触发范围收窄：仅监听 `aiimg_generate`（自拍/生图），不再监听 `aiimg_draw`、`aiimg_edit` 及旧版 gitee 工具
+* 配置项命名统一：`auto_save_gitee_enabled` → `auto_save_aiimg_enabled`，`auto_save_gitee_persona` → `auto_save_aiimg_persona`
+  - 兼容迁移：代码同时读取新旧配置名，优先使用新名称，旧配置自动生效
+
+**🔧 改进**
+
+* `ImageSearcher.search` 新增 `exclude_current_persona` 参数，支持排除指定人格的图库搜索
+* 自动存图只查找 `astrbot_plugin_aiimg` 插件实例，移除对 `astrbot_plugin_gitee_aiimg` 的查找
+
 ### v1.5.7
 
 **🐛 严重修复**
