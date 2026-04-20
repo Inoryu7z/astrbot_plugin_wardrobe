@@ -196,6 +196,10 @@ class WardrobePlugin(Star):
             user_description(string): 用户对图片的额外描述（如有），必须原样写入
             persona(string): 当前对话人格名称。如果你正在扮演某个人格角色（如星织、雪音），必须填写你自己的人格名；如果用户提到了其他人格名，也填写该名称；如果当前没有扮演任何人格角色则留空
         '''
+        if not persona.strip():
+            auto_persona = await self._get_current_persona_name(event)
+            if auto_persona:
+                persona = auto_persona
         result = await self._do_save_image(event, user_description=user_description, persona=persona)
         return result
 
@@ -207,6 +211,10 @@ class WardrobePlugin(Star):
             query(string): 用户的图片需求描述
             persona(string): 当前对话人格名称。如果你正在扮演某个人格角色（如星织、雪音），必须填写你自己的人格名；如果用户提到了其他人格名（如"雪音有没有xxx"），也填写该名称；如果当前没有扮演任何人格角色则留空
         '''
+        if not persona.strip():
+            auto_persona = await self._get_current_persona_name(event)
+            if auto_persona:
+                persona = auto_persona
         return await self._do_search_image(event, query=query, persona=persona)
 
     async def _do_save_image(
