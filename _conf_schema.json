@@ -90,21 +90,9 @@
   },
   "auto_save_aiimg_enabled": {
     "description": "AiImg 生图自动存图",
-    "hint": "开启后，当 AiImg 插件生成自拍图片时，衣橱图鉴会自动将图片存入衣柜库",
+    "hint": "开启后，当 AiImg 插件生成自拍图片时，衣橱图鉴会自动将图片存入当前对话人格的图库",
     "type": "bool",
     "default": false
-  },
-  "auto_save_aiimg_follow_conversation": {
-    "description": "自动存图跟随对话人格",
-    "hint": "开启后，自动存图会使用当前对话的人格；关闭则使用下方配置的默认人格",
-    "type": "bool",
-    "default": true
-  },
-  "auto_save_aiimg_default_persona": {
-    "description": "自动存图默认人格",
-    "hint": "当无法获取当前对话人格时使用的默认人格，留空则不指定人格",
-    "type": "string",
-    "default": ""
   },
   "webui_enabled": {
     "description": "启用 WebUI",
