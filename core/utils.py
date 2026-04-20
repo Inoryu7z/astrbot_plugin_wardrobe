@@ -61,6 +61,8 @@ _IMAGE_MAGIC = {
 
 
 def detect_image_mime(data: bytes) -> str:
+    if len(data) >= 12 and data[:4] == b"RIFF" and data[8:12] == b"WEBP":
+        return "image/webp"
     for magic, mime in _IMAGE_MAGIC.items():
         if data[: len(magic)] == magic:
             return mime
