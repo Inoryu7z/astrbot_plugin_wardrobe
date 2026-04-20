@@ -1,3 +1,20 @@
+### v1.5.7
+
+**🐛 严重修复**
+
+* 修复 `terminate` 方法重复定义导致 WebUI 永远无法正确关闭的问题，合并为单一方法
+* 修复 `@register` 装饰器中版本号与 `metadata.yaml` 不一致的问题（1.0.0 → 1.5.7）
+* 补充 `requirements.txt` 中缺失的 `quart` 和 `hypercorn` 依赖，避免开启 WebUI 时崩溃
+
+**🔧 改进**
+
+* WebUI 启动时机从 `__init__` 移至 `on_astrbot_loaded` 钩子，确保数据库就绪后再启动
+* WebUI 筛选分页修复：`search_images` 新增 `offset` 参数支持分页，新增 `search_count` 方法返回筛选后的实际总数
+* WebUI Token 安全增强：token 存储改为带时间戳的字典，7天自动过期，登录时清理过期 token
+* Cookie 安全增强：`httponly=True` 防止 XSS 读取，`max_age` 从30天缩短为7天
+* `_call_vision_model` fallback 机制改进：改用 `TypeError/AttributeError` 异常类型判断，不再依赖错误信息字符串匹配
+* 移除 `_do_search_image` 中对 `Image` 的重复导入
+
 ### v1.5.6
 
 **✨ 新功能**

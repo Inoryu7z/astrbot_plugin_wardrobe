@@ -26,7 +26,7 @@ _AIIMG_IMAGE_TOOLS = frozenset({"aiimg_draw", "aiimg_edit", "aiimg_generate"})
     "astrbot_plugin_wardrobe",
     "Inoryu7z",
     "图片衣柜管理插件，支持智能分类、语义检索和参考图接口",
-    "1.0.0",
+    "1.5.7",
 )
 class WardrobePlugin(Star):
     def __init__(self, context: Context, config: AstrBotConfig = None):
@@ -43,13 +43,6 @@ class WardrobePlugin(Star):
         self.data_dir = data_dir
         self._webui: Optional[WardrobeWebServer] = None
 
-        if self._cfg("webui_enabled", False):
-            try:
-                loop = asyncio.get_event_loop()
-                loop.create_task(self._start_webui())
-            except Exception as e:
-                logger.error("[Wardrobe] WebUI 启动调度失败: %s", e)
-
         logger.info("[Wardrobe] 插件初始化完成")
 
     async def _start_webui(self):
@@ -63,6 +56,7 @@ class WardrobePlugin(Star):
     async def terminate(self):
         if self._webui:
             await self._webui.stop()
+        logger.info("[Wardrobe] 插件已卸载")
 
     def get_merged_pools(self) -> dict:
         from .core.pools import ALL_POOLS
@@ -135,6 +129,12 @@ class WardrobePlugin(Star):
     async def on_loaded(self):
         await self._ensure_db()
         logger.info("[Wardrobe] 数据库已就绪")
+
+        if self._cfg("webui_enabled", False):
+            try:
+                await self._start_webui()
+            except Exception as e:
+                logger.error("[Wardrobe] WebUI 启动失败: %s", e)
 
     @on_llm_tool_respond()
     async def on_aiimg_tool_respond(self, event: AstrMessageEvent, tool, tool_args, tool_result):
@@ -470,8 +470,7 @@ class WardrobePlugin(Star):
         if not image_paths:
             return "图片文件不存在"
 
-        from astrbot.api.message_components import Image as ImageComp
-        chain = [ImageComp.fromFileSystem(path=p) for p in image_paths]
+        chain = [Image.fromFileSystem(path=p) for p in image_paths]
         mc = event.chain_result(chain)
         await self.context.send_message(event.unified_msg_origin, mc)
 
@@ -648,6 +647,3 @@ class WardrobePlugin(Star):
                 lines.append(f"角度：{angle}")
 
         return "\n".join(lines)
-
-    async def terminate(self):
-        logger.info("[Wardrobe] 插件已卸载")
