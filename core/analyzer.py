@@ -62,8 +62,8 @@ class ImageAnalyzer:
         self.context = context
         self.plugin = plugin
 
-    def _build_pools_text(self) -> str:
-        pools = self.plugin.get_merged_pools() if self.plugin else ALL_POOLS
+    async def _build_pools_text(self) -> str:
+        pools = await self.plugin.get_merged_pools() if self.plugin else ALL_POOLS
         lines = []
         for key, values in pools.items():
             lines.append(f"## {key}")
@@ -81,7 +81,7 @@ class ImageAnalyzer:
         secondary_provider_id: str = "",
         timeout_seconds: float = 60.0,
     ) -> Optional[dict[str, Any]]:
-        pools_text = self._build_pools_text()
+        pools_text = await self._build_pools_text()
         system_prompt = ANALYZE_SYSTEM_PROMPT.format(pools_text=pools_text)
 
         mime = detect_image_mime(image_bytes)

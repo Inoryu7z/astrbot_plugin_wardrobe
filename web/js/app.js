@@ -28,6 +28,7 @@
     opts.headers=headers;
     const resp=await fetch(path,opts);
     if(resp.status===401){localStorage.removeItem('wardrobe_token');window.location.href='/login';return null;}
+    if(!resp.ok){console.error('[Wardrobe] API error:',resp.status,resp.statusText,path);return null;}
     return resp;
   }
 
