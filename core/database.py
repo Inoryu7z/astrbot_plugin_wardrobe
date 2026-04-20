@@ -200,6 +200,7 @@ class WardrobeDatabase:
         persona: str = "",
         exclude_persona: str = "",
         limit: int = 20,
+        offset: int = 0,
     ) -> list[dict[str, Any]]:
         conditions = []
         params: list[Any] = []
@@ -246,13 +247,73 @@ class WardrobeDatabase:
             where_clause = "WHERE " + " AND ".join(conditions)
 
         params.append(limit)
+        params.append(offset)
 
         async with aiosqlite.connect(self.db_path) as db:
             db.row_factory = aiosqlite.Row
-            sql = f"SELECT * FROM images {where_clause} ORDER BY created_at DESC LIMIT ?"
+            sql = f"SELECT * FROM images {where_clause} ORDER BY created_at DESC LIMIT ? OFFSET ?"
             async with db.execute(sql, params) as cursor:
                 rows = await cursor.fetchall()
                 return [self._row_to_dict(row) for row in rows]
+
+    async def search_count(
+        self,
+        *,
+        category: Optional[str] = None,
+        exposure_level: Optional[str] = None,
+        style: Optional[list[str]] = None,
+        scene: Optional[list[str]] = None,
+        atmosphere: Optional[list[str]] = None,
+        persona: str = "",
+        exclude_persona: str = "",
+    ) -> int:
+        conditions = []
+        params: list[Any] = []
+
+        if category:
+            conditions.append("category = ?")
+            params.append(category)
+
+        if exposure_level:
+            conditions.append("exposure_level = ?")
+            params.append(exposure_level)
+
+        if persona:
+            conditions.append("persona = ?")
+            params.append(persona)
+
+        if exclude_persona:
+            conditions.append("persona != ?")
+            params.append(exclude_persona)
+
+        if style:
+            style_conditions = []
+            for s in style:
+                style_conditions.append("style LIKE ?")
+                params.append(f'%{s}%')
+            conditions.append(f"({' OR '.join(style_conditions)})")
+
+        if scene:
+            scene_conditions = []
+            for s in scene:
+                scene_conditions.append("scene LIKE ?")
+                params.append(f'%{s}%')
+            conditions.append(f"({' OR '.join(scene_conditions)})")
+
+        if atmosphere:
+            atm_conditions = []
+            for a in atmosphere:
+                atm_conditions.append("atmosphere LIKE ?")
+                params.append(f'%{a}%')
+            conditions.append(f"({' OR '.join(atm_conditions)})")
+
+        where_clause = ""
+        if conditions:
+            where_clause = "WHERE " + " AND ".join(conditions)
+
+        async with aiosqlite.connect(self.db_path) as db:
+            async with db.execute(f"SELECT COUNT(*) FROM images {where_clause}", params) as cursor:
+                return (await cursor.fetchone())[0]
 
     async def search_by_description(
         self,

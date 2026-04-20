@@ -153,18 +153,7 @@ class ImageAnalyzer:
                 system_prompt=system_prompt,
                 image_urls=[image_path],
             )
-        except Exception as e:
-            err = str(e).lower()
-            fallback_markers = (
-                "list object",
-                "startswith",
-                "image_urls",
-                "expected list",
-                "expected str",
-                "typeerror",
-            )
-            if not any(marker in err for marker in fallback_markers):
-                raise
+        except (TypeError, AttributeError) as e:
             logger.warning("[Wardrobe] image_urls 列表格式不兼容，回退字符串模式: %s", e)
             llm_resp = await self.context.llm_generate(
                 chat_provider_id=provider_id,
@@ -172,6 +161,8 @@ class ImageAnalyzer:
                 system_prompt=system_prompt,
                 image_urls=image_path,
             )
+        except Exception:
+            raise
 
         raw_text = (getattr(llm_resp, "completion_text", "") or "").strip()
         if not raw_text:

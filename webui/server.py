@@ -1,5 +1,6 @@
 import asyncio
 import secrets
+import time
 import uuid
 from pathlib import Path
 
@@ -15,6 +16,8 @@ from quart import (
 
 from astrbot.api import logger
 
+_TOKEN_TTL = 86400 * 7
+
 
 class WardrobeWebServer:
     def __init__(self, plugin, config: dict):
@@ -22,13 +25,27 @@ class WardrobeWebServer:
         self.config = config
         self.host = str(config.get("webui_host", "127.0.0.1"))
         self.port = int(config.get("webui_port", 18921))
-        self._tokens: set[str] = set()
+        self._tokens: dict[str, float] = {}
         self._server_task: asyncio.Task | None = None
         self._web_dir = Path(__file__).parent.parent / "web"
 
     @property
     def password(self):
         return str(self.plugin._cfg("webui_password", "wardrobe") or "wardrobe")
+
+    def _is_token_valid(self, token: str) -> bool:
+        if token not in self._tokens:
+            return False
+        if time.time() - self._tokens[token] > _TOKEN_TTL:
+            del self._tokens[token]
+            return False
+        return True
+
+    def _cleanup_expired_tokens(self):
+        now = time.time()
+        expired = [t for t, ts in self._tokens.items() if now - ts > _TOKEN_TTL]
+        for t in expired:
+            del self._tokens[t]
 
     def _create_app(self) -> Quart:
         app = Quart(
@@ -49,7 +66,7 @@ class WardrobeWebServer:
                 or request.cookies.get("wardrobe_token", "")
                 or session.get("token", "")
             )
-            if token not in self._tokens:
+            if not self._is_token_valid(token):
                 if request.path.startswith("/api/"):
                     return jsonify({"error": "未授权"}), 401
                 return await send_from_directory(str(self._web_dir), "login.html")
@@ -67,18 +84,19 @@ class WardrobeWebServer:
             data = await request.get_json(silent=True) or {}
             pwd = data.get("password", "")
             if pwd == self.password:
+                self._cleanup_expired_tokens()
                 token = secrets.token_hex(32)
-                self._tokens.add(token)
+                self._tokens[token] = time.time()
                 session["token"] = token
                 resp = jsonify({"success": True, "token": token})
-                resp.set_cookie("wardrobe_token", token, max_age=86400 * 30, httponly=False, samesite="Lax")
+                resp.set_cookie("wardrobe_token", token, max_age=86400 * 7, httponly=True, samesite="Lax")
                 return resp
             return jsonify({"success": False, "error": "密码错误"}), 403
 
         @app.route("/api/logout", methods=["POST"])
         async def api_logout():
             token = session.pop("token", "") or request.cookies.get("wardrobe_token", "")
-            self._tokens.discard(token)
+            self._tokens.pop(token, None)
             resp = jsonify({"success": True})
             resp.delete_cookie("wardrobe_token")
             return resp
@@ -115,19 +133,28 @@ class WardrobeWebServer:
                     scene=scene_list,
                     atmosphere=atmosphere_list,
                     limit=per_page,
+                    offset=offset,
+                )
+                total = await self.plugin.db.search_count(
+                    category=category or None,
+                    persona=persona or None,
+                    style=style_list,
+                    scene=scene_list,
+                    atmosphere=atmosphere_list,
                 )
             else:
                 images = await self.plugin.db.list_images(
                     category=category or None, limit=per_page, offset=offset
                 )
+                total_stats = await self.plugin.db.get_stats()
+                total = total_stats["total"]
 
             if shot_size:
                 images = [img for img in images if shot_size == (img.get("shot_size") or "")]
 
-            total_stats = await self.plugin.db.get_stats()
             result = {
                 "images": images,
-                "total": total_stats["total"],
+                "total": total,
                 "page": page,
                 "per_page": per_page,
             }
