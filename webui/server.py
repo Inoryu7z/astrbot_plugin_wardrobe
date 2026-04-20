@@ -330,11 +330,24 @@ class WardrobeWebServer:
 
         logger.info("[Wardrobe] WebUI 启动中: %s:%d", self.host, self.port)
 
-        self._server_task = asyncio.create_task(
-            hypercorn.asyncio.serve(app, config)
-        )
+        async def _serve_with_error_handling():
+            try:
+                await hypercorn.asyncio.serve(app, config)
+            except Exception as e:
+                logger.error("[Wardrobe] WebUI 服务异常: %s", e)
+                raise
+
+        self._server_task = asyncio.create_task(_serve_with_error_handling())
 
         await asyncio.sleep(0.5)
+        
+        if self._server_task.done():
+            try:
+                self._server_task.result()
+            except Exception as e:
+                logger.error("[Wardrobe] WebUI 启动失败: %s", e)
+                return
+        
         logger.info("[Wardrobe] WebUI 已启动: http://%s:%d", self.host, self.port)
         if self.password == "wardrobe":
             logger.warning("[Wardrobe] WebUI 使用默认密码 'wardrobe'，请及时修改！")
