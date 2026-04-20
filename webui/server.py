@@ -84,7 +84,7 @@ class WardrobeWebServer:
         async def api_login():
             data = await request.get_json(silent=True) or {}
             pwd = data.get("password", "")
-            if pwd == self.password:
+            if secrets.compare_digest(pwd, self.password):
                 self._cleanup_expired_tokens()
                 token = secrets.token_hex(32)
                 self._tokens[token] = time.time()
@@ -186,6 +186,8 @@ class WardrobeWebServer:
             ids = data.get("ids", [])
             if not ids:
                 return jsonify({"error": "未指定图片"}), 400
+            if len(ids) > 100:
+                return jsonify({"error": "单次最多删除100张图片"}), 400
             deleted_count = 0
             for image_id in ids:
                 image = await self.plugin.db.get_image(image_id)
@@ -358,7 +360,9 @@ class WardrobeWebServer:
             if self._server_task.done():
                 try:
                     self._server_task.result()
-                except Exception as e:
+                except (asyncio.CancelledError, SystemExit):
+                    continue
+                except BaseException as e:
                     if "Address already in use" in str(e) or isinstance(e, OSError):
                         logger.warning(
                             "[Wardrobe] 端口 %d 被占用，尝试下一个端口", candidate_port
