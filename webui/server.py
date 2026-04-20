@@ -27,6 +27,7 @@ class WardrobeWebServer:
         self.port = int(plugin._cfg("webui_port", 18921) or 18921)
         self._tokens: dict[str, float] = {}
         self._server_task: asyncio.Task | None = None
+        self._shutdown_event: asyncio.Event = asyncio.Event()
         self._web_dir = Path(__file__).parent.parent / "web"
 
     @property
@@ -249,13 +250,8 @@ class WardrobeWebServer:
         async def api_filters():
             await self.plugin._ensure_db()
             stats = await self.plugin.db.get_stats()
-            persona_names = str(self.plugin._cfg("persona_names", "") or "").strip()
-            personas = []
-            if persona_names:
-                for entry in self.plugin._split_persona_entries(persona_names):
-                    canonical, _ = self.plugin._parse_persona_entry(entry.strip())
-                    if canonical:
-                        personas.append(canonical)
+            personas = self.plugin._get_personas_config()
+            persona_names = [p.get("name", "") for p in personas if p.get("name")]
 
             pools = self.plugin.get_merged_pools()
             logger.info("[Wardrobe] /api/filters pools keys: %s", list(pools.keys()))
@@ -263,7 +259,7 @@ class WardrobeWebServer:
 
             return jsonify({
                 "categories": list(stats.get("by_category", {}).keys()),
-                "personas": personas,
+                "personas": persona_names,
                 "pools": {k: list(v) for k, v in pools.items()},
             })
 
@@ -328,36 +324,56 @@ class WardrobeWebServer:
         config.bind = [f"{self.host}:{self.port}"]
         config.graceful_timeout = 5
 
+        self._shutdown_event.clear()
         logger.info("[Wardrobe] WebUI 启动中: %s:%d", self.host, self.port)
 
-        async def _serve_with_error_handling():
+        max_retries = 3
+        for attempt in range(max_retries):
             try:
-                await hypercorn.asyncio.serve(app, config)
-            except Exception as e:
-                logger.error("[Wardrobe] WebUI 服务异常: %s", e)
-                raise
-
-        self._server_task = asyncio.create_task(_serve_with_error_handling())
-
-        await asyncio.sleep(0.5)
-        
-        if self._server_task.done():
-            try:
-                self._server_task.result()
-            except Exception as e:
-                logger.error("[Wardrobe] WebUI 启动失败: %s", e)
+                self._server_task = asyncio.create_task(
+                    hypercorn.asyncio.serve(
+                        app, config,
+                        shutdown_trigger=self._shutdown_event.wait,
+                    )
+                )
+            except OSError:
+                if attempt < max_retries - 1:
+                    logger.warning("[Wardrobe] 端口 %d 被占用，1秒后重试 (%d/%d)", self.port, attempt + 1, max_retries)
+                    await asyncio.sleep(1)
+                    continue
+                logger.error("[Wardrobe] WebUI 启动失败: 端口 %d 被占用", self.port)
                 return
-        
-        logger.info("[Wardrobe] WebUI 已启动: http://%s:%d", self.host, self.port)
-        if self.password == "wardrobe":
-            logger.warning("[Wardrobe] WebUI 使用默认密码 'wardrobe'，请及时修改！")
+
+            await asyncio.sleep(0.5)
+
+            if self._server_task.done():
+                try:
+                    self._server_task.result()
+                except Exception as e:
+                    if attempt < max_retries - 1 and "Address already in use" in str(e):
+                        logger.warning("[Wardrobe] 端口 %d 被占用，1秒后重试 (%d/%d)", self.port, attempt + 1, max_retries)
+                        await asyncio.sleep(1)
+                        continue
+                    logger.error("[Wardrobe] WebUI 启动失败: %s", e)
+                    return
+
+            logger.info("[Wardrobe] WebUI 已启动: http://%s:%d", self.host, self.port)
+            if self.password == "wardrobe":
+                logger.warning("[Wardrobe] WebUI 使用默认密码 'wardrobe'，请及时修改！")
+            return
 
     async def stop(self):
+        self._shutdown_event.set()
         if self._server_task and not self._server_task.done():
-            self._server_task.cancel()
             try:
-                await self._server_task
-            except asyncio.CancelledError:
+                await asyncio.wait_for(self._server_task, timeout=8)
+            except (asyncio.TimeoutError, asyncio.CancelledError):
+                self._server_task.cancel()
+                try:
+                    await self._server_task
+                except asyncio.CancelledError:
+                    pass
+            except Exception:
                 pass
         self._tokens.clear()
         logger.info("[Wardrobe] WebUI 已停止")
