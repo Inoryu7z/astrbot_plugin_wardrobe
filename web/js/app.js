@@ -308,7 +308,7 @@
         }
       }catch(err){
         toast('上传失败','error');
-        $('#uploadStatus').textContent='网络错误';
+        $('#uploadStatus').textContent='网络错误: '+err.message;
         submitBtn.disabled=false;
       }
     });

@@ -69,6 +69,17 @@ class WardrobeWebServer:
             return jsonify({"error": "上传文件过大，请压缩后重试"}), 413
 
         @app.before_request
+        async def log_request():
+            if request.path.startswith("/api/"):
+                logger.info("[Wardrobe] WebUI请求: %s %s", request.method, request.path)
+
+        @app.after_request
+        async def log_response(response):
+            if request.path.startswith("/api/"):
+                logger.info("[Wardrobe] WebUI响应: %s %s -> %s", request.method, request.path, response.status_code)
+            return response
+
+        @app.before_request
         async def auth_check():
             if request.path.startswith("/static/") or request.path == "/login":
                 return None
@@ -356,6 +367,8 @@ class WardrobeWebServer:
             config = HypercornConfig()
             config.bind = [f"{self.host}:{candidate_port}"]
             config.graceful_timeout = 5
+            config.errorlog = "-"
+            config.accesslog = "-"
 
             started = asyncio.Event()
 
