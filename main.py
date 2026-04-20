@@ -28,7 +28,7 @@ _AIIMG_GENERATE_TOOLS = frozenset({"aiimg_generate"})
     "astrbot_plugin_wardrobe",
     "Inoryu7z",
     "图片衣柜管理插件，支持智能分类、语义检索和参考图接口",
-    "1.6.4",
+    "1.6.6",
 )
 class WardrobePlugin(Star):
     def __init__(self, context: Context, config: AstrBotConfig = None):
@@ -138,9 +138,19 @@ class WardrobePlugin(Star):
     @filter.command("存图")
     @filter.permission_type(filter.PermissionType.ADMIN)
     async def save_image_command(self, event: AstrMessageEvent, description: str = ""):
-        '''保存图片到衣柜库（管理员专用），用法：/存图 [描述或人格名]'''
-        persona = self._match_configured_persona(description)
-        user_description = "" if persona else description
+        '''保存图片到衣柜库（管理员专用），用法：/存图 [人格名] [描述]'''
+        persona = ""
+        user_description = ""
+        text = description.strip()
+        if text:
+            parts = text.split(None, 1)
+            first_word = parts[0]
+            matched = self._match_configured_persona(first_word)
+            if matched:
+                persona = matched
+                user_description = parts[1].strip() if len(parts) > 1 else ""
+            else:
+                user_description = text
         result = await self._do_save_image(event, user_description=user_description, persona=persona)
         yield event.plain_result(result)
 
@@ -225,7 +235,7 @@ class WardrobePlugin(Star):
             return f"图片已保存（ID: {image_id}），但模型分析失败，仅保存了原始图片"
 
         logger.info(
-            "[Wardrobe] 分析结果:\n  分类: %s\n  风格: %s\n  服装: %s\n  暴露: %s\n  场景: %s\n  氛围: %s\n  姿势: %s\n  表情: %s\n  景别: %s\n  角度: %s\n  描述: %s",
+            "[Wardrobe] 分析结果:\n  分类: %s\n  风格: %s\n  服装: %s\n  暴露: %s\n  场景: %s\n  氛围: %s\n  姿势: %s\n  朝向: %s\n  动态: %s\n  动作风格: %s\n  景别: %s\n  角度: %s\n  表情: %s\n  色调: %s\n  构图: %s\n  背景: %s\n  描述: %s\n  用户标签: %s",
             attrs.get("category", "人物"),
             ", ".join(attrs.get("style", [])),
             attrs.get("clothing_type", ""),
@@ -233,10 +243,17 @@ class WardrobePlugin(Star):
             ", ".join(attrs.get("scene", [])),
             ", ".join(attrs.get("atmosphere", [])),
             attrs.get("pose_type", ""),
-            attrs.get("expression", ""),
+            attrs.get("body_orientation", ""),
+            attrs.get("dynamic_level", ""),
+            ", ".join(attrs.get("action_style", [])),
             attrs.get("shot_size", ""),
             attrs.get("camera_angle", ""),
+            attrs.get("expression", ""),
+            attrs.get("color_tone", ""),
+            attrs.get("composition", ""),
+            attrs.get("background", ""),
             attrs.get("description", ""),
+            user_description or "无",
         )
 
         feedback_enabled = bool(self._cfg("save_feedback_enabled", False))
