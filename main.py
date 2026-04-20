@@ -533,20 +533,42 @@ class WardrobePlugin(Star):
             return ""
         configured = str(self._cfg("persona_names", "") or "").strip()
         if not configured:
-            return ""
-        for entry in configured.replace("，", ",").split(","):
+            return persona
+        for entry in self._split_persona_entries(configured):
             entry = entry.strip()
             if not entry:
                 continue
             canonical, aliases = self._parse_persona_entry(entry)
             if persona == canonical or persona in aliases:
                 return canonical
-        return ""
+        return persona
+
+    @staticmethod
+    def _split_persona_entries(configured: str) -> list[str]:
+        text = configured.replace("，", ",")
+        entries = []
+        current = ""
+        depth = 0
+        for ch in text:
+            if ch in ("[", "［", "（", "("):
+                depth += 1
+                current += ch
+            elif ch in ("]", "］", "）", ")"):
+                depth = max(0, depth - 1)
+                current += ch
+            elif ch == "," and depth == 0:
+                entries.append(current)
+                current = ""
+            else:
+                current += ch
+        if current.strip():
+            entries.append(current)
+        return entries
 
     @staticmethod
     def _parse_persona_entry(entry: str) -> tuple[str, list[str]]:
         import re
-        m = re.match(r'^(.+?)\[(.+?)\]\s*$', entry)
+        m = re.match(r'^(.+?)[\[［](.+?)[\]］]\s*$', entry)
         if m:
             canonical = m.group(1).strip()
             aliases = [a.strip() for a in m.group(2).replace("，", ",").split(",") if a.strip()]
