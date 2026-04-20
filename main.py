@@ -1,3 +1,4 @@
+# 仅供 Inoryu7z 一人使用，无需考虑多用户安全攻击场景
 from pathlib import Path
 from typing import Optional
 import asyncio
@@ -41,7 +42,12 @@ class WardrobePlugin(Star):
         self.searcher = ImageSearcher(context, self.db, self.store)
         self.data_dir = data_dir
         self._db_initialized = False
+        self._db_init_event = asyncio.Event()
+        self._db_init_event.set()
+        self._db_init_fail_count = 0
+        self._db_init_max_retries = 5
         self._webui: Optional[WardrobeWebServer] = None
+        self._last_auto_saved: dict[str, str] = {}
 
         if self._cfg("webui_enabled", False):
             try:
@@ -63,6 +69,7 @@ class WardrobePlugin(Star):
     async def terminate(self):
         if self._webui:
             await self._webui.stop()
+        await self.db.close()
         logger.info("[Wardrobe] 插件已卸载")
 
     async def get_merged_pools(self) -> dict:
@@ -123,8 +130,22 @@ class WardrobePlugin(Star):
     async def _ensure_db(self):
         if self._db_initialized:
             return
-        await self.db.init()
-        self._db_initialized = True
+        if self._db_init_fail_count >= self._db_init_max_retries:
+            logger.error("[Wardrobe] 数据库初始化已失败 %d 次，不再重试", self._db_init_fail_count)
+            return
+        if not self._db_init_event.is_set():
+            await self._db_init_event.wait()
+            return
+        self._db_init_event.clear()
+        try:
+            await self.db.init()
+            self._db_initialized = True
+            self._db_init_fail_count = 0
+        except Exception as e:
+            self._db_init_fail_count += 1
+            logger.error("[Wardrobe] 数据库初始化失败 (%d/%d): %s", self._db_init_fail_count, self._db_init_max_retries, e)
+        finally:
+            self._db_init_event.set()
 
     def _cfg(self, key: str, default=None):
         return self.config.get(key, default)
@@ -170,6 +191,11 @@ class WardrobePlugin(Star):
     @filter.after_message_sent()
     async def on_after_message_sent(self, event: AstrMessageEvent):
         '''消息发送后钩子：检测 AiImg 命令方式生成的图片并自动存图'''
+        enabled = self._cfg("auto_save_aiimg_enabled")
+        if enabled is None:
+            enabled = self._cfg("auto_save_gitee_enabled", False)
+        if not enabled:
+            return
         await self._auto_save_aiimg_image(event, tool=None)
 
     @filter.llm_tool(name="save_wardrobe_image")
@@ -372,6 +398,11 @@ class WardrobePlugin(Star):
         image_path = last_image_dict.get(user_id)
         if not image_path:
             return
+
+        str_path = str(image_path)
+        if self._last_auto_saved.get(user_id) == str_path:
+            return
+        self._last_auto_saved[user_id] = str_path
 
         path = Path(image_path)
         if not path.exists():
@@ -660,11 +691,14 @@ class WardrobePlugin(Star):
         if not message_chain:
             return None
 
-        for comp in message_chain:
-            if isinstance(comp, Image):
-                image_url = getattr(comp, "url", None) or getattr(comp, "path", None)
-                if image_url:
-                    return await self._download_or_read_image(image_url)
+        image_comps = [comp for comp in message_chain if isinstance(comp, Image)]
+        if len(image_comps) > 1:
+            logger.warning("[Wardrobe] 检测到 %d 张图片，仅保存第一张", len(image_comps))
+
+        for comp in image_comps:
+            image_url = getattr(comp, "url", None) or getattr(comp, "path", None)
+            if image_url:
+                return await self._download_or_read_image(image_url)
 
         return None
 

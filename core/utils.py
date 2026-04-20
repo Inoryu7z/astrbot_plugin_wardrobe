@@ -1,13 +1,20 @@
 import json
+import re
 from typing import Any, Optional
 
 
 def parse_json_response(text: str) -> Optional[dict[str, Any]]:
     text = text.strip()
-    if text.startswith("```"):
-        lines = text.split("\n")
-        lines = [l for l in lines if not l.strip().startswith("```")]
-        text = "\n".join(lines).strip()
+
+    json_block_match = re.search(r'```(?:json)?\s*\n?(.*?)\n?\s*```', text, re.DOTALL)
+    if json_block_match:
+        block = json_block_match.group(1).strip()
+        try:
+            data = json.loads(block)
+            if isinstance(data, dict):
+                return data
+        except json.JSONDecodeError:
+            pass
 
     try:
         data = json.loads(text)

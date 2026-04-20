@@ -1,4 +1,5 @@
 import asyncio
+import os
 import tempfile
 import time
 from pathlib import Path
@@ -90,52 +91,48 @@ class ImageAnalyzer:
         temp_path = ""
         try:
             temp_fd, temp_path = tempfile.mkstemp(suffix=f".{ext}")
-            try:
-                import os
-                os.write(temp_fd, image_bytes)
-            finally:
-                import os
-                os.close(temp_fd)
+            os.close(temp_fd)
+            with open(temp_path, "wb") as f:
+                f.write(image_bytes)
             resolved_path = str(Path(temp_path).resolve())
         except Exception as e:
             logger.warning("[Wardrobe] 保存临时图片失败: %s", e)
             self._cleanup_temp(temp_path)
             return None
 
-        prompt_text = "请分析这张图片的属性。"
-        if user_description.strip():
-            prompt_text += f"\n\n【用户描述】{user_description.strip()}\n\n请参考用户描述进行分析，注意：用户描述中的专有名词（如服装名称）请原样保留，不要发散解释。"
+        try:
+            prompt_text = "请分析这张图片的属性。"
+            if user_description.strip():
+                prompt_text += f"\n\n【用户描述】{user_description.strip()}\n\n请参考用户描述进行分析，注意：用户描述中的专有名词（如服装名称）请原样保留，不要发散解释。"
 
-        providers = [p for p in [primary_provider_id, secondary_provider_id] if p.strip()]
-        if not providers:
-            logger.warning("[Wardrobe] 未配置存图模型，无法分析图片")
-            self._cleanup_temp(temp_path)
+            providers = [p for p in [primary_provider_id, secondary_provider_id] if p.strip()]
+            if not providers:
+                logger.warning("[Wardrobe] 未配置存图模型，无法分析图片")
+                return None
+
+            for provider_id in providers:
+                try:
+                    t0 = time.perf_counter()
+                    result = await asyncio.wait_for(
+                        self._call_vision_model(provider_id, system_prompt, prompt_text, resolved_path),
+                        timeout=timeout_seconds,
+                    )
+                    elapsed = time.perf_counter() - t0
+                    logger.info("[Wardrobe] 图片分析完成 provider=%s 耗时=%.2fs", provider_id, elapsed)
+                    return result
+                except asyncio.TimeoutError:
+                    logger.warning("[Wardrobe] 存图模型超时 provider=%s", provider_id)
+                except Exception as e:
+                    logger.warning("[Wardrobe] 存图模型调用失败 provider=%s error=%s", provider_id, e)
+
+            logger.error("[Wardrobe] 存图模型均不可用")
             return None
-
-        for provider_id in providers:
-            try:
-                t0 = time.perf_counter()
-                result = await asyncio.wait_for(
-                    self._call_vision_model(provider_id, system_prompt, prompt_text, resolved_path),
-                    timeout=timeout_seconds,
-                )
-                elapsed = time.perf_counter() - t0
-                logger.info("[Wardrobe] 图片分析完成 provider=%s 耗时=%.2fs", provider_id, elapsed)
-                self._cleanup_temp(temp_path)
-                return result
-            except asyncio.TimeoutError:
-                logger.warning("[Wardrobe] 存图模型超时 provider=%s", provider_id)
-            except Exception as e:
-                logger.warning("[Wardrobe] 存图模型调用失败 provider=%s error=%s", provider_id, e)
-
-        logger.error("[Wardrobe] 存图模型均不可用")
-        self._cleanup_temp(temp_path)
-        return None
+        finally:
+            self._cleanup_temp(temp_path)
 
     @staticmethod
     def _cleanup_temp(temp_path: str):
         try:
-            import os
             if os.path.exists(temp_path):
                 os.remove(temp_path)
         except Exception:
