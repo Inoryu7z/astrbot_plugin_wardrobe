@@ -50,6 +50,7 @@
     allLoaded:false,
     batchUploading:false,
     batchUploadProgress:{current:0,total:0,uploaded:0,failed:0},
+    batchReanalyzing:false,
   };
 
   function getToken(){
@@ -498,15 +499,19 @@
       return;
     }
     const ids=[...state.selectedIds];
-    const btn=$('#batchReanalyzeBtn');
-    btn.disabled=true;
-    btn.textContent='分析中...';
+    state.batchReanalyzing=true;
+    updateBatchReanalyzeIndicator();
+    toast(`开始重新分析 ${ids.length} 张图片，可继续其他操作`,'info');
+
     try{
       const resp=await api('/api/images/batch-reanalyze',{
         method:'POST',
         json:{ids},
       });
-      if(!resp||resp.error){toast((resp&&resp.error)||'请求失败','error');return;}
+      if(!resp||resp.error){
+        toast((resp&&resp.error)||'请求失败','error');
+        return;
+      }
       const data=await resp.json();
       if(data.success){
         toast(`重新分析完成：${data.reanalyzed}成功，${data.failed}失败`,data.reanalyzed>0?'success':'error');
@@ -517,9 +522,19 @@
     }catch(e){
       toast('网络错误: '+e.message,'error');
     }finally{
-      btn.disabled=false;
-      btn.textContent='重新分析';
+      state.batchReanalyzing=false;
+      updateBatchReanalyzeIndicator();
     }
+  }
+
+  function updateBatchReanalyzeIndicator(){
+    const indicator=$('#batchReanalyzeIndicator');
+    if(!state.batchReanalyzing){
+      indicator.classList.add('hidden');
+      return;
+    }
+    indicator.classList.remove('hidden');
+    indicator.textContent='分析中...';
   }
 
   function setupUpload(){

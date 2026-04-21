@@ -12,6 +12,7 @@ import uvicorn
 from quart import (
     Quart,
     jsonify,
+    redirect,
     request,
     send_file,
     send_from_directory,
@@ -86,7 +87,7 @@ class WardrobeWebServer:
             if not self._is_token_valid(token):
                 if request.path.startswith("/api/"):
                     return jsonify({"error": "未授权"}), 401
-                return await send_from_directory(str(self._web_dir), "login.html")
+                return redirect("/login")
 
         @app.route("/login")
         async def login_page():
