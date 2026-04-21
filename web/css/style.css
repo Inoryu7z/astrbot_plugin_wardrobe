@@ -556,6 +556,58 @@ html, body {
   margin-left: 0.5rem;
   animation: pulse 1.5s ease-in-out infinite;
 }
+.batch-ops-panel {
+  position: fixed;
+  bottom: 1rem;
+  right: 1rem;
+  background: var(--card);
+  border: 1px solid var(--border);
+  border-radius: 0.75rem;
+  box-shadow: 0 4px 20px rgba(0,0,0,0.15);
+  min-width: 240px;
+  max-width: 360px;
+  z-index: 1000;
+  font-size: 0.85rem;
+}
+.batch-ops-header {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  padding: 0.6rem 0.8rem;
+  border-bottom: 1px solid var(--border);
+}
+.batch-ops-header span { flex:1; }
+.btn-sm { padding: 0.2rem 0.5rem; font-size: 0.75rem; }
+.batch-ops-list {
+  max-height: 200px;
+  overflow-y: auto;
+  padding: 0.4rem;
+}
+.batch-op-item {
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+  padding: 0.25rem 0.4rem;
+  border-radius: 0.3rem;
+}
+.op-icon { width: 1.2rem; text-align: center; }
+.op-id { font-family: monospace; font-size: 0.8rem; color: var(--text-muted); }
+.op-done { color: var(--mint-dark); }
+.op-fail { color: var(--danger); }
+.op-active { color: var(--accent); animation: pulse 1.5s ease-in-out infinite; }
+.op-pending { color: var(--text-muted); }
+.op-retry-btn {
+  margin-left: auto;
+  background: none;
+  border: 1px solid var(--accent);
+  color: var(--accent);
+  border-radius: 0.25rem;
+  padding: 0 0.3rem;
+  cursor: pointer;
+  font-size: 0.8rem;
+  line-height: 1;
+}
+.op-retry-btn:hover { background: var(--accent); color: #fff; }
 @keyframes pulse {
   0%, 100% { opacity: 1; }
   50% { opacity: 0.5; }
