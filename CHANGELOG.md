@@ -1,3 +1,16 @@
+### v1.6.8
+
+**🐛 Bug 修复**
+
+* 修复 WebUI 端口占用问题：将 ASGI 服务器从 hypercorn 切换为 uvicorn，参照 DayMind/LivingMemory 插件的成熟方案，使用 `server.started` 标志做可靠启动检测，`should_exit` 做干净关闭，彻底移除不合理的端口跳跃逻辑
+* 修复关键词搜索遗漏 user_tags 字段：`search_by_description()` 现在同时搜索 `description` 和 `user_tags` 两个字段，用户提供的标签（如"杏花微雨"）不再被遗漏
+* 修复搜索缺少原始查询回退：当 LLM 将查询解析为结构化字段但匹配失败时，现在始终将原始查询文本作为 keyword 回退搜索，避免搜不到明明存在的图片
+* 修复搜索 category 过滤过于严格：当带 category 的搜索无结果时，自动尝试不带 category 的纯关键词搜索作为最终回退
+
+**🔧 改进**
+
+* 依赖更新：`hypercorn` 替换为 `uvicorn>=0.29.0`
+
 ### v1.6.7
 
 **🐛 Bug 修复**
