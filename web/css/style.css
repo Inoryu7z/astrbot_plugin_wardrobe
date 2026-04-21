@@ -550,6 +550,12 @@ html, body {
   margin-left: 0.5rem;
   animation: pulse 1.5s ease-in-out infinite;
 }
+.batch-reanalyze-indicator {
+  color: var(--accent);
+  font-size: 0.85rem;
+  margin-left: 0.5rem;
+  animation: pulse 1.5s ease-in-out infinite;
+}
 @keyframes pulse {
   0%, 100% { opacity: 1; }
   50% { opacity: 0.5; }
