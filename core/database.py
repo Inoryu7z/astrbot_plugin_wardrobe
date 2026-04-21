@@ -240,8 +240,10 @@ class WardrobeDatabase:
         if keywords:
             kw_conds = []
             for kw in keywords:
-                kw_conds.append("description LIKE ? ESCAPE '\\'")
-                params.append(f'%{WardrobeDatabase._escape_like(kw)}%')
+                escaped = WardrobeDatabase._escape_like(kw)
+                kw_conds.append(f"(description LIKE ? ESCAPE '\\' OR user_tags LIKE ? ESCAPE '\\')")
+                params.append(f'%{escaped}%')
+                params.append(f'%{escaped}%')
             conditions.append(f"({' AND '.join(kw_conds)})")
 
         return conditions, params

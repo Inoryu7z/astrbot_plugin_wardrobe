@@ -103,6 +103,10 @@ class ImageSearcher:
         if not query_conditions:
             query_conditions = {"keywords": [user_query]}
 
+        existing_keywords = query_conditions.get("keywords") or []
+        if user_query not in existing_keywords:
+            query_conditions["keywords"] = [user_query] + existing_keywords
+
         persona_scope = query_conditions.pop("persona_scope", "global")
         named_persona = query_conditions.pop("persona", "")
         meta["persona_scope"] = persona_scope
@@ -230,6 +234,14 @@ class ImageSearcher:
                 limit=limit,
             )
 
+        if not results and keywords and category:
+            results = await self.db.search_by_description(
+                keywords=keywords,
+                persona="",
+                exclude_persona=exclude_persona,
+                limit=limit,
+            )
+
         return results
 
     async def _parse_query(
@@ -296,6 +308,13 @@ class ImageSearcher:
             results = await self.db.search_by_description(
                 keywords=keywords,
                 category=category,
+                persona=persona,
+                limit=limit,
+            )
+
+        if not results and keywords and category:
+            results = await self.db.search_by_description(
+                keywords=keywords,
                 persona=persona,
                 limit=limit,
             )
