@@ -493,9 +493,11 @@
   }
 
   async function batchReanalyze(){
-    if(state.selectedIds.size===0)return;
+    if(state.selectedIds.size===0){
+      toast('请先选择图片','warning');
+      return;
+    }
     const ids=[...state.selectedIds];
-    if(!confirm(`确定重新分析选中的 ${ids.length} 张图片？将覆盖现有分析结果。`))return;
     const btn=$('#batchReanalyzeBtn');
     btn.disabled=true;
     btn.textContent='分析中...';
