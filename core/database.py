@@ -41,7 +41,8 @@ CREATE TABLE IF NOT EXISTS images (
     persona TEXT DEFAULT '',
     created_by TEXT DEFAULT '',
     favorite TEXT DEFAULT 'none',
-    use_count INTEGER DEFAULT 0
+    use_count INTEGER DEFAULT 0,
+    file_hash TEXT DEFAULT ''
 );
 """
 
@@ -51,6 +52,7 @@ CREATE INDEX IF NOT EXISTS idx_exposure_level ON images(exposure_level);
 CREATE INDEX IF NOT EXISTS idx_style ON images(style);
 CREATE INDEX IF NOT EXISTS idx_scene ON images(scene);
 CREATE INDEX IF NOT EXISTS idx_favorite ON images(favorite);
+CREATE INDEX IF NOT EXISTS idx_file_hash ON images(file_hash);
 """
 
 _UPDATABLE_FIELDS = frozenset({
@@ -59,7 +61,7 @@ _UPDATABLE_FIELDS = frozenset({
     "dynamic_level", "action_style", "shot_size", "camera_angle",
     "expression", "color_tone", "composition", "background",
     "description", "user_tags", "exposure_features", "key_features", "prop_objects", "allure_features", "body_focus",
-    "image_path", "updated_at", "favorite", "use_count",
+    "image_path", "updated_at", "favorite", "use_count", "file_hash",
 })
 
 
@@ -84,6 +86,7 @@ class WardrobeDatabase:
                     ("body_focus", "TEXT DEFAULT '[]'"),
                     ("favorite", "TEXT DEFAULT 'none'"),
                     ("use_count", "INTEGER DEFAULT 0"),
+                    ("file_hash", "TEXT DEFAULT ''"),
                 ]:
                     try:
                         await db.execute(f"ALTER TABLE images ADD COLUMN {col} {default}")
@@ -122,6 +125,7 @@ class WardrobeDatabase:
         persona: str = "",
         image_path: str,
         created_by: str = "",
+        file_hash: str = "",
     ) -> str:
         now = datetime.now(timezone.utc).isoformat()
         image_id = str(uuid.uuid4())
@@ -134,8 +138,8 @@ class WardrobeDatabase:
                         dynamic_level, action_style, shot_size, camera_angle,
                         expression, color_tone, composition, background,
                         description, user_tags, exposure_features, key_features, prop_objects, allure_features, body_focus,
-                        persona, image_path, created_at, updated_at, created_by, favorite, use_count
-                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+                        persona, image_path, created_at, updated_at, created_by, favorite, use_count, file_hash
+                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
                     (
                         image_id,
                         category,
@@ -168,6 +172,7 @@ class WardrobeDatabase:
                         created_by,
                         "none",
                         0,
+                        file_hash,
                     ),
                 )
                 await db.commit()
@@ -178,6 +183,19 @@ class WardrobeDatabase:
             db.row_factory = aiosqlite.Row
             async with db.execute(
                 "SELECT * FROM images WHERE id = ?", (image_id,)
+            ) as cursor:
+                row = await cursor.fetchone()
+                if row is None:
+                    return None
+                return self._row_to_dict(row)
+
+    async def get_image_by_hash(self, file_hash: str) -> Optional[dict[str, Any]]:
+        if not file_hash:
+            return None
+        async with aiosqlite.connect(self.db_path) as db:
+            db.row_factory = aiosqlite.Row
+            async with db.execute(
+                "SELECT * FROM images WHERE file_hash = ? LIMIT 1", (file_hash,)
             ) as cursor:
                 row = await cursor.fetchone()
                 if row is None:
@@ -350,9 +368,11 @@ class WardrobeDatabase:
         params.append(offset)
 
         if sort_by == "use_count":
-            order_clause = "CASE favorite WHEN 'favorite' THEN 1 WHEN 'like' THEN 2 ELSE 3 END, use_count DESC, created_at DESC"
-        else:
+            order_clause = "use_count DESC, created_at DESC"
+        elif sort_by == "favorite":
             order_clause = "CASE favorite WHEN 'favorite' THEN 1 WHEN 'like' THEN 2 ELSE 3 END, created_at DESC"
+        else:
+            order_clause = "created_at DESC"
 
         async with aiosqlite.connect(self.db_path) as db:
             db.row_factory = aiosqlite.Row
@@ -416,7 +436,7 @@ class WardrobeDatabase:
 
         async with aiosqlite.connect(self.db_path) as db:
             db.row_factory = aiosqlite.Row
-            sql = f"SELECT * FROM images {where_clause} ORDER BY CASE favorite WHEN 'favorite' THEN 1 WHEN 'like' THEN 2 ELSE 3 END, created_at DESC LIMIT ? OFFSET ?"
+            sql = f"SELECT * FROM images {where_clause} ORDER BY created_at DESC LIMIT ? OFFSET ?"
             async with db.execute(sql, params) as cursor:
                 rows = await cursor.fetchall()
                 return [self._row_to_dict(row) for row in rows]
@@ -465,9 +485,11 @@ class WardrobeDatabase:
             where_clause = "WHERE " + " AND ".join(conditions)
         params.extend([limit, offset])
         if sort_by == "use_count":
-            order_clause = "CASE favorite WHEN 'favorite' THEN 1 WHEN 'like' THEN 2 ELSE 3 END, use_count DESC, created_at DESC"
-        else:
+            order_clause = "use_count DESC, created_at DESC"
+        elif sort_by == "favorite":
             order_clause = "CASE favorite WHEN 'favorite' THEN 1 WHEN 'like' THEN 2 ELSE 3 END, created_at DESC"
+        else:
+            order_clause = "created_at DESC"
         async with aiosqlite.connect(self.db_path) as db:
             db.row_factory = aiosqlite.Row
             sql = f"SELECT * FROM images {where_clause} ORDER BY {order_clause} LIMIT ? OFFSET ?"
@@ -509,9 +531,11 @@ class WardrobeDatabase:
             where_clause = "WHERE " + " AND ".join(conditions)
         params.extend([limit, offset])
         if sort_by == "use_count":
-            order_clause = "CASE favorite WHEN 'favorite' THEN 1 WHEN 'like' THEN 2 ELSE 3 END, use_count DESC, created_at DESC"
-        else:
+            order_clause = "use_count DESC, created_at DESC"
+        elif sort_by == "favorite":
             order_clause = "CASE favorite WHEN 'favorite' THEN 1 WHEN 'like' THEN 2 ELSE 3 END, created_at DESC"
+        else:
+            order_clause = "created_at DESC"
         async with aiosqlite.connect(self.db_path) as db:
             db.row_factory = aiosqlite.Row
             sql = f"SELECT id, category, persona, image_path, created_at, favorite, use_count FROM images {where_clause} ORDER BY {order_clause} LIMIT ? OFFSET ?"
@@ -548,8 +572,8 @@ class WardrobeDatabase:
                                 dynamic_level, action_style, shot_size, camera_angle,
                                 expression, color_tone, composition, background,
                                 description, user_tags, exposure_features, key_features, prop_objects, allure_features, body_focus,
-                                persona, image_path, created_at, updated_at, created_by, favorite, use_count
-                            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+                                persona, image_path, created_at, updated_at, created_by, favorite, use_count, file_hash
+                            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
                             (
                                 rec.get("id", str(uuid.uuid4())),
                                 rec.get("category", "人物"),
@@ -582,6 +606,7 @@ class WardrobeDatabase:
                                 rec.get("created_by", ""),
                                 rec.get("favorite", "none"),
                                 rec.get("use_count", 0),
+                                rec.get("file_hash", ""),
                             ),
                         )
                         imported += 1

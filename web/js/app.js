@@ -546,6 +546,13 @@
           if(!resp){toast('上传失败','error');$('#uploadStatus').textContent='请求失败';submitBtn.disabled=false;return;}
           if(resp.error){toast(resp.error,'error');$('#uploadStatus').textContent=resp.error;submitBtn.disabled=false;return;}
           const data=await resp.json();
+          if(data.duplicate){
+            const personaInfo=data.existing_persona?`（人格: ${esc(data.existing_persona)}）`:'';
+            toast(`图片重复，已存在于衣柜库中${personaInfo}，跳过保存`,'warning');
+            $('#uploadStatus').textContent='图片重复，已跳过';
+            submitBtn.disabled=false;
+            return;
+          }
           if(data.success){
             toast('上传成功，正在分析...','success');
             $('#uploadModal').classList.add('hidden');
@@ -577,7 +584,10 @@
             const resp=await api('/api/images/upload',{method:'POST',body:fd});
             if(resp&&!resp.error){
               const data=await resp.json();
-              if(data.success){
+              if(data.duplicate){
+                failed++;
+                if(statusEl){statusEl.textContent='重复';statusEl.className='file-status dup';}
+              }else if(data.success){
                 uploaded++;
                 if(statusEl){statusEl.textContent='✓';statusEl.className='file-status ok';}
               }else{

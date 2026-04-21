@@ -1,6 +1,7 @@
 from pathlib import Path
 from typing import Optional
 import asyncio
+import hashlib
 
 from astrbot.api import AstrBotConfig, logger
 from astrbot.api.event import AstrMessageEvent, filter
@@ -35,7 +36,7 @@ _AIIMG_GENERATE_TOOLS = frozenset({"aiimg_generate"})
     "astrbot_plugin_wardrobe",
     "Inoryu7z",
     "图片衣柜管理插件，支持智能分类、语义检索和参考图接口",
-    "1.9.2",
+    "2.1.0",
 )
 class WardrobePlugin(Star):
     def __init__(self, context: Context, config: AstrBotConfig = None):
@@ -172,6 +173,7 @@ class WardrobePlugin(Star):
                 if self.vector_searcher.available:
                     await self.vector_searcher.index_existing_images()
             asyncio.create_task(self._reanalyze_old_images())
+            asyncio.create_task(self._backfill_file_hashes())
         finally:
             self._db_init_event.set()
 
@@ -287,6 +289,48 @@ class WardrobePlugin(Star):
             logger.info("[Wardrobe] 旧图重分析完成: 成功%d 失败%d 共%d张", success, failed, len(need_reanalyze))
         except Exception as e:
             logger.error("[Wardrobe] 旧图重分析任务异常: %s", e, exc_info=True)
+
+    async def _backfill_file_hashes(self):
+        try:
+            records = await self.db.get_all_records()
+            need_backfill = []
+            for rec in records:
+                if not rec.get("file_hash", "").strip():
+                    need_backfill.append(rec)
+
+            if not need_backfill:
+                return
+
+            logger.info("[Wardrobe] 发现 %d 张图片缺少文件哈希，开始回填...", len(need_backfill))
+
+            backfilled = 0
+            for rec in need_backfill:
+                image_id = rec.get("id", "")
+                image_path_str = rec.get("image_path", "")
+                if not image_path_str:
+                    continue
+
+                path = self.store.get_image_path(image_path_str)
+                if not path.exists():
+                    continue
+
+                try:
+                    import aiofiles
+                    async with aiofiles.open(path, "rb") as f:
+                        image_bytes = await f.read()
+
+                    if not image_bytes:
+                        continue
+
+                    file_hash = hashlib.md5(image_bytes).hexdigest()
+                    await self.db.update_image(image_id, file_hash=file_hash)
+                    backfilled += 1
+                except Exception as e:
+                    logger.debug("[Wardrobe] 回填哈希失败 id=%s error=%s", image_id, e)
+
+            logger.info("[Wardrobe] 文件哈希回填完成: %d/%d", backfilled, len(need_backfill))
+        except Exception as e:
+            logger.error("[Wardrobe] 文件哈希回填任务异常: %s", e, exc_info=True)
 
     def _cfg(self, key: str, default=None):
         return self.config.get(key, default)
@@ -421,9 +465,15 @@ class WardrobePlugin(Star):
         logger.info("[Wardrobe] 开始存图，图片大小=%.2fKB 人格=%s 用户描述=%s", len(image_bytes) / 1024, persona or "无", user_description or "无")
 
         created_by = str(event.get_sender_id() or "")
-        image_id, attrs = await self._save_image_from_bytes(
+        image_id, attrs, duplicate = await self._save_image_from_bytes(
             image_bytes, persona=persona, created_by=created_by, user_description=user_description
         )
+
+        if duplicate:
+            dup_persona = duplicate.get("persona", "")
+            dup_id = duplicate.get("id", "")
+            persona_info = f"（人格: {dup_persona}）" if dup_persona else ""
+            return f"这张图片已存在于衣柜库中{persona_info}，ID: {dup_id}，跳过保存"
 
         if not image_id:
             primary = str(self._cfg("save_provider_id", "") or "").strip()
@@ -479,7 +529,13 @@ class WardrobePlugin(Star):
         max_size = int(self._cfg("max_image_size_mb", _MAX_IMAGE_SIZE_MB) or _MAX_IMAGE_SIZE_MB)
         if len(image_bytes) > max_size * 1024 * 1024:
             logger.warning("[Wardrobe] 图片过大 (%.1fMB)", len(image_bytes) / 1024 / 1024)
-            return None, None
+            return None, None, None
+
+        file_hash = hashlib.md5(image_bytes).hexdigest()
+        existing = await self.db.get_image_by_hash(file_hash)
+        if existing:
+            logger.info("[Wardrobe] 图片重复，跳过保存: hash=%s 已存在ID=%s 人格=%s", file_hash, existing["id"], existing.get("persona", ""))
+            return None, None, existing
 
         if user_description and len(user_description) > _MAX_DESCRIPTION_LEN:
             user_description = user_description[:_MAX_DESCRIPTION_LEN]
@@ -489,7 +545,7 @@ class WardrobePlugin(Star):
         timeout = float(self._cfg("save_timeout_seconds", 60.0) or 60.0)
 
         if not primary and not secondary:
-            return None, None
+            return None, None, None
 
         attrs = await self.analyzer.analyze_image(
             image_bytes,
@@ -529,10 +585,11 @@ class WardrobePlugin(Star):
                 image_path=filename,
                 created_by=created_by,
                 persona=persona,
+                file_hash=file_hash,
             )
             await self._index_to_vector(image_id, user_description or "模型分析失败，无描述", user_description,
                                          category="人物", persona=persona)
-            return image_id, None
+            return image_id, None, None
 
         category = attrs.get("category", "人物")
         if category not in ("人物", "衣服"):
@@ -581,6 +638,7 @@ class WardrobePlugin(Star):
             image_path=filename,
             created_by=created_by,
             persona=persona,
+            file_hash=file_hash,
         )
 
         desc_text = _ensure_str(attrs.get("description"))
@@ -594,7 +652,7 @@ class WardrobePlugin(Star):
             category=category, persona=persona,
         )
 
-        return image_id, attrs
+        return image_id, attrs, None
 
     async def _auto_save_aiimg_image(self, event: AstrMessageEvent, tool=None):
         # 仅自动保存自拍模式生成的图片；文生图/改图不自动存入衣橱。
@@ -669,9 +727,16 @@ class WardrobePlugin(Star):
             # 自动存图不传 user_description：此时没有用户主动提供的描述，
             # AI 分析模型会根据图片内容自动生成描述，无需额外文本。
             # 仅 /存图 命令路径才会传入用户描述。
-            image_id, attrs = await self._save_image_from_bytes(
+            image_id, attrs, duplicate = await self._save_image_from_bytes(
                 image_bytes, persona=persona, created_by=user_id,
             )
+
+            if duplicate:
+                logger.info(
+                    "[Wardrobe] AiImg 自动存图跳过：图片重复，已存在ID=%s",
+                    duplicate.get("id", ""),
+                )
+                return
 
             if image_id:
                 if attrs:
