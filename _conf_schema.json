@@ -63,6 +63,12 @@
     "type": "int",
     "default": 1
   },
+  "search_persona_mode": {
+    "description": "取图人格搜索策略",
+    "hint": "exclude_all：优先搜无人格图，找不到再搜其他人格的图；self_first：优先搜当前人格图，找不到再搜全局",
+    "type": "string",
+    "default": "exclude_all"
+  },
   "max_image_size_mb": {
     "description": "图片大小限制(MB)",
     "hint": "超过此大小的图片将被拒绝保存",

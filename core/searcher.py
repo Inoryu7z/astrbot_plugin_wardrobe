@@ -140,6 +140,7 @@ class ImageSearcher:
         current_persona: str = "",
         persona_names: str = "",
         exclude_current_persona: bool = False,
+        persona_mode: str = "exclude_all",
     ) -> tuple[list[dict[str, Any]], dict[str, Any]]:
         meta = {"persona_mismatch": False, "searched_persona": persona, "persona_scope": "global"}
 
@@ -178,6 +179,7 @@ class ImageSearcher:
                 query_conditions, persona_scope=persona_scope,
                 named_persona=named_persona, current_persona=current_persona,
                 limit=candidate_limit, meta=meta, user_query=user_query,
+                persona_mode=persona_mode,
             )
 
         if not candidates:
@@ -213,23 +215,40 @@ class ImageSearcher:
         limit: int,
         meta: dict[str, Any],
         user_query: str = "",
+        persona_mode: str = "exclude_all",
     ) -> list[dict[str, Any]]:
         logger.info(
-            "[Wardrobe] 搜索策略: scope=%s current_persona=%s named_persona=%s",
-            persona_scope, current_persona or "无", named_persona or "无",
+            "[Wardrobe] 搜索策略: scope=%s current_persona=%s named_persona=%s persona_mode=%s",
+            persona_scope, current_persona or "无", named_persona or "无", persona_mode,
         )
 
         if persona_scope == "self" and current_persona:
-            candidates = await self._query_candidates(conditions, limit=limit, persona=current_persona, user_query=user_query)
-            logger.info("[Wardrobe] 人格池搜索结果: %d张 persona=%s", len(candidates), current_persona)
-            if candidates:
-                meta["searched_persona"] = current_persona
+            if persona_mode == "exclude_all":
+                candidates = await self._query_candidates(conditions, limit=limit, persona="", user_query=user_query)
+                logger.info("[Wardrobe] 无人格池搜索结果: %d张", len(candidates))
+                if candidates:
+                    meta["searched_persona"] = ""
+                    return candidates
+                candidates = await self._query_candidates_excluding_persona(
+                    conditions, limit=limit, exclude_persona=current_persona, user_query=user_query,
+                )
+                logger.info("[Wardrobe] 其他人格池搜索结果: %d张 exclude=%s", len(candidates), current_persona)
+                if candidates:
+                    meta["persona_mismatch"] = True
+                    meta["searched_persona"] = f"非{current_persona}"
+                    return candidates
+                return []
+            else:
+                candidates = await self._query_candidates(conditions, limit=limit, persona=current_persona, user_query=user_query)
+                logger.info("[Wardrobe] 人格池搜索结果: %d张 persona=%s", len(candidates), current_persona)
+                if candidates:
+                    meta["searched_persona"] = current_persona
+                    return candidates
+                logger.info("[Wardrobe] 当前人格池无结果，回退全局搜索 persona=%s", current_persona)
+                meta["persona_mismatch"] = True
+                candidates = await self._query_candidates(conditions, limit=limit, persona="", user_query=user_query)
+                meta["searched_persona"] = ""
                 return candidates
-            logger.info("[Wardrobe] 当前人格池无结果，回退全局搜索 persona=%s", current_persona)
-            meta["persona_mismatch"] = True
-            candidates = await self._query_candidates(conditions, limit=limit, persona="", user_query=user_query)
-            meta["searched_persona"] = ""
-            return candidates
 
         if persona_scope == "other" and current_persona:
             candidates = await self._query_candidates_excluding_persona(conditions, limit=limit, exclude_persona=current_persona, user_query=user_query)
@@ -259,8 +278,13 @@ class ImageSearcher:
 
     async def _vector_search(self, user_query: str, k: int, persona: str = "", exclude_persona: str = "") -> list[dict[str, Any]]:
         if not self.vector_searcher or not self.vector_searcher.available:
+            logger.info("[Wardrobe] 向量检索不可用: vector_searcher=%s available=%s",
+                        self.vector_searcher is not None,
+                        self.vector_searcher.available if self.vector_searcher else False)
             return []
 
+        logger.info("[Wardrobe] 向量检索开始: query=%s k=%d persona=%s exclude_persona=%s",
+                    user_query[:100], k, persona or "全局", exclude_persona or "无")
         wardrobe_ids = await self.vector_searcher.search(
             query=user_query,
             k=k,
@@ -268,6 +292,7 @@ class ImageSearcher:
             exclude_persona=exclude_persona,
         )
         if not wardrobe_ids:
+            logger.info("[Wardrobe] 向量检索无结果: query=%s", user_query[:100])
             return []
 
         results = []
@@ -275,6 +300,8 @@ class ImageSearcher:
             img = await self.db.get_image(wid)
             if img:
                 results.append(img)
+        logger.info("[Wardrobe] 向量检索命中: %d张 (原始返回%d个ID, 数据库匹配%d张)",
+                    len(results), len(wardrobe_ids), len(results))
         return results
 
     async def _query_candidates_excluding_persona(
@@ -295,6 +322,7 @@ class ImageSearcher:
             logger.info("[Wardrobe] 向量检索命中（排除人格）: %d张 exclude=%s", len(vec_results), exclude_persona)
             return self._sort_by_favorite(vec_results)
 
+        logger.info("[Wardrobe] 向量检索无结果（排除人格），回退LIKE检索 exclude=%s", exclude_persona)
         results = await self.db.search_images(
             category=category,
             exposure_level=exposure_level,
@@ -388,6 +416,7 @@ class ImageSearcher:
             logger.info("[Wardrobe] 向量检索命中: %d张 persona=%s", len(vec_results), persona or "全局")
             return self._sort_by_favorite(vec_results)
 
+        logger.info("[Wardrobe] 向量检索无结果，回退LIKE检索 persona=%s", persona or "全局")
         results = await self.db.search_images(
             category=category,
             exposure_level=exposure_level,

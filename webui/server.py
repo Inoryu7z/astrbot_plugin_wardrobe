@@ -648,6 +648,28 @@ class WardrobeWebServer:
             if not query:
                 return jsonify({"images": []})
 
+            vec_results = []
+            if self.plugin.vector_searcher and self.plugin.vector_searcher.available:
+                try:
+                    wardrobe_ids = await self.plugin.vector_searcher.search(
+                        query=query, k=limit, persona=persona or "",
+                    )
+                    if wardrobe_ids:
+                        for wid in wardrobe_ids:
+                            img = await self.plugin.db.get_image(wid)
+                            if img:
+                                if category and img.get("category") != category:
+                                    continue
+                                if favorite in ("favorite", "like") and img.get("favorite") != favorite:
+                                    continue
+                                vec_results.append(img)
+                        logger.info("[Wardrobe] WebUI搜索向量检索命中: %d张 query=%s", len(vec_results), query[:50])
+                except Exception as e:
+                    logger.warning("[Wardrobe] WebUI搜索向量检索失败: %s", e)
+
+            if vec_results:
+                return jsonify({"images": vec_results})
+
             keywords = [k.strip() for k in query.replace("，", ",").split(",") if k.strip()]
             results = await self.plugin.db.search_by_description(
                 keywords=keywords,
@@ -655,6 +677,7 @@ class WardrobeWebServer:
                 persona=persona or None,
                 limit=limit,
             )
+            logger.info("[Wardrobe] WebUI搜索LIKE检索: %d张 query=%s", len(results), query[:50])
             return jsonify({"images": results})
 
         @app.route("/api/filters")

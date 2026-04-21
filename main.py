@@ -36,7 +36,7 @@ _AIIMG_GENERATE_TOOLS = frozenset({"aiimg_generate"})
     "astrbot_plugin_wardrobe",
     "Inoryu7z",
     "图片衣柜管理插件，支持智能分类、语义检索和参考图接口",
-    "2.1.4",
+    "2.1.5",
 )
 class WardrobePlugin(Star):
     def __init__(self, context: Context, config: AstrBotConfig = None):
@@ -168,6 +168,11 @@ class WardrobePlugin(Star):
         try:
             await self.db.init()
             self._db_initialized = True
+            if not self.vector_searcher:
+                self.vector_searcher = self._init_vector_searcher(self.data_dir)
+                if self.vector_searcher:
+                    self.searcher.vector_searcher = self.vector_searcher
+                    logger.info("[Wardrobe] 向量检索器延迟初始化成功")
             if self.vector_searcher and not self.vector_searcher._initialized:
                 await self.vector_searcher.initialize()
                 if self.vector_searcher.available:
@@ -445,7 +450,7 @@ class WardrobePlugin(Star):
         '''从图片衣柜库中搜索已有的图片并发送给用户。此工具只能搜索和发送衣柜库中已保存的图片，绝对不能用来生成、绘制或创建新图片。当用户想要查看、寻找、获取某类图片，或要求"发一张以前拍过的/存过的图"时调用此工具。例如：有没有洛丽塔发一张看看、发一张甜美一点的衣服来、以前拍过的挂脖的图发一张。
 
         Args:
-            query(string): 用户的图片需求描述
+            query(string): 用户的图片需求描述，必须使用自然语言完整表达用户的意图，不要拆成关键词。例如用户说"色气的jk服"，就填"色气的jk服"，不要填"jk服 色气"。
             persona(string): 当前对话人格名称。如果你正在扮演某个人格角色（如星织、雪音），必须填写你自己的人格名；如果用户提到了其他人格名（如"雪音有没有xxx"），也填写该名称；如果当前没有扮演任何人格角色则留空
         '''
         if not persona.strip():
@@ -946,6 +951,7 @@ class WardrobePlugin(Star):
             persona=resolved_persona,
             persona_names=persona_names,
             current_persona=current_persona,
+            persona_mode=str(self._cfg("search_persona_mode", "exclude_all") or "exclude_all"),
         )
 
         logger.info(
