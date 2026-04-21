@@ -1,6 +1,6 @@
 name: astrbot_plugin_wardrobe
 display_name: 衣橱图鉴
-version: 1.8.1
+version: 2.0.0
 description: 图片衣柜管理插件，支持智能分类、语义检索和参考图接口
 author: Inoryu7z
 repo: https://github.com/Inoryu7z/astrbot_plugin_wardrobe

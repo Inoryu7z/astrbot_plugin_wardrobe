@@ -7,14 +7,45 @@
     'scene':'场景','atmosphere':'氛围','pose_type':'姿势',
     'body_orientation':'朝向','dynamic_level':'动态程度','action_style':'动作风格',
     'shot_size':'景别','camera_angle':'角度','expression':'表情',
+    'exposure_features':'暴露特征','key_features':'关键特征','prop_objects':'道具物品','allure_features':'魅力特征','body_focus':'身体焦点',
   };
+
+  const FIELD_DEFS=[
+    {key:'category',label:'分类',type:'select',options:['人物','衣服']},
+    {key:'style',label:'风格',type:'tags'},
+    {key:'clothing_type',label:'服装类型',type:'text'},
+    {key:'exposure_level',label:'暴露程度',type:'select',options:['保守','轻微','中等','明显','极限']},
+    {key:'exposure_features',label:'暴露特征',type:'tags',hint:'如：露肩、露背、透视、开叉'},
+    {key:'key_features',label:'关键特征',type:'tags',hint:'3-5个最突出的视觉特征'},
+    {key:'prop_objects',label:'道具物品',type:'tags',hint:'如：手机、扇子、玩偶'},
+    {key:'allure_features',label:'魅力特征',type:'tags',hint:'动作/表情带来的魅力感，如：舔唇、眼神诱惑'},
+    {key:'body_focus',label:'身体焦点',type:'tags',hint:'画面刻意突出的部位，如：胸部特写、腿部特写'},
+    {key:'scene',label:'场景',type:'tags'},
+    {key:'atmosphere',label:'氛围',type:'tags'},
+    {key:'pose_type',label:'姿势',type:'text'},
+    {key:'body_orientation',label:'朝向',type:'text'},
+    {key:'dynamic_level',label:'动态程度',type:'text'},
+    {key:'action_style',label:'动作风格',type:'tags'},
+    {key:'shot_size',label:'景别',type:'text'},
+    {key:'camera_angle',label:'角度',type:'text'},
+    {key:'expression',label:'表情',type:'text'},
+    {key:'color_tone',label:'色调',type:'text'},
+    {key:'composition',label:'构图',type:'text'},
+    {key:'background',label:'背景',type:'text'},
+    {key:'description',label:'描述',type:'textarea'},
+    {key:'user_tags',label:'用户标签',type:'text'},
+    {key:'persona',label:'人格',type:'text'},
+    {key:'favorite',label:'收藏',type:'select',options:['none','favorite','like']},
+  ];
 
   let state={
     page:1, perPage:24, total:0,
-    category:'', persona:'', style:'', scene:'', shot_size:'', atmosphere:'',
+    category:'', persona:'', style:'', scene:'', shot_size:'', atmosphere:'', favorite:'', sort_by:'created_at',
     searchQuery:'', batchMode:false,
     selectedIds:new Set(),
     currentImageId:null,
+    currentImageData:null,
+    editing:false,
     loading:false,
     allLoaded:false,
   };
@@ -49,7 +80,7 @@
 
   async function loadStats(){
     const resp=await api('/api/stats');
-    if(!resp||resp.error)return;
+    if(!resp)return;
     const data=await resp.json();
     $('#statTotal').textContent=data.total||0;
     $('#statPerson').textContent=(data.by_category&&data.by_category['人物'])||0;
@@ -59,7 +90,7 @@
   async function loadFilters(){
     try{
       const resp=await api('/api/filters');
-      if(!resp||resp.error)return;
+      if(!resp)return;
       const data=await resp.json();
 
       const container=$('#personaFilters');
@@ -115,19 +146,19 @@
 
     let url;
     if(state.searchQuery){
-      url=`/api/search?q=${encodeURIComponent(state.searchQuery)}&persona=${encodeURIComponent(state.persona)}&category=${encodeURIComponent(state.category)}&limit=50`;
+      url=`/api/search?q=${encodeURIComponent(state.searchQuery)}&persona=${encodeURIComponent(state.persona)}&category=${encodeURIComponent(state.category)}&favorite=${encodeURIComponent(state.favorite)}&limit=${state.perPage}`;
     }else{
-      url=`/api/images?page=${state.page}&per_page=${state.perPage}&category=${encodeURIComponent(state.category)}&persona=${encodeURIComponent(state.persona)}&style=${encodeURIComponent(state.style)}&scene=${encodeURIComponent(state.scene)}&shot_size=${encodeURIComponent(state.shot_size)}&atmosphere=${encodeURIComponent(state.atmosphere)}&lightweight=1`;
+      url=`/api/images?page=${state.page}&per_page=${state.perPage}&category=${encodeURIComponent(state.category)}&persona=${encodeURIComponent(state.persona)}&style=${encodeURIComponent(state.style)}&scene=${encodeURIComponent(state.scene)}&shot_size=${encodeURIComponent(state.shot_size)}&atmosphere=${encodeURIComponent(state.atmosphere)}&favorite=${encodeURIComponent(state.favorite)}&sort_by=${encodeURIComponent(state.sort_by)}&lightweight=1`;
     }
 
     const resp=await api(url);
     state.loading=false;
     $('#loadingIndicator').classList.add('hidden');
 
-    if(!resp||resp.error)return;
+    if(!resp)return;
     const data=await resp.json();
     const images=data.images||[];
-    state.total=data.total!==undefined?data.total:images.length;
+    state.total=data.total||images.length;
 
     if(resetGrid){
       $('#imageGrid').innerHTML='';
@@ -145,9 +176,6 @@
     if(!state.searchQuery && loadedCount<state.total){
       $('#loadMoreSection').classList.remove('hidden');
       $('#loadMoreInfo').textContent=`已加载 ${loadedCount} / ${state.total}`;
-    }else if(state.searchQuery && state.total>0){
-      $('#loadMoreSection').classList.remove('hidden');
-      $('#loadMoreInfo').textContent=`搜索结果: ${state.total} 张`;
     }else{
       $('#loadMoreSection').classList.add('hidden');
     }
@@ -162,10 +190,15 @@
       card.className='image-card';
       card.dataset.id=img.id;
       const personaText=img.persona?`<div class="image-card-persona">${esc(img.persona)}</div>`:'';
+      const favIcon=img.favorite==='favorite'?'❤️':img.favorite==='like'?'👍':'';
+      const favMark=favIcon?`<div class="image-card-fav">${favIcon}</div>`:'';
+      const useCount=img.use_count?`<span class="image-card-uses">🔥${img.use_count}</span>`:'';
       card.innerHTML=`
+        ${favMark}
         <img src="/api/image-file/${img.id}" loading="lazy" alt="" onerror="this.src='data:image/svg+xml,<svg xmlns=%22http://www.w3.org/2000/svg%22 width=%22180%22 height=%22240%22><rect fill=%22%23F8F0F4%22 width=%22180%22 height=%22240%22/><text x=%2290%22 y=%22125%22 text-anchor=%22middle%22 fill=%22%23C8B8D0%22 font-size=%2214%22>加载失败</text></svg>'">
         <div class="image-card-overlay">
           <span class="image-card-category">${esc(img.category||'')}</span>
+          ${useCount}
           ${personaText}
         </div>
         <div class="image-card-checkbox" data-id="${img.id}"></div>
@@ -199,58 +232,244 @@
 
   async function showDetail(id){
     state.currentImageId=id;
+    state.editing=false;
     const resp=await api(`/api/images/${id}`);
-    if(!resp||resp.error)return;
+    if(!resp)return;
     const img=await resp.json();
+    state.currentImageData=img;
     $('#modalImage').src=`/api/image-file/${id}`;
-    const tags=$('#modalTags');
-    tags.innerHTML='';
-    const tagColors=['tag-pink','tag-lavender','tag-mint','tag-peach'];
-    const tagData=[
-      ...(img.style||[]).map(s=>({t:s,c:0})),
-      ...(img.scene||[]).map(s=>({t:s,c:1})),
-      ...(img.atmosphere||[]).map(s=>({t:s,c:2})),
-      ...(img.action_style||[]).map(s=>({t:s,c:3})),
-    ];
-    if(img.clothing_type)tagData.push({t:img.clothing_type,c:0});
-    if(img.shot_size)tagData.push({t:img.shot_size,c:1});
-    if(img.expression)tagData.push({t:img.expression,c:2});
-    if(img.persona)tagData.push({t:img.persona,c:3});
-    tagData.forEach(td=>{
-      const span=document.createElement('span');
-      span.className='tag '+tagColors[td.c%4];
-      span.textContent=td.t;
-      tags.appendChild(span);
-    });
-    $('#modalDesc').textContent=img.description||'无描述';
-    const userTags=$('#modalUserTags');
-    if(img.user_tags){
-      userTags.textContent='用户标签: '+img.user_tags;
-      userTags.classList.remove('hidden');
-    }else{
-      userTags.classList.add('hidden');
-    }
-    const meta=$('#modalMeta');
-    const lines=[];
-    if(img.exposure_level)lines.push(`暴露程度: ${img.exposure_level}`);
-    if(img.pose_type)lines.push(`姿势: ${img.pose_type}`);
-    if(img.body_orientation)lines.push(`朝向: ${img.body_orientation}`);
-    if(img.camera_angle)lines.push(`角度: ${img.camera_angle}`);
-    if(img.color_tone)lines.push(`色调: ${img.color_tone}`);
-    if(img.composition)lines.push(`构图: ${img.composition}`);
-    if(img.background)lines.push(`背景: ${img.background}`);
-    lines.push(`ID: ${img.id}`);
-    lines.push(`创建时间: ${img.created_at||'未知'}`);
-    meta.innerHTML=lines.map(l=>`<span>${esc(l)}</span>`).join('');
+    renderDetailFields(img,false);
+    const metaRO=$('#modalMetaReadonly');
+    metaRO.innerHTML=`<span>ID: ${esc(img.id)}</span><span>创建时间: ${esc(img.created_at||'未知')}</span>`;
+    updateFavoriteBtns(img.favorite||'none');
+    updateEditButtons();
     $('#detailModal').classList.remove('hidden');
   }
 
-  function closeDetail(){$('#detailModal').classList.add('hidden');state.currentImageId=null;}
+  function updateFavoriteBtns(fav){
+    const favBtn=$('#favFavoriteBtn');
+    const likeBtn=$('#favLikeBtn');
+    favBtn.textContent=fav==='favorite'?'❤️':'🤍';
+    likeBtn.textContent=fav==='like'?'👍🏻':'👍';
+    favBtn.classList.toggle('active-favorite',fav==='favorite');
+    likeBtn.classList.toggle('active-like',fav==='like');
+  }
+
+  async function toggleFavorite(value){
+    if(!state.currentImageId)return;
+    const current=state.currentImageData?.favorite||'none';
+    const newFav=current===value?'none':value;
+    const resp=await api(`/api/images/${state.currentImageId}/favorite`,{
+      method:'PATCH',
+      json:{favorite:newFav},
+    });
+    if(!resp){toast('操作失败','error');return;}
+    const result=await resp.json();
+    if(result.success){
+      state.currentImageData.favorite=newFav;
+      updateFavoriteBtns(newFav);
+      toast(newFav==='none'?'已取消':newFav==='favorite'?'已收藏':'已标记喜欢','success');
+    }else{
+      toast(result.error||'操作失败','error');
+    }
+  }
+
+  function renderDetailFields(img,editMode){
+    const container=$('#modalFields');
+    container.innerHTML='';
+    const tagColors=['tag-pink','tag-lavender','tag-mint','tag-peach'];
+    let colorIdx=0;
+
+    FIELD_DEFS.forEach(def=>{
+      const val=img[def.key];
+      const row=document.createElement('div');
+      row.className='field-row';
+      row.dataset.fieldKey=def.key;
+
+      const label=document.createElement('div');
+      label.className='field-label';
+      label.textContent=def.label;
+      row.appendChild(label);
+
+      if(editMode){
+        const inputWrap=document.createElement('div');
+        inputWrap.className='field-input-wrap';
+
+        if(def.type==='tags'){
+          const tagsArr=Array.isArray(val)?val:(val?String(val).split(',').map(s=>s.trim()).filter(Boolean):[]);
+          const tagInput=document.createElement('div');
+          tagInput.className='tag-input-group';
+          const tagList=document.createElement('div');
+          tagList.className='tag-input-list';
+          tagsArr.forEach(t=>{
+            const tag=document.createElement('span');
+            tag.className='tag tag-editable '+tagColors[colorIdx%4];
+            tag.innerHTML=esc(t)+'<span class="tag-remove" data-key="'+def.key+'">&times;</span>';
+            tag.querySelector('.tag-remove').addEventListener('click',()=>{
+              tag.remove();
+            });
+            tagList.appendChild(tag);
+          });
+          colorIdx++;
+          const addRow=document.createElement('div');
+          addRow.className='tag-add-row';
+          const addInput=document.createElement('input');
+          addInput.type='text';
+          addInput.className='login-input tag-add-input';
+          addInput.placeholder=def.hint||'输入后回车添加';
+          addInput.addEventListener('keydown',e=>{
+            if(e.key==='Enter'){
+              e.preventDefault();
+              const v=addInput.value.trim();
+              if(!v)return;
+              const newTag=document.createElement('span');
+              newTag.className='tag tag-editable '+tagColors[(colorIdx-1)%4];
+              newTag.innerHTML=esc(v)+'<span class="tag-remove" data-key="'+def.key+'">&times;</span>';
+              newTag.querySelector('.tag-remove').addEventListener('click',()=>{newTag.remove();});
+              tagList.appendChild(newTag);
+              addInput.value='';
+            }
+          });
+          addRow.appendChild(addInput);
+          tagInput.appendChild(tagList);
+          tagInput.appendChild(addRow);
+          inputWrap.appendChild(tagInput);
+        }else if(def.type==='select'){
+          const sel=document.createElement('select');
+          sel.className='field-select';
+          const emptyOpt=document.createElement('option');
+          emptyOpt.value='';emptyOpt.textContent='未选择';
+          sel.appendChild(emptyOpt);
+          (def.options||[]).forEach(o=>{
+            const opt=document.createElement('option');
+            opt.value=o;opt.textContent=o;
+            if(val===o)opt.selected=true;
+            sel.appendChild(opt);
+          });
+          inputWrap.appendChild(sel);
+        }else if(def.type==='textarea'){
+          const ta=document.createElement('textarea');
+          ta.className='field-textarea';
+          ta.value=val||'';
+          inputWrap.appendChild(ta);
+        }else{
+          const inp=document.createElement('input');
+          inp.type='text';
+          inp.className='field-text-input';
+          inp.value=val||'';
+          inputWrap.appendChild(inp);
+        }
+        row.appendChild(inputWrap);
+      }else{
+        const valWrap=document.createElement('div');
+        valWrap.className='field-value-wrap';
+
+        if(def.type==='tags'){
+          const tagsArr=Array.isArray(val)?val:(val?String(val).split(',').map(s=>s.trim()).filter(Boolean):[]);
+          if(tagsArr.length===0){
+            valWrap.innerHTML='<span class="field-empty">-</span>';
+          }else{
+            tagsArr.forEach(t=>{
+              const tag=document.createElement('span');
+              tag.className='tag '+tagColors[colorIdx%4];
+              tag.textContent=t;
+              valWrap.appendChild(tag);
+            });
+            colorIdx++;
+          }
+        }else{
+          valWrap.innerHTML=val?`<span class="field-value-text">${esc(String(val))}</span>`:'<span class="field-empty">-</span>';
+        }
+        row.appendChild(valWrap);
+      }
+
+      container.appendChild(row);
+    });
+  }
+
+  function updateEditButtons(){
+    const editBtn=$('#modalEditBtn');
+    const saveBtn=$('#modalSaveBtn');
+    const cancelBtn=$('#modalCancelEditBtn');
+    const title=$('#modalEditTitle');
+    if(state.editing){
+      editBtn.classList.add('hidden');
+      saveBtn.classList.remove('hidden');
+      cancelBtn.classList.remove('hidden');
+      title.textContent='编辑图片属性';
+    }else{
+      editBtn.classList.remove('hidden');
+      saveBtn.classList.add('hidden');
+      cancelBtn.classList.add('hidden');
+      title.textContent='图片详情';
+    }
+  }
+
+  function collectEditData(){
+    const data={};
+    const container=$('#modalFields');
+    FIELD_DEFS.forEach(def=>{
+      const row=container.querySelector(`[data-field-key="${def.key}"]`);
+      if(!row)return;
+
+      if(def.type==='tags'){
+        const tags=row.querySelectorAll('.tag-editable');
+        const vals=[];
+        tags.forEach(t=>{
+          let text=t.textContent;
+          if(text.endsWith('×'))text=text.slice(0,-1);
+          text=text.trim();
+          if(text)vals.push(text);
+        });
+        data[def.key]=vals;
+      }else if(def.type==='select'){
+        const sel=row.querySelector('.field-select');
+        data[def.key]=sel?sel.value:'';
+      }else if(def.type==='textarea'){
+        const ta=row.querySelector('.field-textarea');
+        data[def.key]=ta?ta.value:'';
+      }else{
+        const inp=row.querySelector('.field-text-input');
+        data[def.key]=inp?inp.value:'';
+      }
+    });
+    return data;
+  }
+
+  async function saveEdit(){
+    if(!state.currentImageId)return;
+    const data=collectEditData();
+    const resp=await api(`/api/images/${state.currentImageId}`,{
+      method:'PUT',
+      json:data,
+    });
+    if(!resp){toast('保存失败','error');return;}
+    const result=await resp.json();
+    if(result.success){
+      toast('保存成功','success');
+      state.editing=false;
+      const freshResp=await api(`/api/images/${state.currentImageId}`);
+      if(freshResp){
+        state.currentImageData=await freshResp.json();
+        renderDetailFields(state.currentImageData,false);
+      }
+      updateEditButtons();
+    }else{
+      toast(result.error||'保存失败','error');
+    }
+  }
+
+  function closeDetail(){
+    $('#detailModal').classList.add('hidden');
+    state.currentImageId=null;
+    state.currentImageData=null;
+    state.editing=false;
+  }
 
   async function deleteImage(id){
     if(!confirm('确定删除此图片？'))return;
     const resp=await api(`/api/images/${id}`,{method:'DELETE'});
-    if(!resp||resp.error)return;
+    if(!resp)return;
     const data=await resp.json();
     if(data.success){toast('已删除','success');closeDetail();state.page=1;state.allLoaded=false;loadImages(true);loadStats();}
     else toast('删除失败','error');
@@ -263,7 +482,7 @@
       method:'POST',
       json:{ids:[...state.selectedIds]}
     });
-    if(!resp||resp.error)return;
+    if(!resp)return;
     const data=await resp.json();
     toast(`已删除 ${data.deleted} 张图片`,'success');
     state.selectedIds.clear();
@@ -274,146 +493,128 @@
   function setupUpload(){
     const zone=$('#uploadZone');
     const fileInput=$('#uploadFile');
+    const preview=$('#uploadPreview');
+    const previewImg=$('#previewImg');
     const submitBtn=$('#uploadSubmit');
+    const fileList=$('#uploadFileList');
     let selectedFiles=[];
-    let uploadCancelled=false;
 
     zone.addEventListener('click',()=>fileInput.click());
     zone.addEventListener('dragover',e=>{e.preventDefault();zone.classList.add('dragover');});
     zone.addEventListener('dragleave',()=>zone.classList.remove('dragover'));
     zone.addEventListener('drop',e=>{
       e.preventDefault();zone.classList.remove('dragover');
-      if(e.dataTransfer.files.length)handleFiles(Array.from(e.dataTransfer.files));
+      const files=[...e.dataTransfer.files].filter(f=>f.type.startsWith('image/'));
+      if(files.length)handleFiles(files);
     });
     fileInput.addEventListener('change',()=>{
-      if(fileInput.files.length)handleFiles(Array.from(fileInput.files));
-    });
-
-    $('#uploadClearBtn').addEventListener('click',()=>{
-      selectedFiles=[];
-      fileInput.value='';
-      renderFileList();
-      submitBtn.disabled=true;
-      zone.classList.remove('hidden');
-      $('#uploadBatchPreview').classList.add('hidden');
+      if(fileInput.files.length){
+        handleFiles([...fileInput.files].filter(f=>f.type.startsWith('image/')));
+      }
     });
 
     function handleFiles(files){
-      const imageFiles=files.filter(f=>f.type.startsWith('image/'));
-      if(!imageFiles.length){toast('请选择图片文件','error');return;}
-      selectedFiles=selectedFiles.concat(imageFiles);
-      renderFileList();
-      submitBtn.disabled=false;
+      selectedFiles=files;
+      if(files.length===1){
+        previewImg.src=URL.createObjectURL(files[0]);
+        preview.classList.remove('hidden');
+        fileList.classList.add('hidden');
+      }else{
+        preview.classList.add('hidden');
+        fileList.classList.remove('hidden');
+        fileList.innerHTML=files.map((f,i)=>`<div class="upload-filelist-item"><span>${esc(f.name)}</span><span class="file-size">${(f.size/1024).toFixed(0)}KB</span><span class="file-status" id="fileStatus${i}">待上传</span></div>`).join('');
+      }
       zone.classList.add('hidden');
-      $('#uploadBatchPreview').classList.remove('hidden');
+      submitBtn.disabled=false;
     }
-
-    function renderFileList(){
-      const list=$('#uploadFileList');
-      list.innerHTML='';
-      $('#uploadBatchCount').textContent=`已选择 ${selectedFiles.length} 张`;
-      selectedFiles.forEach((f,i)=>{
-        const item=document.createElement('div');
-        item.className='upload-file-item';
-        item.dataset.index=i;
-        const thumb=document.createElement('img');
-        thumb.className='upload-file-thumb';
-        thumb.src=URL.createObjectURL(f);
-        thumb.onload=()=>URL.revokeObjectURL(thumb.src);
-        const name=document.createElement('span');
-        name.className='upload-file-name';
-        name.textContent=f.name;
-        const status=document.createElement('span');
-        status.className='upload-file-status pending';
-        status.id=`uploadStatus_${i}`;
-        status.textContent='⏳';
-        item.appendChild(thumb);
-        item.appendChild(name);
-        item.appendChild(status);
-        list.appendChild(item);
-      });
-    }
-
-    function sleep(ms){return new Promise(r=>setTimeout(r,ms));}
 
     submitBtn.addEventListener('click',async()=>{
       if(!selectedFiles.length)return;
       submitBtn.disabled=true;
-      uploadCancelled=false;
-      $('#uploadProgress').classList.remove('hidden');
+      const progress=$('#uploadProgress');
+      const progressBar=$('#uploadProgressBar');
+      const progressText=$('#uploadProgressText');
 
-      const total=selectedFiles.length;
-      let successCount=0;
-      let failCount=0;
-
-      for(let i=0;i<selectedFiles.length;i++){
-        if(uploadCancelled)break;
-
-        const statusEl=$(`#uploadStatus_${i}`);
-        if(statusEl)statusEl.className='upload-file-status uploading';
-        if(statusEl)statusEl.textContent='🔄';
-        $('#uploadProgressText').textContent=`正在处理第 ${i+1}/${total} 张...`;
-        $('#uploadProgressFill').style.width=((i/total)*100)+'%';
-
+      if(selectedFiles.length===1){
+        $('#uploadStatus').textContent='上传中...';
         const fd=new FormData();
-        fd.append('image',selectedFiles[i]);
+        fd.append('image',selectedFiles[0]);
         fd.append('persona',$('#uploadPersona').value);
         fd.append('description',$('#uploadDescription').value);
-
         try{
           const resp=await api('/api/images/upload',{method:'POST',body:fd});
-          if(!resp||resp.error){
-            if(statusEl)statusEl.className='upload-file-status error';
-            if(statusEl)statusEl.textContent='❌';
-            failCount++;
+          if(!resp){toast('上传失败','error');$('#uploadStatus').textContent='请求失败';submitBtn.disabled=false;return;}
+          if(resp.error){toast(resp.error,'error');$('#uploadStatus').textContent=resp.error;submitBtn.disabled=false;return;}
+          const data=await resp.json();
+          if(data.success){
+            toast('上传成功，正在分析...','success');
+            $('#uploadModal').classList.add('hidden');
+            resetUpload();
+            setTimeout(()=>{state.page=1;state.allLoaded=false;loadImages(true);loadStats();},2000);
           }else{
-            const data=await resp.json();
-            if(data.success){
-              if(statusEl)statusEl.className='upload-file-status success';
-              if(statusEl)statusEl.textContent='✅';
-              successCount++;
-            }else{
-              if(statusEl)statusEl.className='upload-file-status error';
-              if(statusEl)statusEl.textContent='❌';
-              failCount++;
-            }
+            toast(data.error||'上传失败','error');
+            $('#uploadStatus').textContent=data.error||'上传失败';
+            submitBtn.disabled=false;
           }
         }catch(err){
-          if(statusEl)statusEl.className='upload-file-status error';
-          if(statusEl)statusEl.textContent='❌';
-          failCount++;
+          toast('上传失败','error');
+          $('#uploadStatus').textContent='网络错误: '+err.message;
+          submitBtn.disabled=false;
         }
-
-        $('#uploadProgressFill').style.width=(((i+1)/total)*100)+'%';
-
-        if(i<selectedFiles.length-1&&!uploadCancelled){
-          $('#uploadProgressText').textContent=`等待 5 秒后处理下一张...`;
-          await sleep(5000);
+      }else{
+        progress.classList.remove('hidden');
+        let uploaded=0;
+        let failed=0;
+        for(let i=0;i<selectedFiles.length;i++){
+          progressText.textContent=`${i+1}/${selectedFiles.length}`;
+          progressBar.style.width=((i)/selectedFiles.length*100)+'%';
+          const statusEl=document.getElementById('fileStatus'+i);
+          const fd=new FormData();
+          fd.append('image',selectedFiles[i]);
+          fd.append('persona',$('#uploadPersona').value);
+          fd.append('description',$('#uploadDescription').value);
+          try{
+            const resp=await api('/api/images/upload',{method:'POST',body:fd});
+            if(resp&&!resp.error){
+              const data=await resp.json();
+              if(data.success){
+                uploaded++;
+                if(statusEl){statusEl.textContent='✓';statusEl.className='file-status ok';}
+              }else{
+                failed++;
+                if(statusEl){statusEl.textContent='✗';statusEl.className='file-status fail';}
+              }
+            }else{
+              failed++;
+              if(statusEl){statusEl.textContent='✗';statusEl.className='file-status fail';}
+            }
+          }catch(err){
+            failed++;
+            if(statusEl){statusEl.textContent='✗';statusEl.className='file-status fail';}
+          }
+          progressBar.style.width=((i+1)/selectedFiles.length*100)+'%';
         }
+        progressText.textContent=`完成: ${uploaded}成功 ${failed}失败`;
+        toast(`批量上传完成：${uploaded}成功，${failed}失败`,uploaded>0?'success':'error');
+        setTimeout(()=>{
+          $('#uploadModal').classList.add('hidden');
+          resetUpload();
+          state.page=1;state.allLoaded=false;loadImages(true);loadStats();
+        },1500);
       }
-
-      $('#uploadProgressText').textContent=`完成！成功 ${successCount} 张，失败 ${failCount} 张`;
-      toast(`批量上传完成：成功 ${successCount} 张，失败 ${failCount} 张`,successCount>0?'success':'error');
-
-      setTimeout(()=>{
-        state.page=1;state.allLoaded=false;loadImages(true);loadStats();
-      },1500);
-
-      setTimeout(()=>{
-        resetUpload();
-      },3000);
     });
 
     function resetUpload(){
-      uploadCancelled=true;
       selectedFiles=[];
       fileInput.value='';
-      $('#uploadBatchPreview').classList.add('hidden');
+      preview.classList.add('hidden');
+      fileList.classList.add('hidden');
+      fileList.innerHTML='';
       zone.classList.remove('hidden');
       submitBtn.disabled=true;
       $('#uploadStatus').textContent='';
       $('#uploadProgress').classList.add('hidden');
-      $('#uploadProgressFill').style.width='0%';
+      $('#uploadProgressBar').style.width='0%';
       $('#uploadProgressText').textContent='';
     }
 
@@ -421,7 +622,7 @@
   }
 
   function setupUploadPersonaSelect(){
-    api('/api/filters').then(resp=>(resp&&!resp.error)?resp.json():null).then(data=>{
+    api('/api/filters').then(resp=>resp?resp.json():null).then(data=>{
       if(!data)return;
       const sel=$('#uploadPersona');
       sel.innerHTML='<option value="">不指定</option>';
@@ -489,7 +690,7 @@
         const fd=new FormData();
         fd.append('backup',selectedBackupFile);
         const resp=await api('/api/backup/import',{method:'POST',body:fd});
-        if(!resp||resp.error){toast('恢复失败','error');$('#backupStatus').textContent='请求失败';return;}
+        if(!resp){toast('恢复失败','error');$('#backupStatus').textContent='请求失败';return;}
         const data=await resp.json();
         if(data.success){
           toast(`恢复成功！导入 ${data.imported} 条记录，${data.copied_files} 个图片文件`,'success');
@@ -530,7 +731,7 @@
 
   async function loadPoolsModal(){
     const resp=await api('/api/pools');
-    if(!resp||resp.error)return;
+    if(!resp)return;
     const data=await resp.json();
     const pools=data.pools||{};
     const list=$('#poolsList');
@@ -596,6 +797,16 @@
       });
     });
 
+    $$('input[name="favorite"]').forEach(inp=>{
+      inp.addEventListener('change',()=>{
+        state.favorite=inp.value;state.page=1;state.allLoaded=false;loadImages(true);
+      });
+    });
+
+    $('#sortByFilter').addEventListener('change',e=>{
+      state.sort_by=e.target.value;state.page=1;state.allLoaded=false;loadImages(true);
+    });
+
     $('#poolsBtn').addEventListener('click',()=>{$('#poolsModal').classList.remove('hidden');loadPoolsModal();});
     $('#poolsModalClose').addEventListener('click',()=>{$('#poolsModal').classList.add('hidden');});
     $('#poolAddKeyBtn').addEventListener('click',async()=>{
@@ -646,6 +857,58 @@
     });
     $('#lightbox').addEventListener('click',()=>{$('#lightbox').classList.add('hidden');});
     $('#modalDeleteBtn').addEventListener('click',()=>{if(state.currentImageId)deleteImage(state.currentImageId);});
+    $('#modalEditBtn').addEventListener('click',()=>{
+      state.editing=true;
+      renderDetailFields(state.currentImageData,true);
+      updateEditButtons();
+    });
+    $('#modalCancelEditBtn').addEventListener('click',()=>{
+      state.editing=false;
+      renderDetailFields(state.currentImageData,false);
+      updateEditButtons();
+    });
+    $('#modalSaveBtn').addEventListener('click',saveEdit);
+    $('#favFavoriteBtn').addEventListener('click',()=>toggleFavorite('favorite'));
+    $('#favLikeBtn').addEventListener('click',()=>toggleFavorite('like'));
+    $('#modalReanalyzeBtn').addEventListener('click',async()=>{
+      if(!state.currentImageId)return;
+      const desc=$('#reanalyzeDesc').value.trim();
+      const statusEl=$('#reanalyzeStatus');
+      const btn=$('#modalReanalyzeBtn');
+      btn.disabled=true;
+      btn.textContent='分析中...';
+      statusEl.textContent='正在调用模型重新分析，请稍候...';
+      statusEl.classList.remove('hidden');
+      try{
+        const resp=await api(`/api/images/${state.currentImageId}/reanalyze`,{
+          method:'POST',
+          json:{description:desc},
+        });
+        if(!resp){
+          statusEl.textContent='请求失败';
+          return;
+        }
+        const result=await resp.json();
+        if(result.success){
+          toast('重新分析完成','success');
+          state.currentImageData=result.image||null;
+          state.editing=false;
+          if(state.currentImageData){
+            renderDetailFields(state.currentImageData,false);
+          }
+          updateEditButtons();
+          statusEl.classList.add('hidden');
+          $('#reanalyzeDesc').value='';
+        }else{
+          statusEl.textContent=result.error||'分析失败';
+        }
+      }catch(e){
+        statusEl.textContent='网络错误: '+e.message;
+      }finally{
+        btn.disabled=false;
+        btn.textContent='重新分析';
+      }
+    });
 
     $('#logoutBtn').addEventListener('click',async()=>{
       await api('/api/logout',{method:'POST'});

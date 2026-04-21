@@ -30,11 +30,18 @@ CREATE TABLE IF NOT EXISTS images (
     background TEXT DEFAULT '',
     description TEXT DEFAULT '',
     user_tags TEXT DEFAULT '',
+    exposure_features TEXT DEFAULT '[]',
+    key_features TEXT DEFAULT '[]',
+    prop_objects TEXT DEFAULT '[]',
+    allure_features TEXT DEFAULT '[]',
+    body_focus TEXT DEFAULT '[]',
     image_path TEXT NOT NULL,
     created_at TEXT NOT NULL,
     updated_at TEXT NOT NULL,
     persona TEXT DEFAULT '',
-    created_by TEXT DEFAULT ''
+    created_by TEXT DEFAULT '',
+    favorite TEXT DEFAULT 'none',
+    use_count INTEGER DEFAULT 0
 );
 """
 
@@ -43,6 +50,7 @@ CREATE INDEX IF NOT EXISTS idx_category ON images(category);
 CREATE INDEX IF NOT EXISTS idx_exposure_level ON images(exposure_level);
 CREATE INDEX IF NOT EXISTS idx_style ON images(style);
 CREATE INDEX IF NOT EXISTS idx_scene ON images(scene);
+CREATE INDEX IF NOT EXISTS idx_favorite ON images(favorite);
 """
 
 _UPDATABLE_FIELDS = frozenset({
@@ -50,7 +58,8 @@ _UPDATABLE_FIELDS = frozenset({
     "scene", "atmosphere", "pose_type", "body_orientation",
     "dynamic_level", "action_style", "shot_size", "camera_angle",
     "expression", "color_tone", "composition", "background",
-    "description", "user_tags", "image_path", "updated_at",
+    "description", "user_tags", "exposure_features", "key_features", "prop_objects", "allure_features", "body_focus",
+    "image_path", "updated_at", "favorite", "use_count",
 })
 
 
@@ -64,16 +73,23 @@ class WardrobeDatabase:
         async with self._lock:
             async with aiosqlite.connect(self.db_path) as db:
                 await db.executescript(_CREATE_TABLE_SQL)
-                await db.executescript(_CREATE_INDEX_SQL)
                 for col, default in [
                     ("persona", "TEXT DEFAULT ''"),
                     ("created_by", "TEXT DEFAULT ''"),
                     ("user_tags", "TEXT DEFAULT ''"),
+                    ("exposure_features", "TEXT DEFAULT '[]'"),
+                    ("key_features", "TEXT DEFAULT '[]'"),
+                    ("prop_objects", "TEXT DEFAULT '[]'"),
+                    ("allure_features", "TEXT DEFAULT '[]'"),
+                    ("body_focus", "TEXT DEFAULT '[]'"),
+                    ("favorite", "TEXT DEFAULT 'none'"),
+                    ("use_count", "INTEGER DEFAULT 0"),
                 ]:
                     try:
                         await db.execute(f"ALTER TABLE images ADD COLUMN {col} {default}")
                     except Exception:
                         pass
+                await db.executescript(_CREATE_INDEX_SQL)
                 await db.commit()
         logger.info("[Wardrobe] 数据库初始化完成")
 
@@ -98,6 +114,11 @@ class WardrobeDatabase:
         background: str,
         description: str,
         user_tags: str = "",
+        exposure_features: list[str] | None = None,
+        key_features: list[str] | None = None,
+        prop_objects: list[str] | None = None,
+        allure_features: list[str] | None = None,
+        body_focus: list[str] | None = None,
         persona: str = "",
         image_path: str,
         created_by: str = "",
@@ -112,8 +133,9 @@ class WardrobeDatabase:
                         scene, atmosphere, pose_type, body_orientation,
                         dynamic_level, action_style, shot_size, camera_angle,
                         expression, color_tone, composition, background,
-                        description, user_tags, persona, image_path, created_at, updated_at, created_by
-                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+                        description, user_tags, exposure_features, key_features, prop_objects, allure_features, body_focus,
+                        persona, image_path, created_at, updated_at, created_by, favorite, use_count
+                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
                     (
                         image_id,
                         category,
@@ -134,11 +156,18 @@ class WardrobeDatabase:
                         background,
                         description,
                         user_tags,
+                        json.dumps(exposure_features or [], ensure_ascii=False),
+                        json.dumps(key_features or [], ensure_ascii=False),
+                        json.dumps(prop_objects or [], ensure_ascii=False),
+                        json.dumps(allure_features or [], ensure_ascii=False),
+                        json.dumps(body_focus or [], ensure_ascii=False),
                         persona,
                         image_path,
                         now,
                         now,
                         created_by,
+                        "none",
+                        0,
                     ),
                 )
                 await db.commit()
@@ -189,6 +218,15 @@ class WardrobeDatabase:
                 await db.commit()
                 return cursor.rowcount > 0
 
+    async def increment_use_count(self, image_id: str) -> None:
+        async with self._lock:
+            async with aiosqlite.connect(self.db_path) as db:
+                await db.execute(
+                    "UPDATE images SET use_count = COALESCE(use_count, 0) + 1, updated_at = ? WHERE id = ?",
+                    (datetime.now(timezone.utc).isoformat(), image_id),
+                )
+                await db.commit()
+
     @staticmethod
     def _escape_like(value: str) -> str:
         return value.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_")
@@ -201,10 +239,14 @@ class WardrobeDatabase:
         style: Optional[list[str]] = None,
         scene: Optional[list[str]] = None,
         atmosphere: Optional[list[str]] = None,
+        pose_type: Optional[str] = None,
+        body_focus: Optional[list[str]] = None,
         persona: str = "",
         exclude_persona: str = "",
         shot_size: Optional[str] = None,
         keywords: Optional[list[str]] = None,
+        favorite: Optional[str] = None,
+        sort_by: str = "created_at",
     ) -> tuple[list[str], list[Any]]:
         conditions = []
         params: list[Any] = []
@@ -216,6 +258,10 @@ class WardrobeDatabase:
         if exposure_level:
             conditions.append("exposure_level = ?")
             params.append(exposure_level)
+
+        if pose_type:
+            conditions.append("pose_type LIKE ? ESCAPE '\\'")
+            params.append(f'%{WardrobeDatabase._escape_like(pose_type)}%')
 
         if persona:
             conditions.append("persona = ?")
@@ -237,11 +283,32 @@ class WardrobeDatabase:
                     params.append(f'%{WardrobeDatabase._escape_like(v)}%')
                 conditions.append(f"({' OR '.join(field_conds)})")
 
+        if body_focus:
+            bf_conds = []
+            for v in body_focus:
+                bf_conds.append("body_focus LIKE ? ESCAPE '\\'")
+                params.append(f'%{WardrobeDatabase._escape_like(v)}%')
+            conditions.append(f"({' OR '.join(bf_conds)})")
+
+        if favorite and favorite in ("favorite", "like"):
+            conditions.append("favorite = ?")
+            params.append(favorite)
+
         if keywords:
             kw_conds = []
             for kw in keywords:
                 escaped = WardrobeDatabase._escape_like(kw)
-                kw_conds.append(f"(description LIKE ? ESCAPE '\\' OR user_tags LIKE ? ESCAPE '\\')")
+                kw_conds.append(
+                    "(description LIKE ? ESCAPE '\\' OR user_tags LIKE ? ESCAPE '\\' "
+                    "OR exposure_features LIKE ? ESCAPE '\\' OR key_features LIKE ? ESCAPE '\\' "
+                    "OR prop_objects LIKE ? ESCAPE '\\' OR allure_features LIKE ? ESCAPE '\\' "
+                    "OR body_focus LIKE ? ESCAPE '\\')"
+                )
+                params.append(f'%{escaped}%')
+                params.append(f'%{escaped}%')
+                params.append(f'%{escaped}%')
+                params.append(f'%{escaped}%')
+                params.append(f'%{escaped}%')
                 params.append(f'%{escaped}%')
                 params.append(f'%{escaped}%')
             conditions.append(f"({' AND '.join(kw_conds)})")
@@ -256,17 +323,23 @@ class WardrobeDatabase:
         style: Optional[list[str]] = None,
         scene: Optional[list[str]] = None,
         atmosphere: Optional[list[str]] = None,
+        pose_type: Optional[str] = None,
+        body_focus: Optional[list[str]] = None,
         persona: str = "",
         exclude_persona: str = "",
         shot_size: Optional[str] = None,
+        favorite: Optional[str] = None,
+        sort_by: str = "created_at",
         limit: int = 20,
         offset: int = 0,
     ) -> list[dict[str, Any]]:
         conditions, params = self._build_search_conditions(
             category=category, exposure_level=exposure_level,
             style=style, scene=scene, atmosphere=atmosphere,
+            pose_type=pose_type, body_focus=body_focus,
             persona=persona, exclude_persona=exclude_persona,
-            shot_size=shot_size,
+            shot_size=shot_size, favorite=favorite,
+            sort_by=sort_by,
         )
 
         where_clause = ""
@@ -276,9 +349,14 @@ class WardrobeDatabase:
         params.append(limit)
         params.append(offset)
 
+        if sort_by == "use_count":
+            order_clause = "CASE favorite WHEN 'favorite' THEN 1 WHEN 'like' THEN 2 ELSE 3 END, use_count DESC, created_at DESC"
+        else:
+            order_clause = "CASE favorite WHEN 'favorite' THEN 1 WHEN 'like' THEN 2 ELSE 3 END, created_at DESC"
+
         async with aiosqlite.connect(self.db_path) as db:
             db.row_factory = aiosqlite.Row
-            sql = f"SELECT * FROM images {where_clause} ORDER BY created_at DESC LIMIT ? OFFSET ?"
+            sql = f"SELECT * FROM images {where_clause} ORDER BY {order_clause} LIMIT ? OFFSET ?"
             async with db.execute(sql, params) as cursor:
                 rows = await cursor.fetchall()
                 return [self._row_to_dict(row) for row in rows]
@@ -291,15 +369,19 @@ class WardrobeDatabase:
         style: Optional[list[str]] = None,
         scene: Optional[list[str]] = None,
         atmosphere: Optional[list[str]] = None,
+        pose_type: Optional[str] = None,
+        body_focus: Optional[list[str]] = None,
         persona: str = "",
         exclude_persona: str = "",
         shot_size: Optional[str] = None,
+        favorite: Optional[str] = None,
     ) -> int:
         conditions, params = self._build_search_conditions(
             category=category, exposure_level=exposure_level,
             style=style, scene=scene, atmosphere=atmosphere,
+            pose_type=pose_type, body_focus=body_focus,
             persona=persona, exclude_persona=exclude_persona,
-            shot_size=shot_size,
+            shot_size=shot_size, favorite=favorite,
         )
 
         where_clause = ""
@@ -334,7 +416,7 @@ class WardrobeDatabase:
 
         async with aiosqlite.connect(self.db_path) as db:
             db.row_factory = aiosqlite.Row
-            sql = f"SELECT * FROM images {where_clause} ORDER BY created_at DESC LIMIT ? OFFSET ?"
+            sql = f"SELECT * FROM images {where_clause} ORDER BY CASE favorite WHEN 'favorite' THEN 1 WHEN 'like' THEN 2 ELSE 3 END, created_at DESC LIMIT ? OFFSET ?"
             async with db.execute(sql, params) as cursor:
                 rows = await cursor.fetchall()
                 return [self._row_to_dict(row) for row in rows]
@@ -362,6 +444,8 @@ class WardrobeDatabase:
         *,
         category: Optional[str] = None,
         shot_size: Optional[str] = None,
+        favorite: Optional[str] = None,
+        sort_by: str = "created_at",
         limit: int = 50,
         offset: int = 0,
     ) -> list[dict[str, Any]]:
@@ -373,13 +457,20 @@ class WardrobeDatabase:
         if shot_size:
             conditions.append("shot_size = ?")
             params.append(shot_size)
+        if favorite and favorite in ("favorite", "like"):
+            conditions.append("favorite = ?")
+            params.append(favorite)
         where_clause = ""
         if conditions:
             where_clause = "WHERE " + " AND ".join(conditions)
         params.extend([limit, offset])
+        if sort_by == "use_count":
+            order_clause = "CASE favorite WHEN 'favorite' THEN 1 WHEN 'like' THEN 2 ELSE 3 END, use_count DESC, created_at DESC"
+        else:
+            order_clause = "CASE favorite WHEN 'favorite' THEN 1 WHEN 'like' THEN 2 ELSE 3 END, created_at DESC"
         async with aiosqlite.connect(self.db_path) as db:
             db.row_factory = aiosqlite.Row
-            sql = f"SELECT * FROM images {where_clause} ORDER BY created_at DESC LIMIT ? OFFSET ?"
+            sql = f"SELECT * FROM images {where_clause} ORDER BY {order_clause} LIMIT ? OFFSET ?"
             async with db.execute(sql, params) as cursor:
                 rows = await cursor.fetchall()
                 return [self._row_to_dict(row) for row in rows]
@@ -391,6 +482,8 @@ class WardrobeDatabase:
         shot_size: Optional[str] = None,
         persona: str = "",
         exclude_persona: str = "",
+        favorite: Optional[str] = None,
+        sort_by: str = "created_at",
         limit: int = 50,
         offset: int = 0,
     ) -> list[dict[str, Any]]:
@@ -408,13 +501,20 @@ class WardrobeDatabase:
         if exclude_persona:
             conditions.append("persona != ?")
             params.append(exclude_persona)
+        if favorite and favorite in ("favorite", "like"):
+            conditions.append("favorite = ?")
+            params.append(favorite)
         where_clause = ""
         if conditions:
             where_clause = "WHERE " + " AND ".join(conditions)
         params.extend([limit, offset])
+        if sort_by == "use_count":
+            order_clause = "CASE favorite WHEN 'favorite' THEN 1 WHEN 'like' THEN 2 ELSE 3 END, use_count DESC, created_at DESC"
+        else:
+            order_clause = "CASE favorite WHEN 'favorite' THEN 1 WHEN 'like' THEN 2 ELSE 3 END, created_at DESC"
         async with aiosqlite.connect(self.db_path) as db:
             db.row_factory = aiosqlite.Row
-            sql = f"SELECT id, category, persona, image_path, created_at FROM images {where_clause} ORDER BY created_at DESC LIMIT ? OFFSET ?"
+            sql = f"SELECT id, category, persona, image_path, created_at, favorite, use_count FROM images {where_clause} ORDER BY {order_clause} LIMIT ? OFFSET ?"
             async with db.execute(sql, params) as cursor:
                 rows = await cursor.fetchall()
                 return [dict(row) for row in rows]
@@ -447,8 +547,9 @@ class WardrobeDatabase:
                                 scene, atmosphere, pose_type, body_orientation,
                                 dynamic_level, action_style, shot_size, camera_angle,
                                 expression, color_tone, composition, background,
-                                description, user_tags, persona, image_path, created_at, updated_at, created_by
-                            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+                                description, user_tags, exposure_features, key_features, prop_objects, allure_features, body_focus,
+                                persona, image_path, created_at, updated_at, created_by, favorite, use_count
+                            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
                             (
                                 rec.get("id", str(uuid.uuid4())),
                                 rec.get("category", "人物"),
@@ -469,11 +570,18 @@ class WardrobeDatabase:
                                 rec.get("background", ""),
                                 rec.get("description", ""),
                                 rec.get("user_tags", ""),
+                                rec.get("exposure_features", "[]") if isinstance(rec.get("exposure_features"), str) else json.dumps(rec.get("exposure_features", []), ensure_ascii=False),
+                                rec.get("key_features", "[]") if isinstance(rec.get("key_features"), str) else json.dumps(rec.get("key_features", []), ensure_ascii=False),
+                                rec.get("prop_objects", "[]") if isinstance(rec.get("prop_objects"), str) else json.dumps(rec.get("prop_objects", []), ensure_ascii=False),
+                                rec.get("allure_features", "[]") if isinstance(rec.get("allure_features"), str) else json.dumps(rec.get("allure_features", []), ensure_ascii=False),
+                                rec.get("body_focus", "[]") if isinstance(rec.get("body_focus"), str) else json.dumps(rec.get("body_focus", []), ensure_ascii=False),
                                 rec.get("persona", ""),
                                 rec.get("image_path", ""),
                                 rec.get("created_at", datetime.now(timezone.utc).isoformat()),
                                 rec.get("updated_at", datetime.now(timezone.utc).isoformat()),
                                 rec.get("created_by", ""),
+                                rec.get("favorite", "none"),
+                                rec.get("use_count", 0),
                             ),
                         )
                         imported += 1
@@ -485,7 +593,7 @@ class WardrobeDatabase:
     @staticmethod
     def _row_to_dict(row: aiosqlite.Row) -> dict[str, Any]:
         d = dict(row)
-        for key in ("style", "scene", "atmosphere", "action_style"):
+        for key in ("style", "scene", "atmosphere", "action_style", "exposure_features", "key_features", "prop_objects", "allure_features", "body_focus"):
             val = d.get(key)
             if isinstance(val, str):
                 try:
