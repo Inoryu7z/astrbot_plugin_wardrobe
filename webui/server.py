@@ -361,7 +361,7 @@ class WardrobeWebServer:
                 await self.plugin.db.update_image(image_id, **update_data)
                 logger.info("[Wardrobe] WebUI重新分析完成: id=%s category=%s exposure=%s description=%s",
                             image_id, attrs.get("category", ""), attrs.get("exposure_level", ""),
-                            str(attrs.get("description", ""))[:80])
+                            attrs.get("description", ""))
 
                 if self.plugin.vector_searcher and self.plugin.vector_searcher.available:
                     try:
@@ -550,10 +550,18 @@ class WardrobeWebServer:
                 )
 
                 if duplicate:
+                    logger.info("[Wardrobe] WebUI上传跳过: 图片重复 existing_id=%s", duplicate.get("id", ""))
                     return jsonify({"duplicate": True, "existing_id": duplicate.get("id", ""), "existing_persona": duplicate.get("persona", "")})
 
                 if not image_id:
+                    logger.warning("[Wardrobe] WebUI上传失败: 保存失败")
                     return jsonify({"error": "保存失败，请检查存图模型是否已配置"}), 500
+
+                logger.info("[Wardrobe] WebUI上传完成: id=%s category=%s exposure=%s description=%s",
+                            image_id,
+                            attrs.get("category", "") if attrs else "",
+                            attrs.get("exposure_level", "") if attrs else "",
+                            attrs.get("description", "") if attrs else "")
 
                 return jsonify({"success": True, "image_id": image_id})
             except Exception as e:

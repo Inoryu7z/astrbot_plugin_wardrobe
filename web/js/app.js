@@ -51,6 +51,7 @@
     batchUploading:false,
     batchUploadProgress:{current:0,total:0,uploaded:0,failed:0},
     batchReanalyzing:false,
+    batchOps:[],
   };
 
   function getToken(){
@@ -499,32 +500,77 @@
       return;
     }
     const ids=[...state.selectedIds];
+    state.batchOps=ids.map(id=>({id,type:'reanalyze',status:'pending'}));
     state.batchReanalyzing=true;
+    updateBatchOpsPanel();
     updateBatchReanalyzeIndicator();
-    toast(`开始重新分析 ${ids.length} 张图片，可继续其他操作`,'info');
+    toast(`开始重新分析 ${ids.length} 张图片`,'info');
+
+    await runBatchOps();
+  }
+
+  async function runBatchOps(){
+    const pending=state.batchOps.filter(o=>o.status==='pending'||o.status==='failed');
+    if(!pending.length)return;
+
+    let successCount=state.batchOps.filter(o=>o.status==='done').length;
+    let failCount=0;
 
     try{
-      const resp=await api('/api/images/batch-reanalyze',{
-        method:'POST',
-        json:{ids},
-      });
-      if(!resp||resp.error){
-        toast((resp&&resp.error)||'请求失败','error');
-        return;
+      for(let i=0;i<pending.length;i++){
+        const op=pending[i];
+        op.status='analyzing';
+        updateBatchOpsPanel();
+
+        try{
+          const resp=await api(`/api/images/${op.id}/reanalyze`,{method:'POST',json:{description:''}});
+          if(!resp||resp.error){
+            op.status='failed';
+            failCount++;
+          }else{
+            const data=await resp.json();
+            if(data.success){
+              op.status='done';
+              successCount++;
+            }else{
+              op.status='failed';
+              failCount++;
+            }
+          }
+        }catch(e){
+          console.error('[Wardrobe] 批量重新分析单张失败:',e);
+          op.status='failed';
+          failCount++;
+        }
+        updateBatchOpsPanel();
+
+        if(i<pending.length-1){
+          await new Promise(r=>setTimeout(r,5000));
+        }
       }
-      const data=await resp.json();
-      if(data.success){
-        toast(`重新分析完成：${data.reanalyzed}成功，${data.failed}失败`,data.reanalyzed>0?'success':'error');
-        state.page=1;state.allLoaded=false;loadImages(true);loadStats();
-      }else{
-        toast(data.error||'重新分析失败','error');
-      }
-    }catch(e){
-      toast('网络错误: '+e.message,'error');
-    }finally{
-      state.batchReanalyzing=false;
-      updateBatchReanalyzeIndicator();
+    }catch(err){
+      console.error('[Wardrobe] 批量重新分析异常中断:',err);
+      toast('批量重新分析异常中断: '+err.message,'error');
+      state.batchOps.filter(o=>o.status==='analyzing').forEach(o=>o.status='failed');
+      updateBatchOpsPanel();
     }
+
+    state.batchReanalyzing=false;
+    updateBatchReanalyzeIndicator();
+    toast(`重新分析完成：${successCount}成功，${failCount}失败`,successCount>0?'success':'error');
+    state.page=1;state.allLoaded=false;loadImages(true);loadStats();
+  }
+
+  async function retryBatchOps(){
+    const failed=state.batchOps.filter(o=>o.status==='failed');
+    if(!failed.length){
+      toast('没有失败的任务','info');
+      return;
+    }
+    toast(`重试 ${failed.length} 张失败图片`,'info');
+    state.batchReanalyzing=true;
+    updateBatchReanalyzeIndicator();
+    await runBatchOps();
   }
 
   function updateBatchReanalyzeIndicator(){
@@ -534,7 +580,86 @@
       return;
     }
     indicator.classList.remove('hidden');
-    indicator.textContent='分析中...';
+    const done=state.batchOps.filter(o=>o.status==='done').length;
+    const failed=state.batchOps.filter(o=>o.status==='failed').length;
+    indicator.textContent=`分析中 ${done+failed}/${state.batchOps.length}`;
+  }
+
+  function updateBatchOpsPanel(){
+    const panel=$('#batchOpsPanel');
+    const list=$('#batchOpsList');
+    const summary=$('#batchOpsSummary');
+    if(!state.batchOps.length){
+      panel.classList.add('hidden');
+      return;
+    }
+    panel.classList.remove('hidden');
+    const done=state.batchOps.filter(o=>o.status==='done').length;
+    const failed=state.batchOps.filter(o=>o.status==='failed').length;
+    const pending=state.batchOps.filter(o=>o.status==='pending').length;
+    const analyzing=state.batchOps.filter(o=>o.status==='analyzing').length;
+    summary.textContent=`共${state.batchOps.length}张 | ✓${done} ✗${failed} ⏳${pending+analyzing}`;
+    list.innerHTML=state.batchOps.map((o,idx)=>{
+      const icon=o.status==='done'?'✓':o.status==='failed'?'✗':o.status==='analyzing'?'⏳':'○';
+      const cls=o.status==='done'?'op-done':o.status==='failed'?'op-fail':o.status==='analyzing'?'op-active':'op-pending';
+      const retryBtn=o.status==='failed'?`<button class="op-retry-btn" onclick="retrySingleOp(${idx})">↻</button>`:'';
+      return `<div class="batch-op-item ${cls}"><span class="op-icon">${icon}</span><span class="op-id">${o.id.length>12?o.id.slice(0,8):o.id}</span>${retryBtn}</div>`;
+    }).join('');
+
+    const retryAllBtn=$('#batchOpsRetryAll');
+    if(retryAllBtn){
+      retryAllBtn.classList.toggle('hidden',failed===0);
+    }
+  }
+
+  async function retrySingleOp(idx){
+    const op=state.batchOps[idx];
+    if(!op||op.status!=='failed')return;
+    op.status='analyzing';
+    updateBatchOpsPanel();
+    try{
+      if(op.type==='upload'){
+        const fd=new FormData();
+        fd.append('image',op.file);
+        fd.append('persona',$('#uploadPersona')?$('#uploadPersona').value:'');
+        fd.append('description',$('#uploadDescription')?$('#uploadDescription').value:'');
+        const resp=await api('/api/images/upload',{method:'POST',body:fd});
+        if(!resp||resp.error){
+          op.status='failed';
+        }else{
+          const data=await resp.json();
+          op.status=(data.success||data.duplicate)?'done':'failed';
+        }
+      }else{
+        const resp=await api(`/api/images/${op.id}/reanalyze`,{method:'POST',json:{description:''}});
+        if(!resp||resp.error){
+          op.status='failed';
+        }else{
+          const data=await resp.json();
+          op.status=data.success?'done':'failed';
+        }
+      }
+    }catch(e){
+      op.status='failed';
+    }
+    updateBatchOpsPanel();
+  }
+
+  function toggleBatchOpsPanel(){
+    const list=$('#batchOpsList');
+    const toggle=$('#batchOpsToggle');
+    if(list.classList.contains('hidden')){
+      list.classList.remove('hidden');
+      toggle.textContent='收起';
+    }else{
+      list.classList.add('hidden');
+      toggle.textContent='详情';
+    }
+  }
+
+  function clearBatchOps(){
+    state.batchOps=[];
+    updateBatchOpsPanel();
   }
 
   function setupUpload(){
@@ -624,41 +749,63 @@
 
         state.batchUploading=true;
         state.batchUploadProgress={current:0,total:files.length,uploaded:0,failed:0};
+        state.batchOps=files.map((f,i)=>({id:f.name,type:'upload',file:f,status:'pending'}));
 
         $('#uploadModal').classList.add('hidden');
-        toast(`开始批量上传 ${files.length} 张图片，可继续其他操作`,'info');
+        toast(`开始批量上传 ${files.length} 张图片`,'info');
+        updateBatchOpsPanel();
 
-        for(let i=0;i<files.length;i++){
-          state.batchUploadProgress.current=i+1;
-          updateBatchUploadIndicator();
-          const statusEl=document.getElementById('fileStatus'+i);
-          const fd=new FormData();
-          fd.append('image',files[i]);
-          fd.append('persona',persona);
-          fd.append('description',description);
-          try{
-            const resp=await api('/api/images/upload',{method:'POST',body:fd});
-            if(resp&&!resp.error){
-              const data=await resp.json();
-              if(data.duplicate){
-                state.batchUploadProgress.failed++;
-                if(statusEl){statusEl.textContent='重复';statusEl.className='file-status dup';}
-              }else if(data.success){
-                state.batchUploadProgress.uploaded++;
-                if(statusEl){statusEl.textContent='✓';statusEl.className='file-status ok';}
+        try{
+          for(let i=0;i<files.length;i++){
+            state.batchUploadProgress.current=i+1;
+            state.batchOps[i].status='analyzing';
+            updateBatchUploadIndicator();
+            updateBatchOpsPanel();
+            const statusEl=document.getElementById('fileStatus'+i);
+            const fd=new FormData();
+            fd.append('image',files[i]);
+            fd.append('persona',persona);
+            fd.append('description',description);
+            try{
+              const resp=await api('/api/images/upload',{method:'POST',body:fd});
+              if(resp&&typeof resp.json==='function'&&!resp.error){
+                const data=await resp.json();
+                if(data.duplicate){
+                  state.batchUploadProgress.failed++;
+                  state.batchOps[i].status='failed';
+                  if(statusEl){statusEl.textContent='重复';statusEl.className='file-status dup';}
+                }else if(data.success){
+                  state.batchUploadProgress.uploaded++;
+                  state.batchOps[i].status='done';
+                  if(statusEl){statusEl.textContent='✓';statusEl.className='file-status ok';}
+                }else{
+                  state.batchUploadProgress.failed++;
+                  state.batchOps[i].status='failed';
+                  if(statusEl){statusEl.textContent='✗';statusEl.className='file-status fail';}
+                }
               }else{
                 state.batchUploadProgress.failed++;
+                state.batchOps[i].status='failed';
                 if(statusEl){statusEl.textContent='✗';statusEl.className='file-status fail';}
               }
-            }else{
+            }catch(err){
+              console.error('[Wardrobe] 批量上传单张失败:',err);
               state.batchUploadProgress.failed++;
+              state.batchOps[i].status='failed';
               if(statusEl){statusEl.textContent='✗';statusEl.className='file-status fail';}
             }
-          }catch(err){
-            state.batchUploadProgress.failed++;
-            if(statusEl){statusEl.textContent='✗';statusEl.className='file-status fail';}
+            updateBatchUploadIndicator();
+            updateBatchOpsPanel();
+
+            if(i<files.length-1){
+              await new Promise(r=>setTimeout(r,5000));
+            }
           }
-          updateBatchUploadIndicator();
+        }catch(err){
+          console.error('[Wardrobe] 批量上传异常中断:',err);
+          toast('批量上传异常中断: '+err.message,'error');
+          state.batchOps.filter(o=>o.status==='analyzing').forEach(o=>o.status='failed');
+          updateBatchOpsPanel();
         }
 
         const up=state.batchUploadProgress.uploaded;
