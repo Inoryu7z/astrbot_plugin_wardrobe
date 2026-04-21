@@ -1,6 +1,11 @@
 import asyncio
+import io
+import json
 import secrets
+import shutil
+import tempfile
 import time
+import zipfile
 from pathlib import Path
 
 import uvicorn
@@ -8,6 +13,7 @@ from quart import (
     Quart,
     jsonify,
     request,
+    send_file,
     send_from_directory,
     session,
 )
@@ -53,8 +59,8 @@ class WardrobeWebServer:
             static_url_path="/static",
         )
         app.secret_key = secrets.token_hex(32)
-        app.config["MAX_CONTENT_LENGTH"] = 64 * 1024 * 1024
-        app.config["BODY_TIMEOUT"] = 300
+        app.config["MAX_CONTENT_LENGTH"] = 512 * 1024 * 1024
+        app.config["BODY_TIMEOUT"] = 600
 
         @app.errorhandler(Exception)
         async def handle_exception(e):
@@ -129,6 +135,7 @@ class WardrobeWebServer:
             scene = request.args.get("scene", "")
             shot_size = request.args.get("shot_size", "")
             atmosphere = request.args.get("atmosphere", "")
+            lightweight = request.args.get("lightweight", "") == "1"
 
             offset = (page - 1) * per_page
 
@@ -155,6 +162,16 @@ class WardrobeWebServer:
                     atmosphere=atmosphere_list,
                     shot_size=shot_size or None,
                 )
+            elif lightweight:
+                images = await self.plugin.db.list_images_lightweight(
+                    category=category or None,
+                    shot_size=shot_size or None,
+                    persona=persona or None,
+                    limit=per_page,
+                    offset=offset,
+                )
+                total_stats = await self.plugin.db.get_stats()
+                total = total_stats["total"]
             else:
                 images = await self.plugin.db.list_images(
                     category=category or None, shot_size=shot_size or None, limit=per_page, offset=offset
@@ -341,6 +358,118 @@ class WardrobeWebServer:
             await self.plugin.save_custom_pools(pools)
             return jsonify({"success": True, "pools": {k: list(v) for k, v in pools.items()}})
 
+        @app.route("/api/backup/export")
+        async def api_backup_export():
+            try:
+                await self.plugin._ensure_db()
+                records = await self.plugin.db.get_all_records()
+                images_dir = self.plugin.store.images_dir
+
+                buf = io.BytesIO()
+                with zipfile.ZipFile(buf, "w", zipfile.ZIP_DEFLATED) as zf:
+                    metadata = json.dumps({
+                        "version": "1.0",
+                        "export_time": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
+                        "total_records": len(records),
+                    }, ensure_ascii=False)
+                    zf.writestr("backup_metadata.json", metadata)
+                    zf.writestr("records.json", json.dumps(records, ensure_ascii=False, indent=2))
+
+                    added_files = 0
+                    for rec in records:
+                        img_filename = rec.get("image_path", "")
+                        if not img_filename:
+                            continue
+                        img_path = images_dir / img_filename
+                        if img_path.exists():
+                            zf.write(str(img_path), f"images/{img_filename}")
+                            added_files += 1
+
+                buf.seek(0)
+                logger.info("[Wardrobe] 备份导出: %d条记录, %d个图片文件", len(records), added_files)
+
+                return await send_file(
+                    buf,
+                    mimetype="application/zip",
+                    as_attachment=True,
+                    attachment_filename=f"wardrobe_backup_{time.strftime('%Y%m%d_%H%M%S')}.zip",
+                )
+            except Exception as e:
+                logger.error("[Wardrobe] 备份导出失败: %s", e, exc_info=True)
+                return jsonify({"error": f"导出失败: {e}"}), 500
+
+        @app.route("/api/backup/import", methods=["POST"])
+        async def api_backup_import():
+            tmp_dir = None
+            try:
+                await self.plugin._ensure_db()
+                files = await request.files
+                file = files.get("backup")
+                if not file:
+                    return jsonify({"error": "未选择备份文件"}), 400
+
+                file_bytes = file.read()
+                if not file_bytes:
+                    return jsonify({"error": "备份文件为空"}), 400
+
+                tmp_dir = tempfile.mkdtemp(prefix="wardrobe_restore_")
+                zip_path = Path(tmp_dir) / "backup.zip"
+                async with aiofiles_open(zip_path, "wb") as f:
+                    await f.write(file_bytes)
+
+                def _extract():
+                    with zipfile.ZipFile(str(zip_path), "r") as zf:
+                        zf.extractall(tmp_dir)
+
+                await asyncio.to_thread(_extract)
+
+                records_path = Path(tmp_dir) / "records.json"
+                if not records_path.exists():
+                    return jsonify({"error": "无效的备份文件：缺少 records.json"}), 400
+
+                def _read_records():
+                    with open(str(records_path), "r", encoding="utf-8") as f:
+                        return json.load(f)
+
+                records = await asyncio.to_thread(_read_records)
+                if not isinstance(records, list):
+                    return jsonify({"error": "无效的备份文件：records.json 格式错误"}), 400
+
+                images_src = Path(tmp_dir) / "images"
+                images_dst = self.plugin.store.images_dir
+                copied_files = 0
+
+                if images_src.exists():
+                    def _copy_images():
+                        nonlocal copied_files
+                        for rec in records:
+                            img_filename = rec.get("image_path", "")
+                            if not img_filename:
+                                continue
+                            src = images_src / img_filename
+                            dst = images_dst / img_filename
+                            if src.exists() and not dst.exists():
+                                shutil.copy2(str(src), str(dst))
+                                copied_files += 1
+
+                    await asyncio.to_thread(_copy_images)
+
+                imported = await self.plugin.db.import_records(records, skip_existing=True)
+
+                logger.info("[Wardrobe] 备份恢复: 导入%d条记录, 复制%d个图片文件", imported, copied_files)
+                return jsonify({
+                    "success": True,
+                    "imported": imported,
+                    "copied_files": copied_files,
+                    "total_in_backup": len(records),
+                })
+            except Exception as e:
+                logger.error("[Wardrobe] 备份恢复失败: %s", e, exc_info=True)
+                return jsonify({"error": f"恢复失败: {e}"}), 500
+            finally:
+                if tmp_dir:
+                    await asyncio.to_thread(shutil.rmtree, tmp_dir, ignore_errors=True)
+
         return app
 
     async def start(self):
@@ -388,3 +517,8 @@ class WardrobeWebServer:
         self._server_task = None
         self._tokens.clear()
         logger.info("[Wardrobe] WebUI 已停止")
+
+
+async def aiofiles_open(path, mode="r"):
+    import aiofiles
+    return aiofiles.open(path, mode)
