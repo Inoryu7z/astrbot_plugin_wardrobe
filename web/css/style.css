@@ -544,6 +544,16 @@ html, body {
 .toast-success { background:#DFF5ED; color:#2D8A5E; }
 .toast-error { background:var(--danger-bg); color:var(--danger); }
 .toast-info { background:#E4ECFF; color:#5A72CF; }
+.batch-upload-indicator {
+  color: var(--accent);
+  font-size: 0.85rem;
+  margin-left: 0.5rem;
+  animation: pulse 1.5s ease-in-out infinite;
+}
+@keyframes pulse {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.5; }
+}
 .toast-warning { background:#FFF3E0; color:#E6A23C; }
 
 @keyframes toastIn {
