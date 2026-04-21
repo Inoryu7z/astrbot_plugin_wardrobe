@@ -384,6 +384,104 @@ class WardrobeDatabase:
                 rows = await cursor.fetchall()
                 return [self._row_to_dict(row) for row in rows]
 
+    async def list_images_lightweight(
+        self,
+        *,
+        category: Optional[str] = None,
+        shot_size: Optional[str] = None,
+        persona: str = "",
+        exclude_persona: str = "",
+        limit: int = 50,
+        offset: int = 0,
+    ) -> list[dict[str, Any]]:
+        conditions = []
+        params: list[Any] = []
+        if category:
+            conditions.append("category = ?")
+            params.append(category)
+        if shot_size:
+            conditions.append("shot_size = ?")
+            params.append(shot_size)
+        if persona:
+            conditions.append("persona = ?")
+            params.append(persona)
+        if exclude_persona:
+            conditions.append("persona != ?")
+            params.append(exclude_persona)
+        where_clause = ""
+        if conditions:
+            where_clause = "WHERE " + " AND ".join(conditions)
+        params.extend([limit, offset])
+        async with aiosqlite.connect(self.db_path) as db:
+            db.row_factory = aiosqlite.Row
+            sql = f"SELECT id, category, persona, image_path, created_at FROM images {where_clause} ORDER BY created_at DESC LIMIT ? OFFSET ?"
+            async with db.execute(sql, params) as cursor:
+                rows = await cursor.fetchall()
+                return [dict(row) for row in rows]
+
+    async def get_all_records(self) -> list[dict[str, Any]]:
+        async with aiosqlite.connect(self.db_path) as db:
+            db.row_factory = aiosqlite.Row
+            async with db.execute("SELECT * FROM images") as cursor:
+                rows = await cursor.fetchall()
+                return [self._row_to_dict(row) for row in rows]
+
+    async def import_records(self, records: list[dict[str, Any]], skip_existing: bool = True) -> int:
+        existing_ids = set()
+        if skip_existing:
+            async with aiosqlite.connect(self.db_path) as db:
+                async with db.execute("SELECT id FROM images") as cursor:
+                    async for row in cursor:
+                        existing_ids.add(row[0])
+
+        imported = 0
+        async with self._lock:
+            async with aiosqlite.connect(self.db_path) as db:
+                for rec in records:
+                    if skip_existing and rec.get("id") in existing_ids:
+                        continue
+                    try:
+                        await db.execute(
+                            """INSERT INTO images (
+                                id, category, style, clothing_type, exposure_level,
+                                scene, atmosphere, pose_type, body_orientation,
+                                dynamic_level, action_style, shot_size, camera_angle,
+                                expression, color_tone, composition, background,
+                                description, user_tags, persona, image_path, created_at, updated_at, created_by
+                            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+                            (
+                                rec.get("id", str(uuid.uuid4())),
+                                rec.get("category", "人物"),
+                                rec.get("style", "[]") if isinstance(rec.get("style"), str) else json.dumps(rec.get("style", []), ensure_ascii=False),
+                                rec.get("clothing_type", ""),
+                                rec.get("exposure_level", ""),
+                                rec.get("scene", "[]") if isinstance(rec.get("scene"), str) else json.dumps(rec.get("scene", []), ensure_ascii=False),
+                                rec.get("atmosphere", "[]") if isinstance(rec.get("atmosphere"), str) else json.dumps(rec.get("atmosphere", []), ensure_ascii=False),
+                                rec.get("pose_type", ""),
+                                rec.get("body_orientation", ""),
+                                rec.get("dynamic_level", ""),
+                                rec.get("action_style", "[]") if isinstance(rec.get("action_style"), str) else json.dumps(rec.get("action_style", []), ensure_ascii=False),
+                                rec.get("shot_size", ""),
+                                rec.get("camera_angle", ""),
+                                rec.get("expression", ""),
+                                rec.get("color_tone", ""),
+                                rec.get("composition", ""),
+                                rec.get("background", ""),
+                                rec.get("description", ""),
+                                rec.get("user_tags", ""),
+                                rec.get("persona", ""),
+                                rec.get("image_path", ""),
+                                rec.get("created_at", datetime.now(timezone.utc).isoformat()),
+                                rec.get("updated_at", datetime.now(timezone.utc).isoformat()),
+                                rec.get("created_by", ""),
+                            ),
+                        )
+                        imported += 1
+                    except Exception as e:
+                        logger.warning("[Wardrobe] 导入记录跳过: id=%s error=%s", rec.get("id"), e)
+                await db.commit()
+        return imported
+
     @staticmethod
     def _row_to_dict(row: aiosqlite.Row) -> dict[str, Any]:
         d = dict(row)

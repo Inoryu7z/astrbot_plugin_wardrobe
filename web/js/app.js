@@ -15,6 +15,8 @@
     searchQuery:'', batchMode:false,
     selectedIds:new Set(),
     currentImageId:null,
+    loading:false,
+    allLoaded:false,
   };
 
   function getToken(){
@@ -70,7 +72,7 @@
       });
       container.querySelectorAll('input[name="persona"]').forEach(inp=>{
         inp.addEventListener('change',()=>{
-          state.persona=inp.value;state.page=1;loadImages();
+          state.persona=inp.value;state.page=1;state.allLoaded=false;loadImages(true);
         });
       });
 
@@ -90,37 +92,72 @@
           opt.value=v;opt.textContent=v;
           sel.appendChild(opt);
         });
-        sel.onchange=()=>{state[cfg.stateKey]=sel.value;state.page=1;loadImages();};
+        sel.onchange=()=>{state[cfg.stateKey]=sel.value;state.page=1;state.allLoaded=false;loadImages(true);};
       });
     }catch(e){
       console.error('[Wardrobe] loadFilters error:',e);
     }
   }
 
-  async function loadImages(){
+  async function loadImages(resetGrid){
+    if(state.loading)return;
+    if(state.allLoaded&&!resetGrid)return;
+
+    if(resetGrid){
+      state.page=1;
+      state.allLoaded=false;
+      $('#imageGrid').innerHTML='';
+    }
+
+    state.loading=true;
+    $('#loadingIndicator').classList.remove('hidden');
+    $('#loadMoreSection').classList.add('hidden');
+
     let url;
     if(state.searchQuery){
-      url=`/api/search?q=${encodeURIComponent(state.searchQuery)}&persona=${encodeURIComponent(state.persona)}&category=${encodeURIComponent(state.category)}&limit=50`;
+      url=`/api/search?q=${encodeURIComponent(state.searchQuery)}&persona=${encodeURIComponent(state.persona)}&category=${encodeURIComponent(state.category)}&limit=${state.perPage}`;
     }else{
-      url=`/api/images?page=${state.page}&per_page=${state.perPage}&category=${encodeURIComponent(state.category)}&persona=${encodeURIComponent(state.persona)}&style=${encodeURIComponent(state.style)}&scene=${encodeURIComponent(state.scene)}&shot_size=${encodeURIComponent(state.shot_size)}&atmosphere=${encodeURIComponent(state.atmosphere)}`;
+      url=`/api/images?page=${state.page}&per_page=${state.perPage}&category=${encodeURIComponent(state.category)}&persona=${encodeURIComponent(state.persona)}&style=${encodeURIComponent(state.style)}&scene=${encodeURIComponent(state.scene)}&shot_size=${encodeURIComponent(state.shot_size)}&atmosphere=${encodeURIComponent(state.atmosphere)}&lightweight=1`;
     }
+
     const resp=await api(url);
+    state.loading=false;
+    $('#loadingIndicator').classList.add('hidden');
+
     if(!resp)return;
     const data=await resp.json();
     const images=data.images||[];
     state.total=data.total||images.length;
-    renderGrid(images);
-    if(!state.searchQuery)renderPagination();
-    else $('#pagination').innerHTML='';
-    $('#emptyState').classList.toggle('hidden',images.length>0);
+
+    if(resetGrid){
+      $('#imageGrid').innerHTML='';
+    }
+
+    appendGrid(images);
+
+    if(!state.searchQuery && images.length<state.perPage){
+      state.allLoaded=true;
+    }else if(!state.searchQuery){
+      state.page++;
+    }
+
+    const loadedCount=$('#imageGrid').children.length;
+    if(!state.searchQuery && loadedCount<state.total){
+      $('#loadMoreSection').classList.remove('hidden');
+      $('#loadMoreInfo').textContent=`已加载 ${loadedCount} / ${state.total}`;
+    }else{
+      $('#loadMoreSection').classList.add('hidden');
+    }
+
+    $('#emptyState').classList.toggle('hidden',loadedCount>0);
   }
 
-  function renderGrid(images){
+  function appendGrid(images){
     const grid=$('#imageGrid');
-    grid.innerHTML='';
     images.forEach(img=>{
       const card=document.createElement('div');
       card.className='image-card';
+      card.dataset.id=img.id;
       const personaText=img.persona?`<div class="image-card-persona">${esc(img.persona)}</div>`:'';
       card.innerHTML=`
         <img src="/api/image-file/${img.id}" loading="lazy" alt="" onerror="this.src='data:image/svg+xml,<svg xmlns=%22http://www.w3.org/2000/svg%22 width=%22180%22 height=%22240%22><rect fill=%22%23F8F0F4%22 width=%22180%22 height=%22240%22/><text x=%2290%22 y=%22125%22 text-anchor=%22middle%22 fill=%22%23C8B8D0%22 font-size=%2214%22>加载失败</text></svg>'">
@@ -155,32 +192,6 @@
       cb.classList.toggle('checked',state.selectedIds.has(cb.dataset.id));
     });
     $('#batchCount').textContent=`已选 ${state.selectedIds.size} 张`;
-  }
-
-  function renderPagination(){
-    const total=state.total;
-    const pages=Math.ceil(total/state.perPage)||1;
-    const cur=state.page;
-    const container=$('#pagination');
-    container.innerHTML='';
-    if(pages<=1)return;
-    const prev=document.createElement('button');
-    prev.className='page-btn';prev.textContent='‹';prev.disabled=cur<=1;
-    prev.onclick=()=>{state.page--;loadImages();};
-    container.appendChild(prev);
-    let start=Math.max(1,cur-2),end=Math.min(pages,start+4);
-    if(end-start<4)start=Math.max(1,end-4);
-    for(let i=start;i<=end;i++){
-      const btn=document.createElement('button');
-      btn.className='page-btn'+(i===cur?' active':'');
-      btn.textContent=i;
-      btn.onclick=()=>{state.page=i;loadImages();};
-      container.appendChild(btn);
-    }
-    const next=document.createElement('button');
-    next.className='page-btn';next.textContent='›';next.disabled=cur>=pages;
-    next.onclick=()=>{state.page++;loadImages();};
-    container.appendChild(next);
   }
 
   async function showDetail(id){
@@ -238,7 +249,7 @@
     const resp=await api(`/api/images/${id}`,{method:'DELETE'});
     if(!resp)return;
     const data=await resp.json();
-    if(data.success){toast('已删除','success');closeDetail();loadImages();loadStats();}
+    if(data.success){toast('已删除','success');closeDetail();state.page=1;state.allLoaded=false;loadImages(true);loadStats();}
     else toast('删除失败','error');
   }
 
@@ -254,7 +265,7 @@
     toast(`已删除 ${data.deleted} 张图片`,'success');
     state.selectedIds.clear();
     updateBatchUI();
-    loadImages();loadStats();
+    state.page=1;state.allLoaded=false;loadImages(true);loadStats();
   }
 
   function setupUpload(){
@@ -300,7 +311,7 @@
           toast('上传成功，正在分析...','success');
           $('#uploadModal').classList.add('hidden');
           resetUpload();
-          setTimeout(()=>{loadImages();loadStats();},2000);
+          setTimeout(()=>{state.page=1;state.allLoaded=false;loadImages(true);loadStats();},2000);
         }else{
           toast(data.error||'上传失败','error');
           $('#uploadStatus').textContent=data.error||'上传失败';
@@ -329,11 +340,97 @@
     api('/api/filters').then(resp=>resp?resp.json():null).then(data=>{
       if(!data)return;
       const sel=$('#uploadPersona');
+      sel.innerHTML='<option value="">不指定</option>';
       (data.personas||[]).forEach(p=>{
         const opt=document.createElement('option');
         opt.value=p;opt.textContent=p;
         sel.appendChild(opt);
       });
+    });
+  }
+
+  function setupBackup(){
+    const zone=$('#backupUploadZone');
+    const fileInput=$('#backupFile');
+    const importBtn=$('#backupImportBtn');
+    let selectedBackupFile=null;
+
+    zone.addEventListener('click',()=>fileInput.click());
+    fileInput.addEventListener('change',()=>{
+      if(fileInput.files.length){
+        selectedBackupFile=fileInput.files[0];
+        zone.querySelector('.backup-upload-text').textContent=selectedBackupFile.name;
+        importBtn.disabled=false;
+      }
+    });
+
+    $('#backupExportBtn').addEventListener('click',async()=>{
+      const btn=$('#backupExportBtn');
+      btn.disabled=true;
+      btn.textContent='正在打包...';
+      try{
+        const resp=await fetch('/api/backup/export',{
+          headers:{'X-Wardrobe-Token':getToken()}
+        });
+        if(resp.status===401){localStorage.removeItem('wardrobe_token');window.location.href='/login';return;}
+        if(!resp.ok){
+          toast('导出失败','error');
+          return;
+        }
+        const blob=await resp.blob();
+        const url=URL.createObjectURL(blob);
+        const a=document.createElement('a');
+        a.href=url;
+        a.download=`wardrobe_backup_${new Date().toISOString().slice(0,10)}.zip`;
+        document.body.appendChild(a);
+        a.click();
+        document.body.removeChild(a);
+        URL.revokeObjectURL(url);
+        toast('备份导出成功','success');
+      }catch(e){
+        toast('导出失败: '+e.message,'error');
+      }finally{
+        btn.disabled=false;
+        btn.innerHTML='<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="16" height="16"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg> 导出备份';
+      }
+    });
+
+    importBtn.addEventListener('click',async()=>{
+      if(!selectedBackupFile)return;
+      if(!confirm('确定要恢复此备份？已有数据不会被覆盖，只会导入新数据。'))return;
+      importBtn.disabled=true;
+      importBtn.textContent='正在恢复...';
+      $('#backupStatus').textContent='上传并恢复中，请稍候...';
+      try{
+        const fd=new FormData();
+        fd.append('backup',selectedBackupFile);
+        const resp=await api('/api/backup/import',{method:'POST',body:fd});
+        if(!resp){toast('恢复失败','error');$('#backupStatus').textContent='请求失败';return;}
+        const data=await resp.json();
+        if(data.success){
+          toast(`恢复成功！导入 ${data.imported} 条记录，${data.copied_files} 个图片文件`,'success');
+          $('#backupStatus').textContent=`导入 ${data.imported}/${data.total_in_backup} 条记录，${data.copied_files} 个图片文件`;
+          state.page=1;state.allLoaded=false;loadImages(true);loadStats();
+        }else{
+          toast(data.error||'恢复失败','error');
+          $('#backupStatus').textContent=data.error||'恢复失败';
+        }
+      }catch(e){
+        toast('恢复失败: '+e.message,'error');
+        $('#backupStatus').textContent='网络错误: '+e.message;
+      }finally{
+        importBtn.disabled=false;
+        importBtn.textContent='恢复备份';
+      }
+    });
+
+    $('#backupModalClose').addEventListener('click',()=>{
+      $('#backupModal').classList.add('hidden');
+      selectedBackupFile=null;
+      fileInput.value='';
+      zone.querySelector('.backup-upload-text').textContent='点击选择备份文件（.zip）';
+      importBtn.disabled=true;
+      $('#backupStatus').textContent='';
     });
   }
 
@@ -411,7 +508,7 @@
   function init(){
     $$('input[name="category"]').forEach(inp=>{
       inp.addEventListener('change',()=>{
-        state.category=inp.value;state.page=1;loadImages();
+        state.category=inp.value;state.page=1;state.allLoaded=false;loadImages(true);
       });
     });
 
@@ -430,6 +527,10 @@
     $('#uploadBtn').addEventListener('click',()=>{
       setupUploadPersonaSelect();
       $('#uploadModal').classList.remove('hidden');
+    });
+
+    $('#backupBtn').addEventListener('click',()=>{
+      $('#backupModal').classList.remove('hidden');
     });
 
     $('#batchModeBtn').addEventListener('click',()=>{
@@ -468,17 +569,21 @@
       window.location.href='/login';
     });
 
+    $('#loadMoreBtn').addEventListener('click',()=>loadImages(false));
+
     setupUpload();
+    setupBackup();
     loadStats();
     loadFilters();
-    loadImages();
+    loadImages(true);
   }
 
   function doSearch(){
     const q=$('#searchInput').value.trim();
     state.searchQuery=q;
     state.page=1;
-    loadImages();
+    state.allLoaded=false;
+    loadImages(true);
   }
 
   document.addEventListener('DOMContentLoaded',init);
