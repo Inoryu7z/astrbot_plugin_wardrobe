@@ -283,6 +283,7 @@ class WardrobeWebServer:
         @app.route("/api/images/<image_id>/reanalyze", methods=["POST"])
         async def api_image_reanalyze(image_id):
             await self.plugin._ensure_db()
+            logger.info("[Wardrobe] WebUI重新分析请求: id=%s", image_id)
             image = await self.plugin.db.get_image(image_id)
             if not image:
                 return jsonify({"error": "未找到图片"}), 404
@@ -322,6 +323,7 @@ class WardrobeWebServer:
                 )
 
                 if not attrs:
+                    logger.warning("[Wardrobe] WebUI重新分析失败: 模型返回空结果 id=%s", image_id)
                     return jsonify({"error": "模型分析失败"}), 500
 
                 def _ensure_list(v):
@@ -356,6 +358,9 @@ class WardrobeWebServer:
                     update_data["user_tags"] = user_description
 
                 await self.plugin.db.update_image(image_id, **update_data)
+                logger.info("[Wardrobe] WebUI重新分析完成: id=%s category=%s exposure=%s description=%s",
+                            image_id, attrs.get("category", ""), attrs.get("exposure_level", ""),
+                            str(attrs.get("description", ""))[:80])
 
                 if self.plugin.vector_searcher and self.plugin.vector_searcher.available:
                     try:
@@ -403,108 +408,118 @@ class WardrobeWebServer:
 
         @app.route("/api/images/batch-reanalyze", methods=["POST"])
         async def api_images_batch_reanalyze():
-            await self.plugin._ensure_db()
-            data = await request.get_json(silent=True) or {}
-            ids = data.get("ids", [])
-            if not ids:
-                return jsonify({"error": "未指定图片"}), 400
+            try:
+                await self.plugin._ensure_db()
+                data = await request.get_json(silent=True) or {}
+                ids = data.get("ids", [])
+                if not ids:
+                    return jsonify({"error": "未指定图片"}), 400
 
-            primary = str(self.plugin._cfg("save_provider_id", "") or "").strip()
-            secondary = str(self.plugin._cfg("save_secondary_provider_id", "") or "").strip()
-            timeout = float(self.plugin._cfg("save_timeout_seconds", 60.0) or 60.0)
+                logger.info("[Wardrobe] WebUI批量重新分析请求: %d张图片", len(ids))
 
-            if not primary and not secondary:
-                return jsonify({"error": "未配置存图模型"}), 400
+                primary = str(self.plugin._cfg("save_provider_id", "") or "").strip()
+                secondary = str(self.plugin._cfg("save_secondary_provider_id", "") or "").strip()
+                timeout = float(self.plugin._cfg("save_timeout_seconds", 60.0) or 60.0)
 
-            success = 0
-            failed = 0
-            for image_id in ids:
-                image = await self.plugin.db.get_image(image_id)
-                if not image:
-                    failed += 1
-                    continue
+                if not primary and not secondary:
+                    return jsonify({"error": "未配置存图模型"}), 400
 
-                image_path_str = image.get("image_path", "")
-                if not image_path_str:
-                    failed += 1
-                    continue
-
-                path = self.plugin.store.get_image_path(image_path_str)
-                if not path.exists():
-                    failed += 1
-                    continue
-
-                try:
-                    import aiofiles
-                    async with aiofiles.open(path, "rb") as f:
-                        image_bytes = await f.read()
-
-                    if not image_bytes:
+                success = 0
+                failed = 0
+                for image_id in ids:
+                    image = await self.plugin.db.get_image(image_id)
+                    if not image:
                         failed += 1
                         continue
 
-                    attrs = await self.plugin.analyzer.analyze_image(
-                        image_bytes,
-                        user_description="",
-                        primary_provider_id=primary,
-                        secondary_provider_id=secondary,
-                        timeout_seconds=timeout,
-                    )
-
-                    if not attrs:
+                    image_path_str = image.get("image_path", "")
+                    if not image_path_str:
                         failed += 1
                         continue
 
-                    def _ensure_list(v):
-                        if isinstance(v, list):
-                            return v
-                        if isinstance(v, str) and v:
-                            return [v]
-                        return []
+                    path = self.plugin.store.get_image_path(image_path_str)
+                    if not path.exists():
+                        failed += 1
+                        continue
 
-                    update_data = {}
-                    for field in ("exposure_features", "key_features", "prop_objects", "allure_features", "body_focus"):
-                        update_data[field] = _ensure_list(attrs.get(field))
+                    try:
+                        import aiofiles
+                        async with aiofiles.open(path, "rb") as f:
+                            image_bytes = await f.read()
 
-                    for field in ("style", "scene", "atmosphere", "action_style",
-                                  "clothing_type", "exposure_level", "pose_type",
-                                  "body_orientation", "dynamic_level", "shot_size",
-                                  "camera_angle", "expression", "color_tone",
-                                  "composition", "background", "description", "category"):
-                        val = attrs.get(field)
-                        if val is not None:
-                            if isinstance(val, list):
-                                update_data[field] = val
-                            else:
-                                update_data[field] = str(val)
+                        if not image_bytes:
+                            failed += 1
+                            continue
 
-                    await self.plugin.db.update_image(image_id, **update_data)
+                        attrs = await self.plugin.analyzer.analyze_image(
+                            image_bytes,
+                            user_description="",
+                            primary_provider_id=primary,
+                            secondary_provider_id=secondary,
+                            timeout_seconds=timeout,
+                        )
 
-                    if self.plugin.vector_searcher and self.plugin.vector_searcher.available:
-                        try:
-                            updated_image = await self.plugin.db.get_image(image_id)
-                            if updated_image:
-                                await self.plugin._index_to_vector(
-                                    image_id,
-                                    updated_image.get("description", ""),
-                                    updated_image.get("user_tags", ""),
-                                    exposure_features=updated_image.get("exposure_features", []),
-                                    key_features=updated_image.get("key_features", []),
-                                    prop_objects=updated_image.get("prop_objects", []),
-                                    allure_features=updated_image.get("allure_features", []),
-                                    body_focus=updated_image.get("body_focus", []),
-                                    category=updated_image.get("category", ""),
-                                    persona=updated_image.get("persona", ""),
-                                )
-                        except Exception as e:
-                            logger.warning("[Wardrobe] 批量重新分析后向量索引重建失败: %s", e)
+                        if not attrs:
+                            logger.warning("[Wardrobe] 批量重新分析: 模型返回空结果 id=%s", image_id)
+                            failed += 1
+                            continue
 
-                    success += 1
-                except Exception as e:
-                    logger.warning("[Wardrobe] 批量重新分析失败 id=%s error=%s", image_id, e)
-                    failed += 1
+                        def _ensure_list(v):
+                            if isinstance(v, list):
+                                return v
+                            if isinstance(v, str) and v:
+                                return [v]
+                            return []
 
-            return jsonify({"success": True, "reanalyzed": success, "failed": failed})
+                        update_data = {}
+                        for field in ("exposure_features", "key_features", "prop_objects", "allure_features", "body_focus"):
+                            update_data[field] = _ensure_list(attrs.get(field))
+
+                        for field in ("style", "scene", "atmosphere", "action_style",
+                                      "clothing_type", "exposure_level", "pose_type",
+                                      "body_orientation", "dynamic_level", "shot_size",
+                                      "camera_angle", "expression", "color_tone",
+                                      "composition", "background", "description", "category"):
+                            val = attrs.get(field)
+                            if val is not None:
+                                if isinstance(val, list):
+                                    update_data[field] = val
+                                else:
+                                    update_data[field] = str(val)
+
+                        await self.plugin.db.update_image(image_id, **update_data)
+                        logger.info("[Wardrobe] 批量重新分析完成: id=%s category=%s",
+                                    image_id, attrs.get("category", ""))
+
+                        if self.plugin.vector_searcher and self.plugin.vector_searcher.available:
+                            try:
+                                updated_image = await self.plugin.db.get_image(image_id)
+                                if updated_image:
+                                    await self.plugin._index_to_vector(
+                                        image_id,
+                                        updated_image.get("description", ""),
+                                        updated_image.get("user_tags", ""),
+                                        exposure_features=updated_image.get("exposure_features", []),
+                                        key_features=updated_image.get("key_features", []),
+                                        prop_objects=updated_image.get("prop_objects", []),
+                                        allure_features=updated_image.get("allure_features", []),
+                                        body_focus=updated_image.get("body_focus", []),
+                                        category=updated_image.get("category", ""),
+                                        persona=updated_image.get("persona", ""),
+                                    )
+                            except Exception as e:
+                                logger.warning("[Wardrobe] 批量重新分析后向量索引重建失败: %s", e)
+
+                        success += 1
+                    except Exception as e:
+                        logger.warning("[Wardrobe] 批量重新分析失败 id=%s error=%s", image_id, e)
+                        failed += 1
+
+                logger.info("[Wardrobe] 批量重新分析完成: 成功%d 失败%d 共%d张", success, failed, len(ids))
+                return jsonify({"success": True, "reanalyzed": success, "failed": failed})
+            except Exception as e:
+                logger.error("[Wardrobe] 批量重新分析异常: %s", e, exc_info=True)
+                return jsonify({"error": f"批量重新分析失败: {e}"}), 500
 
         @app.route("/api/images/upload", methods=["POST"])
         async def api_image_upload():
