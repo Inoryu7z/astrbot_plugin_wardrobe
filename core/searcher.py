@@ -9,6 +9,12 @@ from .database import WardrobeDatabase
 from .image_store import ImageStore
 from .utils import parse_json_response
 
+try:
+    from .vector_searcher import WardrobeVectorSearcher
+    _VEC_AVAILABLE = True
+except ImportError:
+    _VEC_AVAILABLE = False
+
 
 SEARCH_PARSE_SYSTEM_PROMPT = """# 角色
 你是图片检索意图解析助手。根据用户的自然语言描述，生成结构化的查询条件。
@@ -18,10 +24,10 @@ SEARCH_PARSE_SYSTEM_PROMPT = """# 角色
 
 # 可用查询字段
 - category: "人物" 或 "衣服"（可选）
-- style: 风格列表，如 ["甜系洛丽塔", "哥特洛丽塔"]（可选）
+- style: 风格列表，从风格池中选择（可选）
 - exposure_level: "保守"/"适度"/"略暴露"/"暴露"（可选）
-- scene: 场景列表（可选）
-- atmosphere: 氛围列表，如 ["性感", "可爱"]（可选）
+- scene: 场景列表，从场景池中选择（可选）
+- atmosphere: 氛围列表，从氛围池中选择（可选）
 - keywords: 关键词列表，用于描述匹配（可选）
 - persona: 人格名称（可选，仅在 persona_scope 为 named 时填写具体名称）
 - persona_scope: 人格搜索范围，必填，取值如下：
@@ -29,6 +35,9 @@ SEARCH_PARSE_SYSTEM_PROMPT = """# 角色
   - "other": 用户明确要别人的/非当前人格的图（如"有没有别人的漂亮图片""其他人的cos"）
   - "named": 用户明确提到某个具体人格名（如"星织有没有拍过xxx"），此时 persona 填写该名称
   - "global": 用户泛泛询问不涉及任何人格（如"有没有穿洛丽塔的美少女"），或人格无关的纯内容搜索
+
+# 预定义值池（请优先从中选择）
+{pools_text}
 
 # 人格判断规则
 当前对话人格：{current_persona}
@@ -46,7 +55,8 @@ SEARCH_PARSE_SYSTEM_PROMPT = """# 角色
 1. 只输出 JSON，不要输出解释
 2. 用户可能描述得很模糊，尽量推断最合理的查询条件
 3. 如果用户没有明确指定分类，不要填写 category
-4. keywords 用于捕捉无法用预定义值表达的特征"""
+4. style/scene/atmosphere 请优先从预定义值池中选择，确保与存图时的标签一致
+5. keywords 用于捕捉无法用预定义值表达的特征"""
 
 SEARCH_SELECT_SYSTEM_PROMPT = """# 角色
 你是图片选择助手。从给定的候选图片中，选出最符合用户需求的图片。
@@ -63,18 +73,52 @@ SEARCH_SELECT_SYSTEM_PROMPT = """# 角色
 }}
 ```
 
+# 选择策略
+1. 优先匹配 style（风格）和 atmosphere（氛围），这两个维度最能体现图片的整体感觉
+2. 其次匹配 scene（场景）和 clothing_type（服装类型）
+3. description 字段包含最丰富的语义信息，当其他属性都不太匹配时，以 description 的语义相似度为准
+4. 如果候选图片都不匹配用户需求，返回空列表 selected_ids: []
+
 # 规则
 1. 最多选择 {max_select} 张图片
 2. 优先选择最匹配用户描述的图片
-3. 如果没有完全匹配的，选择最接近的
+3. 如果没有合理匹配的，可以返回空列表
 4. 只输出 JSON，不要输出解释"""
 
 
 class ImageSearcher:
-    def __init__(self, context, db: WardrobeDatabase, store: ImageStore):
+    def __init__(self, context, db: WardrobeDatabase, store: ImageStore, vector_searcher=None):
         self.context = context
         self.db = db
         self.store = store
+        self.vector_searcher = vector_searcher
+        self._pools_text_cache = None
+        self._pools_text_ts = 0
+
+    async def _get_pools_text(self) -> str:
+        now = time.time()
+        if self._pools_text_cache and now - self._pools_text_ts < 300:
+            return self._pools_text_cache
+
+        try:
+            from .pools import ALL_POOLS
+            plugin = getattr(self.context, '_wardrobe_plugin', None)
+            pools = await plugin.get_merged_pools() if plugin else ALL_POOLS
+        except Exception:
+            from .pools import ALL_POOLS
+            pools = ALL_POOLS
+
+        search_pools = {k: v for k, v in pools.items() if k in ("style", "scene", "atmosphere", "clothing_type")}
+        lines = []
+        for key, values in search_pools.items():
+            lines.append(f"## {key}")
+            for v in values:
+                lines.append(f"- {v}")
+            lines.append("")
+
+        self._pools_text_cache = "\n".join(lines)
+        self._pools_text_ts = now
+        return self._pools_text_cache
 
     async def search(
         self,
@@ -114,6 +158,7 @@ class ImageSearcher:
         if exclude_current_persona and current_persona:
             candidates = await self._query_candidates_excluding_persona(
                 query_conditions, exclude_persona=current_persona, limit=candidate_limit,
+                user_query=user_query,
             )
             logger.info(
                 "[Wardrobe] 排除人格搜索结果: %d张 exclude=%s",
@@ -125,7 +170,7 @@ class ImageSearcher:
             candidates = await self._search_by_scope(
                 query_conditions, persona_scope=persona_scope,
                 named_persona=named_persona, current_persona=current_persona,
-                limit=candidate_limit, meta=meta,
+                limit=candidate_limit, meta=meta, user_query=user_query,
             )
 
         if not candidates:
@@ -160,6 +205,7 @@ class ImageSearcher:
         current_persona: str,
         limit: int,
         meta: dict[str, Any],
+        user_query: str = "",
     ) -> list[dict[str, Any]]:
         logger.info(
             "[Wardrobe] 搜索策略: scope=%s current_persona=%s named_persona=%s",
@@ -167,45 +213,65 @@ class ImageSearcher:
         )
 
         if persona_scope == "self" and current_persona:
-            candidates = await self._query_candidates(conditions, limit=limit, persona=current_persona)
+            candidates = await self._query_candidates(conditions, limit=limit, persona=current_persona, user_query=user_query)
             logger.info("[Wardrobe] 人格池搜索结果: %d张 persona=%s", len(candidates), current_persona)
             if candidates:
                 meta["searched_persona"] = current_persona
                 return candidates
             logger.info("[Wardrobe] 当前人格池无结果，回退全局搜索 persona=%s", current_persona)
             meta["persona_mismatch"] = True
-            candidates = await self._query_candidates(conditions, limit=limit, persona="")
+            candidates = await self._query_candidates(conditions, limit=limit, persona="", user_query=user_query)
             meta["searched_persona"] = ""
             return candidates
 
         if persona_scope == "other" and current_persona:
-            candidates = await self._query_candidates_excluding_persona(conditions, limit=limit, exclude_persona=current_persona)
+            candidates = await self._query_candidates_excluding_persona(conditions, limit=limit, exclude_persona=current_persona, user_query=user_query)
             logger.info("[Wardrobe] 排除人格搜索结果: %d张 exclude=%s", len(candidates), current_persona)
             if candidates:
                 meta["searched_persona"] = f"非{current_persona}"
                 return candidates
             logger.info("[Wardrobe] 非当前人格池无结果，回退全局搜索")
-            candidates = await self._query_candidates(conditions, limit=limit, persona="")
+            candidates = await self._query_candidates(conditions, limit=limit, persona="", user_query=user_query)
             meta["searched_persona"] = ""
             return candidates
 
         if persona_scope == "named" and named_persona:
-            candidates = await self._query_candidates(conditions, limit=limit, persona=named_persona)
+            candidates = await self._query_candidates(conditions, limit=limit, persona=named_persona, user_query=user_query)
             logger.info("[Wardrobe] 指定人格搜索结果: %d张 persona=%s", len(candidates), named_persona)
             if candidates:
                 meta["searched_persona"] = named_persona
                 return candidates
             logger.info("[Wardrobe] 指定人格池无结果，回退全局搜索 persona=%s", named_persona)
             meta["persona_mismatch"] = True
-            candidates = await self._query_candidates(conditions, limit=limit, persona="")
+            candidates = await self._query_candidates(conditions, limit=limit, persona="", user_query=user_query)
             meta["searched_persona"] = ""
             return candidates
 
         logger.info("[Wardrobe] 全局搜索")
-        return await self._query_candidates(conditions, limit=limit, persona="")
+        return await self._query_candidates(conditions, limit=limit, persona="", user_query=user_query)
+
+    async def _vector_search(self, user_query: str, k: int, persona: str = "", exclude_persona: str = "") -> list[dict[str, Any]]:
+        if not self.vector_searcher or not self.vector_searcher.available:
+            return []
+
+        wardrobe_ids = await self.vector_searcher.search(
+            query=user_query,
+            k=k,
+            persona=persona,
+            exclude_persona=exclude_persona,
+        )
+        if not wardrobe_ids:
+            return []
+
+        results = []
+        for wid in wardrobe_ids:
+            img = await self.db.get_image(wid)
+            if img:
+                results.append(img)
+        return results
 
     async def _query_candidates_excluding_persona(
-        self, conditions: dict[str, Any], *, exclude_persona: str, limit: int = 20
+        self, conditions: dict[str, Any], *, exclude_persona: str, limit: int = 20, user_query: str = ""
     ) -> list[dict[str, Any]]:
         category = conditions.get("category")
         style = conditions.get("style")
@@ -213,6 +279,11 @@ class ImageSearcher:
         scene = conditions.get("scene")
         atmosphere = conditions.get("atmosphere")
         keywords = conditions.get("keywords")
+
+        vec_results = await self._vector_search(user_query or " ".join(keywords or []), k=limit, exclude_persona=exclude_persona)
+        if vec_results:
+            logger.info("[Wardrobe] 向量检索命中（排除人格）: %d张 exclude=%s", len(vec_results), exclude_persona)
+            return vec_results
 
         results = await self.db.search_images(
             category=category,
@@ -258,9 +329,11 @@ class ImageSearcher:
         if not providers:
             return None
 
+        pools_text = await self._get_pools_text()
         system_prompt = SEARCH_PARSE_SYSTEM_PROMPT.format(
             current_persona=current_persona or "未设置",
             persona_names=persona_names or "无",
+            pools_text=pools_text,
         )
 
         for provider_id in providers:
@@ -285,7 +358,7 @@ class ImageSearcher:
         return None
 
     async def _query_candidates(
-        self, conditions: dict[str, Any], limit: int = 20, persona: str = ""
+        self, conditions: dict[str, Any], limit: int = 20, persona: str = "", user_query: str = ""
     ) -> list[dict[str, Any]]:
         category = conditions.get("category")
         style = conditions.get("style")
@@ -293,6 +366,11 @@ class ImageSearcher:
         scene = conditions.get("scene")
         atmosphere = conditions.get("atmosphere")
         keywords = conditions.get("keywords")
+
+        vec_results = await self._vector_search(user_query or " ".join(keywords or []), k=limit, persona=persona)
+        if vec_results:
+            logger.info("[Wardrobe] 向量检索命中: %d张 persona=%s", len(vec_results), persona or "全局")
+            return vec_results
 
         results = await self.db.search_images(
             category=category,
@@ -376,6 +454,8 @@ class ImageSearcher:
                 result = parse_json_response(raw)
                 if result and "selected_ids" in result:
                     selected_ids = result["selected_ids"]
+                    if not selected_ids:
+                        return []
                     id_set = set(selected_ids)
                     return [c for c in candidates if c["id"] in id_set]
             except asyncio.TimeoutError:
