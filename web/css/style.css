@@ -832,6 +832,11 @@ html, body {
   display:flex; gap:16px;
 }
 
+.modal-bottom-actions {
+  display:flex; gap:8px; margin-top:16px;
+  padding-top:12px; border-top:1px solid var(--border);
+}
+
 .modal-reanalyze-section {
   margin-bottom:12px;
   padding:10px 12px;
