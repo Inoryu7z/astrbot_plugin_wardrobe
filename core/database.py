@@ -439,7 +439,59 @@ class WardrobeDatabase:
             sql = f"SELECT * FROM images {where_clause} ORDER BY created_at DESC LIMIT ? OFFSET ?"
             async with db.execute(sql, params) as cursor:
                 rows = await cursor.fetchall()
-                return [self._row_to_dict(row) for row in rows]
+                results = [self._row_to_dict(row) for row in rows]
+
+        if results:
+            return results
+
+        bigram_groups = self._bigram_decompose_grouped(keywords)
+        if not bigram_groups:
+            return []
+
+        base_conditions, base_params = self._build_search_conditions(
+            category=category, persona=persona,
+            exclude_persona=exclude_persona, keywords=None,
+        )
+
+        for group in bigram_groups:
+            group_conds = []
+            for bg in group:
+                escaped = WardrobeDatabase._escape_like(bg)
+                group_conds.append(
+                    "(description LIKE ? ESCAPE '\\' OR user_tags LIKE ? ESCAPE '\\' "
+                    "OR exposure_features LIKE ? ESCAPE '\\' OR key_features LIKE ? ESCAPE '\\' "
+                    "OR prop_objects LIKE ? ESCAPE '\\' OR allure_features LIKE ? ESCAPE '\\' "
+                    "OR body_focus LIKE ? ESCAPE '\\')"
+                )
+                for _ in range(7):
+                    base_params.append(f'%{escaped}%')
+            base_conditions.append(f"({' OR '.join(group_conds)})")
+
+        where_clause2 = ""
+        if base_conditions:
+            where_clause2 = "WHERE " + " AND ".join(base_conditions)
+        base_params.append(limit)
+        base_params.append(offset)
+
+        async with aiosqlite.connect(self.db_path) as db:
+            db.row_factory = aiosqlite.Row
+            sql2 = f"SELECT * FROM images {where_clause2} ORDER BY created_at DESC LIMIT ? OFFSET ?"
+            async with db.execute(sql2, base_params) as cursor:
+                rows2 = await cursor.fetchall()
+                return [self._row_to_dict(row) for row in rows2]
+
+    @staticmethod
+    def _bigram_decompose_grouped(keywords: list[str]) -> list[list[str]]:
+        groups: list[list[str]] = []
+        for kw in keywords:
+            if len(kw) <= 1:
+                continue
+            elif len(kw) == 2:
+                groups.append([kw])
+            else:
+                bigrams = [kw[i:i + 2] for i in range(len(kw) - 1)]
+                groups.append(bigrams)
+        return groups
 
     async def get_stats(self) -> dict[str, Any]:
         async with aiosqlite.connect(self.db_path) as db:
