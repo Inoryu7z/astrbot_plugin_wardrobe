@@ -1,3 +1,18 @@
+### v1.8.0
+
+**✨ 新功能**
+
+* 新增向量语义检索：基于 AstrBot 框架的 FaissVecDB + EmbeddingProvider，支持配置专用 Embedding 模型，向量模型失效时自动回退到本地关键词匹配
+* 向量检索解决洛丽塔/JK等相似描述的精准匹配问题——LIKE 搜索无法区分"中华风甜系"和"蓝白蕾丝拼接"，向量检索可以捕捉语义差异
+* 存图时自动生成 description + user_tags 的向量索引，首次启用时自动索引已有图片
+* 新增 `embedding_provider_id` 配置项，允许指定专用 Embedding Provider
+
+**🔧 改进**
+
+* 搜索意图解析 prompt 注入值池（style/scene/atmosphere/clothing_type），解决存图-取图值池断层问题
+* 候选图片选择 prompt 增加属性优先级说明和空结果选项，提升选择质量
+* 选择 prompt 支持返回空列表，避免强行选择不匹配的图片
+
 ### v1.7.0
 
 **✨ 新功能**

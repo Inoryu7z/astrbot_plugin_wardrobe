@@ -16,6 +16,13 @@ from .core.searcher import ImageSearcher
 from .core.utils import detect_image_mime, mime_to_ext
 from .webui import WardrobeWebServer
 
+try:
+    from .core.vector_searcher import WardrobeVectorSearcher
+    from astrbot.core.provider.provider import EmbeddingProvider
+    _VEC_AVAILABLE = True
+except ImportError:
+    _VEC_AVAILABLE = False
+
 _MAX_IMAGE_SIZE_MB = 10
 _MAX_DESCRIPTION_LEN = 2000
 # 仅监听 aiimg_generate 这一个统一入口工具。
@@ -28,7 +35,7 @@ _AIIMG_GENERATE_TOOLS = frozenset({"aiimg_generate"})
     "astrbot_plugin_wardrobe",
     "Inoryu7z",
     "图片衣柜管理插件，支持智能分类、语义检索和参考图接口",
-    "1.7.0",
+    "1.8.0",
 )
 class WardrobePlugin(Star):
     def __init__(self, context: Context, config: AstrBotConfig = None):
@@ -41,7 +48,8 @@ class WardrobePlugin(Star):
         self.db = WardrobeDatabase(data_dir)
         self.store = ImageStore(data_dir)
         self.analyzer = ImageAnalyzer(context, plugin=self)
-        self.searcher = ImageSearcher(context, self.db, self.store)
+        self.vector_searcher = self._init_vector_searcher(data_dir)
+        self.searcher = ImageSearcher(context, self.db, self.store, vector_searcher=self.vector_searcher)
         self.data_dir = data_dir
         self._db_initialized = False
         self._db_init_event = asyncio.Event()
@@ -59,9 +67,39 @@ class WardrobePlugin(Star):
         except Exception as e:
             logger.error("[Wardrobe] WebUI 启动失败: %s", e)
 
+    def _init_vector_searcher(self, data_dir):
+        if not _VEC_AVAILABLE:
+            return None
+        try:
+            emb_id = self._cfg("embedding_provider_id", "")
+            embedding_provider = None
+            if emb_id:
+                provider = self.context.get_provider_by_id(emb_id)
+                if provider and isinstance(provider, EmbeddingProvider):
+                    embedding_provider = provider
+                    logger.info("[Wardrobe] 使用配置的 Embedding Provider: %s", emb_id)
+            if not embedding_provider:
+                try:
+                    embedding_providers = self.context.get_all_embedding_providers()
+                    if embedding_providers:
+                        embedding_provider = embedding_providers[0]
+                        logger.info("[Wardrobe] 使用默认 Embedding Provider")
+                except Exception:
+                    pass
+            if not embedding_provider:
+                logger.info("[Wardrobe] 无可用 Embedding Provider，向量检索已禁用")
+                return None
+            vs = WardrobeVectorSearcher(str(data_dir), embedding_provider=embedding_provider, db=self.db)
+            return vs
+        except Exception as e:
+            logger.warning("[Wardrobe] 向量检索器初始化失败: %s", e)
+            return None
+
     async def terminate(self):
         if self._webui:
             await self._webui.stop()
+        if self.vector_searcher:
+            await self.vector_searcher.terminate()
         logger.info("[Wardrobe] 插件已卸载")
 
     async def get_merged_pools(self) -> dict:
@@ -129,11 +167,36 @@ class WardrobePlugin(Star):
         try:
             await self.db.init()
             self._db_initialized = True
+            if self.vector_searcher and not self.vector_searcher._initialized:
+                await self.vector_searcher.initialize()
+                if self.vector_searcher.available:
+                    await self.vector_searcher.index_existing_images()
         finally:
             self._db_init_event.set()
 
     def _cfg(self, key: str, default=None):
         return self.config.get(key, default)
+
+    async def _index_to_vector(self, image_id: str, description: str, user_tags: str, category: str, persona: str):
+        if not self.vector_searcher or not self.vector_searcher.available:
+            return
+        text_parts = []
+        if description:
+            text_parts.append(description)
+        if user_tags:
+            text_parts.append(f"标签: {user_tags}")
+        text = " ".join(text_parts)
+        if not text.strip():
+            return
+        try:
+            await self.vector_searcher.add_image(
+                wardrobe_id=image_id,
+                text=text,
+                category=category,
+                persona=persona,
+            )
+        except Exception as e:
+            logger.debug("[Wardrobe] 向量索引添加失败: %s", e)
 
     @filter.command("存图")
     @filter.permission_type(filter.PermissionType.ADMIN)
@@ -329,6 +392,7 @@ class WardrobePlugin(Star):
                 created_by=created_by,
                 persona=persona,
             )
+            await self._index_to_vector(image_id, user_description or "模型分析失败，无描述", user_description, "人物", persona)
             return image_id, None
 
         category = attrs.get("category", "人物")
@@ -374,6 +438,9 @@ class WardrobePlugin(Star):
             created_by=created_by,
             persona=persona,
         )
+
+        desc_text = _ensure_str(attrs.get("description"))
+        await self._index_to_vector(image_id, desc_text, user_description, category, persona)
 
         return image_id, attrs
 
