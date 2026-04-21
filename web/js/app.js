@@ -513,51 +513,45 @@
     const pending=state.batchOps.filter(o=>o.status==='pending'||o.status==='failed');
     if(!pending.length)return;
 
-    let successCount=state.batchOps.filter(o=>o.status==='done').length;
-    let failCount=0;
+    const promises=[];
 
-    try{
-      for(let i=0;i<pending.length;i++){
-        const op=pending[i];
-        op.status='analyzing';
-        updateBatchOpsPanel();
+    for(let i=0;i<pending.length;i++){
+      const op=pending[i];
+      op.status='analyzing';
+      updateBatchOpsPanel();
+      if(state.batchReanalyzing) updateBatchReanalyzeIndicator();
 
+      const p=(async()=>{
         try{
           const resp=await api(`/api/images/${op.id}/reanalyze`,{method:'POST',json:{description:''}});
           if(!resp||resp.error){
             op.status='failed';
-            failCount++;
           }else{
             const data=await resp.json();
-            if(data.success){
-              op.status='done';
-              successCount++;
-            }else{
-              op.status='failed';
-              failCount++;
-            }
+            op.status=data.success?'done':'failed';
           }
         }catch(e){
           console.error('[Wardrobe] 批量重新分析单张失败:',e);
           op.status='failed';
-          failCount++;
         }
         updateBatchOpsPanel();
+        if(state.batchReanalyzing) updateBatchReanalyzeIndicator();
+      })();
 
-        if(i<pending.length-1){
-          await new Promise(r=>setTimeout(r,5000));
-        }
+      promises.push(p);
+
+      if(i<pending.length-1){
+        await new Promise(r=>setTimeout(r,5000));
       }
-    }catch(err){
-      console.error('[Wardrobe] 批量重新分析异常中断:',err);
-      toast('批量重新分析异常中断: '+err.message,'error');
-      state.batchOps.filter(o=>o.status==='analyzing').forEach(o=>o.status='failed');
-      updateBatchOpsPanel();
     }
+
+    await Promise.all(promises);
 
     state.batchReanalyzing=false;
     updateBatchReanalyzeIndicator();
-    toast(`重新分析完成：${successCount}成功，${failCount}失败`,successCount>0?'success':'error');
+    const done=state.batchOps.filter(o=>o.status==='done').length;
+    const failed=state.batchOps.filter(o=>o.status==='failed').length;
+    toast(`重新分析完成：${done}成功，${failed}失败`,done>0?'success':'error');
     state.page=1;state.allLoaded=false;loadImages(true);loadStats();
   }
 
@@ -755,58 +749,55 @@
         toast(`开始批量上传 ${files.length} 张图片`,'info');
         updateBatchOpsPanel();
 
-        try{
-          for(let i=0;i<files.length;i++){
-            state.batchUploadProgress.current=i+1;
-            state.batchOps[i].status='analyzing';
-            updateBatchUploadIndicator();
-            updateBatchOpsPanel();
-            const statusEl=document.getElementById('fileStatus'+i);
-            const fd=new FormData();
-            fd.append('image',files[i]);
-            fd.append('persona',persona);
-            fd.append('description',description);
+        const uploadPromises=[];
+
+        for(let i=0;i<files.length;i++){
+          state.batchUploadProgress.current=i+1;
+          state.batchOps[i].status='analyzing';
+          updateBatchUploadIndicator();
+          updateBatchOpsPanel();
+
+          const p=(async()=>{
             try{
+              const fd=new FormData();
+              fd.append('image',files[i]);
+              fd.append('persona',persona);
+              fd.append('description',description);
               const resp=await api('/api/images/upload',{method:'POST',body:fd});
               if(resp&&typeof resp.json==='function'&&!resp.error){
                 const data=await resp.json();
                 if(data.duplicate){
                   state.batchUploadProgress.failed++;
                   state.batchOps[i].status='failed';
-                  if(statusEl){statusEl.textContent='重复';statusEl.className='file-status dup';}
                 }else if(data.success){
                   state.batchUploadProgress.uploaded++;
                   state.batchOps[i].status='done';
-                  if(statusEl){statusEl.textContent='✓';statusEl.className='file-status ok';}
+                  if(!state.loading){state.page=1;state.allLoaded=false;loadImages(true);loadStats();}
                 }else{
                   state.batchUploadProgress.failed++;
                   state.batchOps[i].status='failed';
-                  if(statusEl){statusEl.textContent='✗';statusEl.className='file-status fail';}
                 }
               }else{
                 state.batchUploadProgress.failed++;
                 state.batchOps[i].status='failed';
-                if(statusEl){statusEl.textContent='✗';statusEl.className='file-status fail';}
               }
             }catch(err){
               console.error('[Wardrobe] 批量上传单张失败:',err);
               state.batchUploadProgress.failed++;
               state.batchOps[i].status='failed';
-              if(statusEl){statusEl.textContent='✗';statusEl.className='file-status fail';}
             }
             updateBatchUploadIndicator();
             updateBatchOpsPanel();
+          })();
 
-            if(i<files.length-1){
-              await new Promise(r=>setTimeout(r,5000));
-            }
+          uploadPromises.push(p);
+
+          if(i<files.length-1){
+            await new Promise(r=>setTimeout(r,5000));
           }
-        }catch(err){
-          console.error('[Wardrobe] 批量上传异常中断:',err);
-          toast('批量上传异常中断: '+err.message,'error');
-          state.batchOps.filter(o=>o.status==='analyzing').forEach(o=>o.status='failed');
-          updateBatchOpsPanel();
         }
+
+        await Promise.all(uploadPromises);
 
         const up=state.batchUploadProgress.uploaded;
         const fl=state.batchUploadProgress.failed;
@@ -849,8 +840,10 @@
       return;
     }
     indicator.classList.remove('hidden');
-    const p=state.batchUploadProgress;
-    indicator.textContent=`上传中 ${p.current}/${p.total}（✓${p.uploaded} ✗${p.failed}）`;
+    const done=state.batchOps.filter(o=>o.status==='done').length;
+    const failed=state.batchOps.filter(o=>o.status==='failed').length;
+    const total=state.batchOps.length;
+    indicator.textContent=`上传中 ${done+failed}/${total}（✓${done} ✗${failed}）`;
   }
 
   function setupUploadPersonaSelect(){
@@ -1176,4 +1169,9 @@
   }
 
   document.addEventListener('DOMContentLoaded',init);
+
+  window.toggleBatchOpsPanel=toggleBatchOpsPanel;
+  window.clearBatchOps=clearBatchOps;
+  window.retryBatchOps=retryBatchOps;
+  window.retrySingleOp=retrySingleOp;
 })();
