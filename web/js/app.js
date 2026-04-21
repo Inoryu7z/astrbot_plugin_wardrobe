@@ -870,7 +870,15 @@
     $('#modalSaveBtn').addEventListener('click',saveEdit);
     $('#favFavoriteBtn').addEventListener('click',()=>toggleFavorite('favorite'));
     $('#favLikeBtn').addEventListener('click',()=>toggleFavorite('like'));
-    $('#modalReanalyzeBtn').addEventListener('click',async()=>{
+    $('#modalReanalyzeBtn').addEventListener('click',()=>{
+      $('#reanalyzeSection').classList.remove('hidden');
+      $('#reanalyzeDesc').value='';
+      $('#reanalyzeStatus').classList.add('hidden');
+    });
+    $('#reanalyzeCancelBtn').addEventListener('click',()=>{
+      $('#reanalyzeSection').classList.add('hidden');
+    });
+    $('#reanalyzeConfirmBtn').addEventListener('click',async()=>{
       if(!state.currentImageId)return;
       const desc=$('#reanalyzeDesc').value.trim();
       const statusEl=$('#reanalyzeStatus');
@@ -896,6 +904,7 @@
           if(state.currentImageData){
             renderDetailFields(state.currentImageData,false);
           }
+          $('#reanalyzeSection').classList.add('hidden');
           updateEditButtons();
           statusEl.classList.add('hidden');
           $('#reanalyzeDesc').value='';

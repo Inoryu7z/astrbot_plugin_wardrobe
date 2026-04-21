@@ -157,15 +157,19 @@
           </div>
         </div>
         <div class="modal-fields" id="modalFields"></div>
-        <div class="modal-meta-readonly" id="modalMetaReadonly"></div>
-        <div class="modal-reanalyze-section">
+        <div class="modal-bottom-actions">
+          <button class="btn btn-danger btn-sm" id="modalDeleteBtn">删除此图</button>
+          <button class="btn btn-secondary btn-sm" id="modalReanalyzeBtn">重新分析</button>
+        </div>
+        <div class="modal-reanalyze-section hidden" id="reanalyzeSection">
           <div class="reanalyze-row">
             <input type="text" class="login-input reanalyze-input" id="reanalyzeDesc" placeholder="可选：输入描述帮助模型分析">
-            <button class="btn btn-accent btn-sm" id="modalReanalyzeBtn">重新分析</button>
+            <button class="btn btn-accent btn-sm" id="reanalyzeConfirmBtn">确认分析</button>
+            <button class="btn btn-ghost btn-sm" id="reanalyzeCancelBtn">取消</button>
           </div>
           <div class="reanalyze-status hidden" id="reanalyzeStatus"></div>
         </div>
-        <button class="btn btn-danger btn-sm" id="modalDeleteBtn">删除此图</button>
+        <div class="modal-meta-readonly" id="modalMetaReadonly"></div>
       </div>
     </div>
   </div>
