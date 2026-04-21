@@ -49,7 +49,7 @@
 
   async function loadStats(){
     const resp=await api('/api/stats');
-    if(!resp)return;
+    if(!resp||resp.error)return;
     const data=await resp.json();
     $('#statTotal').textContent=data.total||0;
     $('#statPerson').textContent=(data.by_category&&data.by_category['人物'])||0;
@@ -59,7 +59,7 @@
   async function loadFilters(){
     try{
       const resp=await api('/api/filters');
-      if(!resp)return;
+      if(!resp||resp.error)return;
       const data=await resp.json();
 
       const container=$('#personaFilters');
@@ -115,7 +115,7 @@
 
     let url;
     if(state.searchQuery){
-      url=`/api/search?q=${encodeURIComponent(state.searchQuery)}&persona=${encodeURIComponent(state.persona)}&category=${encodeURIComponent(state.category)}&limit=${state.perPage}`;
+      url=`/api/search?q=${encodeURIComponent(state.searchQuery)}&persona=${encodeURIComponent(state.persona)}&category=${encodeURIComponent(state.category)}&limit=50`;
     }else{
       url=`/api/images?page=${state.page}&per_page=${state.perPage}&category=${encodeURIComponent(state.category)}&persona=${encodeURIComponent(state.persona)}&style=${encodeURIComponent(state.style)}&scene=${encodeURIComponent(state.scene)}&shot_size=${encodeURIComponent(state.shot_size)}&atmosphere=${encodeURIComponent(state.atmosphere)}&lightweight=1`;
     }
@@ -124,10 +124,10 @@
     state.loading=false;
     $('#loadingIndicator').classList.add('hidden');
 
-    if(!resp)return;
+    if(!resp||resp.error)return;
     const data=await resp.json();
     const images=data.images||[];
-    state.total=data.total||images.length;
+    state.total=data.total!==undefined?data.total:images.length;
 
     if(resetGrid){
       $('#imageGrid').innerHTML='';
@@ -145,6 +145,9 @@
     if(!state.searchQuery && loadedCount<state.total){
       $('#loadMoreSection').classList.remove('hidden');
       $('#loadMoreInfo').textContent=`已加载 ${loadedCount} / ${state.total}`;
+    }else if(state.searchQuery && state.total>0){
+      $('#loadMoreSection').classList.remove('hidden');
+      $('#loadMoreInfo').textContent=`搜索结果: ${state.total} 张`;
     }else{
       $('#loadMoreSection').classList.add('hidden');
     }
@@ -197,7 +200,7 @@
   async function showDetail(id){
     state.currentImageId=id;
     const resp=await api(`/api/images/${id}`);
-    if(!resp)return;
+    if(!resp||resp.error)return;
     const img=await resp.json();
     $('#modalImage').src=`/api/image-file/${id}`;
     const tags=$('#modalTags');
@@ -247,7 +250,7 @@
   async function deleteImage(id){
     if(!confirm('确定删除此图片？'))return;
     const resp=await api(`/api/images/${id}`,{method:'DELETE'});
-    if(!resp)return;
+    if(!resp||resp.error)return;
     const data=await resp.json();
     if(data.success){toast('已删除','success');closeDetail();state.page=1;state.allLoaded=false;loadImages(true);loadStats();}
     else toast('删除失败','error');
@@ -260,7 +263,7 @@
       method:'POST',
       json:{ids:[...state.selectedIds]}
     });
-    if(!resp)return;
+    if(!resp||resp.error)return;
     const data=await resp.json();
     toast(`已删除 ${data.deleted} 张图片`,'success');
     state.selectedIds.clear();
@@ -271,73 +274,154 @@
   function setupUpload(){
     const zone=$('#uploadZone');
     const fileInput=$('#uploadFile');
-    const preview=$('#uploadPreview');
-    const previewImg=$('#previewImg');
     const submitBtn=$('#uploadSubmit');
-    let selectedFile=null;
+    let selectedFiles=[];
+    let uploadCancelled=false;
 
     zone.addEventListener('click',()=>fileInput.click());
     zone.addEventListener('dragover',e=>{e.preventDefault();zone.classList.add('dragover');});
     zone.addEventListener('dragleave',()=>zone.classList.remove('dragover'));
     zone.addEventListener('drop',e=>{
       e.preventDefault();zone.classList.remove('dragover');
-      if(e.dataTransfer.files.length)handleFile(e.dataTransfer.files[0]);
+      if(e.dataTransfer.files.length)handleFiles(Array.from(e.dataTransfer.files));
     });
-    fileInput.addEventListener('change',()=>{if(fileInput.files.length)handleFile(fileInput.files[0]);});
+    fileInput.addEventListener('change',()=>{
+      if(fileInput.files.length)handleFiles(Array.from(fileInput.files));
+    });
 
-    function handleFile(file){
-      if(!file.type.startsWith('image/')){toast('请选择图片文件','error');return;}
-      selectedFile=file;
-      previewImg.src=URL.createObjectURL(file);
-      preview.classList.remove('hidden');
-      zone.classList.add('hidden');
+    $('#uploadClearBtn').addEventListener('click',()=>{
+      selectedFiles=[];
+      fileInput.value='';
+      renderFileList();
+      submitBtn.disabled=true;
+      zone.classList.remove('hidden');
+      $('#uploadBatchPreview').classList.add('hidden');
+    });
+
+    function handleFiles(files){
+      const imageFiles=files.filter(f=>f.type.startsWith('image/'));
+      if(!imageFiles.length){toast('请选择图片文件','error');return;}
+      selectedFiles=selectedFiles.concat(imageFiles);
+      renderFileList();
       submitBtn.disabled=false;
+      zone.classList.add('hidden');
+      $('#uploadBatchPreview').classList.remove('hidden');
     }
 
+    function renderFileList(){
+      const list=$('#uploadFileList');
+      list.innerHTML='';
+      $('#uploadBatchCount').textContent=`已选择 ${selectedFiles.length} 张`;
+      selectedFiles.forEach((f,i)=>{
+        const item=document.createElement('div');
+        item.className='upload-file-item';
+        item.dataset.index=i;
+        const thumb=document.createElement('img');
+        thumb.className='upload-file-thumb';
+        thumb.src=URL.createObjectURL(f);
+        thumb.onload=()=>URL.revokeObjectURL(thumb.src);
+        const name=document.createElement('span');
+        name.className='upload-file-name';
+        name.textContent=f.name;
+        const status=document.createElement('span');
+        status.className='upload-file-status pending';
+        status.id=`uploadStatus_${i}`;
+        status.textContent='⏳';
+        item.appendChild(thumb);
+        item.appendChild(name);
+        item.appendChild(status);
+        list.appendChild(item);
+      });
+    }
+
+    function sleep(ms){return new Promise(r=>setTimeout(r,ms));}
+
     submitBtn.addEventListener('click',async()=>{
-      if(!selectedFile)return;
+      if(!selectedFiles.length)return;
       submitBtn.disabled=true;
-      $('#uploadStatus').textContent='上传中...';
-      const fd=new FormData();
-      fd.append('image',selectedFile);
-      fd.append('persona',$('#uploadPersona').value);
-      fd.append('description',$('#uploadDescription').value);
-      try{
-        const resp=await api('/api/images/upload',{method:'POST',body:fd});
-        if(!resp){toast('上传失败','error');$('#uploadStatus').textContent='请求失败';submitBtn.disabled=false;return;}
-        if(resp.error){toast(resp.error,'error');$('#uploadStatus').textContent=resp.error;submitBtn.disabled=false;return;}
-        const data=await resp.json();
-        if(data.success){
-          toast('上传成功，正在分析...','success');
-          $('#uploadModal').classList.add('hidden');
-          resetUpload();
-          setTimeout(()=>{state.page=1;state.allLoaded=false;loadImages(true);loadStats();},2000);
-        }else{
-          toast(data.error||'上传失败','error');
-          $('#uploadStatus').textContent=data.error||'上传失败';
-          submitBtn.disabled=false;
+      uploadCancelled=false;
+      $('#uploadProgress').classList.remove('hidden');
+
+      const total=selectedFiles.length;
+      let successCount=0;
+      let failCount=0;
+
+      for(let i=0;i<selectedFiles.length;i++){
+        if(uploadCancelled)break;
+
+        const statusEl=$(`#uploadStatus_${i}`);
+        if(statusEl)statusEl.className='upload-file-status uploading';
+        if(statusEl)statusEl.textContent='🔄';
+        $('#uploadProgressText').textContent=`正在处理第 ${i+1}/${total} 张...`;
+        $('#uploadProgressFill').style.width=((i/total)*100)+'%';
+
+        const fd=new FormData();
+        fd.append('image',selectedFiles[i]);
+        fd.append('persona',$('#uploadPersona').value);
+        fd.append('description',$('#uploadDescription').value);
+
+        try{
+          const resp=await api('/api/images/upload',{method:'POST',body:fd});
+          if(!resp||resp.error){
+            if(statusEl)statusEl.className='upload-file-status error';
+            if(statusEl)statusEl.textContent='❌';
+            failCount++;
+          }else{
+            const data=await resp.json();
+            if(data.success){
+              if(statusEl)statusEl.className='upload-file-status success';
+              if(statusEl)statusEl.textContent='✅';
+              successCount++;
+            }else{
+              if(statusEl)statusEl.className='upload-file-status error';
+              if(statusEl)statusEl.textContent='❌';
+              failCount++;
+            }
+          }
+        }catch(err){
+          if(statusEl)statusEl.className='upload-file-status error';
+          if(statusEl)statusEl.textContent='❌';
+          failCount++;
         }
-      }catch(err){
-        toast('上传失败','error');
-        $('#uploadStatus').textContent='网络错误: '+err.message;
-        submitBtn.disabled=false;
+
+        $('#uploadProgressFill').style.width=(((i+1)/total)*100)+'%';
+
+        if(i<selectedFiles.length-1&&!uploadCancelled){
+          $('#uploadProgressText').textContent=`等待 5 秒后处理下一张...`;
+          await sleep(5000);
+        }
       }
+
+      $('#uploadProgressText').textContent=`完成！成功 ${successCount} 张，失败 ${failCount} 张`;
+      toast(`批量上传完成：成功 ${successCount} 张，失败 ${failCount} 张`,successCount>0?'success':'error');
+
+      setTimeout(()=>{
+        state.page=1;state.allLoaded=false;loadImages(true);loadStats();
+      },1500);
+
+      setTimeout(()=>{
+        resetUpload();
+      },3000);
     });
 
     function resetUpload(){
-      selectedFile=null;
+      uploadCancelled=true;
+      selectedFiles=[];
       fileInput.value='';
-      preview.classList.add('hidden');
+      $('#uploadBatchPreview').classList.add('hidden');
       zone.classList.remove('hidden');
       submitBtn.disabled=true;
       $('#uploadStatus').textContent='';
+      $('#uploadProgress').classList.add('hidden');
+      $('#uploadProgressFill').style.width='0%';
+      $('#uploadProgressText').textContent='';
     }
 
     $('#uploadModalClose').addEventListener('click',()=>{$('#uploadModal').classList.add('hidden');resetUpload();});
   }
 
   function setupUploadPersonaSelect(){
-    api('/api/filters').then(resp=>resp?resp.json():null).then(data=>{
+    api('/api/filters').then(resp=>(resp&&!resp.error)?resp.json():null).then(data=>{
       if(!data)return;
       const sel=$('#uploadPersona');
       sel.innerHTML='<option value="">不指定</option>';
@@ -405,7 +489,7 @@
         const fd=new FormData();
         fd.append('backup',selectedBackupFile);
         const resp=await api('/api/backup/import',{method:'POST',body:fd});
-        if(!resp){toast('恢复失败','error');$('#backupStatus').textContent='请求失败';return;}
+        if(!resp||resp.error){toast('恢复失败','error');$('#backupStatus').textContent='请求失败';return;}
         const data=await resp.json();
         if(data.success){
           toast(`恢复成功！导入 ${data.imported} 条记录，${data.copied_files} 个图片文件`,'success');
@@ -446,7 +530,7 @@
 
   async function loadPoolsModal(){
     const resp=await api('/api/pools');
-    if(!resp)return;
+    if(!resp||resp.error)return;
     const data=await resp.json();
     const pools=data.pools||{};
     const list=$('#poolsList');

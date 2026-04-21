@@ -268,16 +268,43 @@ class WardrobeWebServer:
             limit = min(100, max(1, int(request.args.get("limit", 50))))
 
             if not query:
-                return jsonify({"images": []})
+                return jsonify({"images": [], "total": 0})
 
-            keywords = [k.strip() for k in query.replace("，", ",").split(",") if k.strip()]
-            results = await self.plugin.db.search_by_description(
-                keywords=keywords,
-                category=category or None,
-                persona=persona or None,
-                limit=limit,
-            )
-            return jsonify({"images": results})
+            results = []
+
+            vector_searcher = getattr(self.plugin, 'vector_searcher', None)
+            if vector_searcher and vector_searcher.available:
+                try:
+                    fetch_k = limit * 3 if category else limit
+                    wardrobe_ids = await vector_searcher.search(
+                        query=query,
+                        k=fetch_k,
+                        persona=persona,
+                    )
+                    if wardrobe_ids:
+                        for wid in wardrobe_ids:
+                            if len(results) >= limit:
+                                break
+                            img = await self.plugin.db.get_image(wid)
+                            if img:
+                                if category and img.get("category") != category:
+                                    continue
+                                results.append(img)
+                        if results:
+                            logger.info("[Wardrobe] WebUI向量检索命中: %d张", len(results))
+                except Exception as e:
+                    logger.warning("[Wardrobe] WebUI向量检索失败: %s", e)
+
+            if not results:
+                keywords = [k.strip() for k in query.replace("，", ",").split(",") if k.strip()]
+                results = await self.plugin.db.search_by_description(
+                    keywords=keywords,
+                    category=category or None,
+                    persona=persona or None,
+                    limit=limit,
+                )
+
+            return jsonify({"images": results, "total": len(results)})
 
         @app.route("/api/filters")
         async def api_filters():
