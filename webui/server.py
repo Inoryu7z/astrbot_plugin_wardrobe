@@ -315,7 +315,7 @@ class WardrobeWebServer:
 
                 attrs = await self.plugin.analyzer.analyze_image(
                     image_bytes,
-                    user_description=user_description or None,
+                    user_description=user_description,
                     primary_provider_id=primary,
                     secondary_provider_id=secondary,
                     timeout_seconds=timeout,
@@ -424,9 +424,12 @@ class WardrobeWebServer:
                     return jsonify({"error": f"图片过大，限制{max_size}MB"}), 400
 
                 logger.info("[Wardrobe] WebUI上传图片: 大小=%.2fKB 人格=%s 描述=%s", len(image_bytes) / 1024, persona or "无", description or "无")
-                image_id, attrs = await self.plugin._save_image_from_bytes(
+                image_id, attrs, duplicate = await self.plugin._save_image_from_bytes(
                     image_bytes, persona=persona, created_by="webui", user_description=description
                 )
+
+                if duplicate:
+                    return jsonify({"duplicate": True, "existing_id": duplicate.get("id", ""), "existing_persona": duplicate.get("persona", "")})
 
                 if not image_id:
                     return jsonify({"error": "保存失败，请检查存图模型是否已配置"}), 500
@@ -466,10 +469,12 @@ class WardrobeWebServer:
                         continue
 
                     try:
-                        image_id, attrs = await self.plugin._save_image_from_bytes(
+                        image_id, attrs, duplicate = await self.plugin._save_image_from_bytes(
                             image_bytes, persona=persona, created_by="webui", user_description=description
                         )
-                        if image_id:
+                        if duplicate:
+                            errors.append({"index": i, "name": file.filename, "error": "图片重复", "duplicate_id": duplicate.get("id", "")})
+                        elif image_id:
                             results.append({"index": i, "name": file.filename, "image_id": image_id})
                         else:
                             errors.append({"index": i, "name": file.filename, "error": "保存失败"})
