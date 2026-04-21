@@ -25,9 +25,11 @@ SEARCH_PARSE_SYSTEM_PROMPT = """# 角色
 # 可用查询字段
 - category: "人物" 或 "衣服"（可选）
 - style: 风格列表，从风格池中选择（可选）
-- exposure_level: "保守"/"适度"/"略暴露"/"暴露"（可选）
+- exposure_level: "保守"/"轻微"/"中等"/"明显"/"极限"（可选）
 - scene: 场景列表，从场景池中选择（可选）
 - atmosphere: 氛围列表，从氛围池中选择（可选）
+- pose_type: 从姿势类型池中选择（可选）
+- body_focus: 身体焦点列表，如"胸部特写""臀部特写""腿部特写"等（可选）
 - keywords: 关键词列表，用于描述匹配（可选）
 - persona: 人格名称（可选，仅在 persona_scope 为 named 时填写具体名称）
 - persona_scope: 人格搜索范围，必填，取值如下：
@@ -119,6 +121,11 @@ class ImageSearcher:
         self._pools_text_cache = "\n".join(lines)
         self._pools_text_ts = now
         return self._pools_text_cache
+
+    @staticmethod
+    def _sort_by_favorite(results: list[dict[str, Any]]) -> list[dict[str, Any]]:
+        fav_order = {"favorite": 0, "like": 1}
+        return sorted(results, key=lambda r: fav_order.get(r.get("favorite", "none"), 2))
 
     async def search(
         self,
@@ -278,12 +285,15 @@ class ImageSearcher:
         exposure_level = conditions.get("exposure_level")
         scene = conditions.get("scene")
         atmosphere = conditions.get("atmosphere")
+        pose_type = conditions.get("pose_type")
+        body_focus = conditions.get("body_focus")
+        shot_size = conditions.get("shot_size")
         keywords = conditions.get("keywords")
 
         vec_results = await self._vector_search(user_query or " ".join(keywords or []), k=limit, exclude_persona=exclude_persona)
         if vec_results:
             logger.info("[Wardrobe] 向量检索命中（排除人格）: %d张 exclude=%s", len(vec_results), exclude_persona)
-            return vec_results
+            return self._sort_by_favorite(vec_results)
 
         results = await self.db.search_images(
             category=category,
@@ -291,8 +301,11 @@ class ImageSearcher:
             style=style,
             scene=scene,
             atmosphere=atmosphere,
+            pose_type=pose_type,
+            body_focus=body_focus,
             persona="",
             exclude_persona=exclude_persona,
+            shot_size=shot_size,
             limit=limit,
         )
 
@@ -366,11 +379,14 @@ class ImageSearcher:
         scene = conditions.get("scene")
         atmosphere = conditions.get("atmosphere")
         keywords = conditions.get("keywords")
+        pose_type = conditions.get("pose_type")
+        body_focus = conditions.get("body_focus")
+        shot_size = conditions.get("shot_size")
 
         vec_results = await self._vector_search(user_query or " ".join(keywords or []), k=limit, persona=persona)
         if vec_results:
             logger.info("[Wardrobe] 向量检索命中: %d张 persona=%s", len(vec_results), persona or "全局")
-            return vec_results
+            return self._sort_by_favorite(vec_results)
 
         results = await self.db.search_images(
             category=category,
@@ -378,7 +394,10 @@ class ImageSearcher:
             style=style,
             scene=scene,
             atmosphere=atmosphere,
+            pose_type=pose_type,
+            body_focus=body_focus,
             persona=persona,
+            shot_size=shot_size,
             limit=limit,
         )
 
@@ -421,6 +440,11 @@ class ImageSearcher:
                 "style": c.get("style", []),
                 "clothing_type": c.get("clothing_type", ""),
                 "exposure_level": c.get("exposure_level", ""),
+                "exposure_features": c.get("exposure_features", []),
+                "key_features": c.get("key_features", []),
+                "prop_objects": c.get("prop_objects", []),
+                "allure_features": c.get("allure_features", []),
+                "body_focus": c.get("body_focus", []),
                 "scene": c.get("scene", []),
                 "atmosphere": c.get("atmosphere", []),
                 "description": c.get("description", ""),

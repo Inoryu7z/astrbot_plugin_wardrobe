@@ -35,7 +35,7 @@ _AIIMG_GENERATE_TOOLS = frozenset({"aiimg_generate"})
     "astrbot_plugin_wardrobe",
     "Inoryu7z",
     "图片衣柜管理插件，支持智能分类、语义检索和参考图接口",
-    "1.8.0",
+    "1.9.2",
 )
 class WardrobePlugin(Star):
     def __init__(self, context: Context, config: AstrBotConfig = None):
@@ -171,13 +171,133 @@ class WardrobePlugin(Star):
                 await self.vector_searcher.initialize()
                 if self.vector_searcher.available:
                     await self.vector_searcher.index_existing_images()
+            asyncio.create_task(self._reanalyze_old_images())
         finally:
             self._db_init_event.set()
+
+    async def _reanalyze_old_images(self):
+        try:
+            records = await self.db.get_all_records()
+            need_reanalyze = []
+            for rec in records:
+                exp = rec.get("exposure_features", [])
+                key = rec.get("key_features", [])
+                prop = rec.get("prop_objects", [])
+                allure = rec.get("allure_features", [])
+                bf = rec.get("body_focus", [])
+                if (isinstance(exp, list) and not exp) and (isinstance(key, list) and not key) and (isinstance(prop, list) and not prop) and (isinstance(allure, list) and not allure) and (isinstance(bf, list) and not bf):
+                    need_reanalyze.append(rec)
+
+            if not need_reanalyze:
+                return
+
+            logger.info("[Wardrobe] 发现 %d 张旧图需要补充分析新字段，开始逐张重分析...", len(need_reanalyze))
+
+            primary = str(self._cfg("save_provider_id", "") or "").strip()
+            secondary = str(self._cfg("save_secondary_provider_id", "") or "").strip()
+            timeout = float(self._cfg("save_timeout_seconds", 60.0) or 60.0)
+
+            if not primary and not secondary:
+                logger.info("[Wardrobe] 未配置存图模型，跳过旧图重分析")
+                return
+
+            success = 0
+            failed = 0
+            for i, rec in enumerate(need_reanalyze):
+                image_id = rec.get("id", "")
+                image_path_str = rec.get("image_path", "")
+                if not image_path_str:
+                    continue
+
+                path = self.store.get_image_path(image_path_str)
+                if not path.exists():
+                    logger.debug("[Wardrobe] 旧图重分析跳过：文件不存在 id=%s", image_id)
+                    continue
+
+                try:
+                    import aiofiles
+                    async with aiofiles.open(path, "rb") as f:
+                        image_bytes = await f.read()
+
+                    if not image_bytes:
+                        continue
+
+                    attrs = await self.analyzer.analyze_image(
+                        image_bytes,
+                        primary_provider_id=primary,
+                        secondary_provider_id=secondary,
+                        timeout_seconds=timeout,
+                    )
+
+                    if not attrs:
+                        failed += 1
+                        logger.warning("[Wardrobe] 旧图重分析失败 id=%s", image_id)
+                        continue
+
+                    def _ensure_list(v):
+                        if isinstance(v, list):
+                            return v
+                        if isinstance(v, str) and v:
+                            return [v]
+                        return []
+
+                    update_data = {}
+                    for field in ("exposure_features", "key_features", "prop_objects", "allure_features", "body_focus"):
+                        val = _ensure_list(attrs.get(field))
+                        update_data[field] = val
+
+                    for field in ("style", "scene", "atmosphere", "action_style",
+                                  "clothing_type", "exposure_level", "pose_type",
+                                  "body_orientation", "dynamic_level", "shot_size",
+                                  "camera_angle", "expression", "color_tone",
+                                  "composition", "background", "description", "category"):
+                        val = attrs.get(field)
+                        if val is not None:
+                            if isinstance(val, list):
+                                update_data[field] = val
+                            else:
+                                update_data[field] = str(val)
+
+                    await self.db.update_image(image_id, **update_data)
+
+                    if self.vector_searcher and self.vector_searcher.available:
+                        desc = str(attrs.get("description", rec.get("description", "")))
+                        tags = rec.get("user_tags", "")
+                        await self._index_to_vector(
+                            image_id, desc, tags,
+                            exposure_features=_ensure_list(attrs.get("exposure_features")),
+                            key_features=_ensure_list(attrs.get("key_features")),
+                            prop_objects=_ensure_list(attrs.get("prop_objects")),
+                            allure_features=_ensure_list(attrs.get("allure_features")),
+                            body_focus=_ensure_list(attrs.get("body_focus")),
+                            category=str(attrs.get("category", rec.get("category", ""))),
+                            persona=rec.get("persona", ""),
+                        )
+
+                    success += 1
+                    logger.info("[Wardrobe] 旧图重分析进度: %d/%d (成功%d 失败%d)", i + 1, len(need_reanalyze), success, failed)
+
+                    if i < len(need_reanalyze) - 1:
+                        await asyncio.sleep(2)
+
+                except Exception as e:
+                    failed += 1
+                    logger.warning("[Wardrobe] 旧图重分析异常 id=%s error=%s", image_id, e)
+
+            logger.info("[Wardrobe] 旧图重分析完成: 成功%d 失败%d 共%d张", success, failed, len(need_reanalyze))
+        except Exception as e:
+            logger.error("[Wardrobe] 旧图重分析任务异常: %s", e, exc_info=True)
 
     def _cfg(self, key: str, default=None):
         return self.config.get(key, default)
 
-    async def _index_to_vector(self, image_id: str, description: str, user_tags: str, category: str, persona: str):
+    async def _index_to_vector(self, image_id: str, description: str, user_tags: str,
+                                exposure_features: list | None = None,
+                                key_features: list | None = None,
+                                prop_objects: list | None = None,
+                                allure_features: list | None = None,
+                                body_focus: list | None = None,
+                                category: str = "", persona: str = ""):
         if not self.vector_searcher or not self.vector_searcher.available:
             return
         text_parts = []
@@ -185,6 +305,16 @@ class WardrobePlugin(Star):
             text_parts.append(description)
         if user_tags:
             text_parts.append(f"标签: {user_tags}")
+        if exposure_features:
+            text_parts.append(f"暴露特征: {' '.join(str(v) for v in exposure_features if v)}")
+        if key_features:
+            text_parts.append(f"关键特征: {' '.join(str(v) for v in key_features if v)}")
+        if prop_objects:
+            text_parts.append(f"道具: {' '.join(str(v) for v in prop_objects if v)}")
+        if allure_features:
+            text_parts.append(f"魅力特征: {' '.join(str(v) for v in allure_features if v)}")
+        if body_focus:
+            text_parts.append(f"身体焦点: {' '.join(str(v) for v in body_focus if v)}")
         text = " ".join(text_parts)
         if not text.strip():
             return
@@ -306,7 +436,7 @@ class WardrobePlugin(Star):
             return f"图片已保存（ID: {image_id}），但模型分析失败，仅保存了原始图片"
 
         logger.info(
-            "[Wardrobe] 分析结果:\n  分类: %s\n  风格: %s\n  服装: %s\n  暴露: %s\n  场景: %s\n  氛围: %s\n  姿势: %s\n  朝向: %s\n  动态: %s\n  动作风格: %s\n  景别: %s\n  角度: %s\n  表情: %s\n  色调: %s\n  构图: %s\n  背景: %s\n  描述: %s\n  用户标签: %s",
+            "[Wardrobe] 分析结果:\n  分类: %s\n  风格: %s\n  服装: %s\n  暴露: %s\n  场景: %s\n  氛围: %s\n  姿势: %s\n  朝向: %s\n  动态: %s\n  动作风格: %s\n  景别: %s\n  角度: %s\n  表情: %s\n  色调: %s\n  构图: %s\n  背景: %s\n  描述: %s\n  用户标签: %s\n  暴露特征: %s\n  关键特征: %s\n  道具: %s",
             attrs.get("category", "人物"),
             ", ".join(attrs.get("style", [])),
             attrs.get("clothing_type", ""),
@@ -325,6 +455,9 @@ class WardrobePlugin(Star):
             attrs.get("background", ""),
             attrs.get("description", ""),
             user_description or "无",
+            ", ".join(attrs.get("exposure_features", [])),
+            ", ".join(attrs.get("key_features", [])),
+            ", ".join(attrs.get("prop_objects", [])),
         )
 
         feedback_enabled = bool(self._cfg("save_feedback_enabled", False))
@@ -388,11 +521,17 @@ class WardrobePlugin(Star):
                 background="",
                 description=user_description or "模型分析失败，无描述",
                 user_tags=user_description,
+                exposure_features=[],
+                key_features=[],
+                prop_objects=[],
+                allure_features=[],
+                body_focus=[],
                 image_path=filename,
                 created_by=created_by,
                 persona=persona,
             )
-            await self._index_to_vector(image_id, user_description or "模型分析失败，无描述", user_description, "人物", persona)
+            await self._index_to_vector(image_id, user_description or "模型分析失败，无描述", user_description,
+                                         category="人物", persona=persona)
             return image_id, None
 
         category = attrs.get("category", "人物")
@@ -434,13 +573,26 @@ class WardrobePlugin(Star):
             background=_ensure_str(attrs.get("background")),
             description=_ensure_str(attrs.get("description")),
             user_tags=user_description,
+            exposure_features=_ensure_list(attrs.get("exposure_features")),
+            key_features=_ensure_list(attrs.get("key_features")),
+            prop_objects=_ensure_list(attrs.get("prop_objects")),
+            allure_features=_ensure_list(attrs.get("allure_features")),
+            body_focus=_ensure_list(attrs.get("body_focus")),
             image_path=filename,
             created_by=created_by,
             persona=persona,
         )
 
         desc_text = _ensure_str(attrs.get("description"))
-        await self._index_to_vector(image_id, desc_text, user_description, category, persona)
+        await self._index_to_vector(
+            image_id, desc_text, user_description,
+            exposure_features=_ensure_list(attrs.get("exposure_features")),
+            key_features=_ensure_list(attrs.get("key_features")),
+            prop_objects=_ensure_list(attrs.get("prop_objects")),
+            allure_features=_ensure_list(attrs.get("allure_features")),
+            body_focus=_ensure_list(attrs.get("body_focus")),
+            category=category, persona=persona,
+        )
 
         return image_id, attrs
 
@@ -683,6 +835,11 @@ class WardrobePlugin(Star):
             best["id"], best.get("description", "")[:100],
         )
 
+        try:
+            await self.db.increment_use_count(best["id"])
+        except Exception:
+            pass
+
         return {
             "image_path": str(image_path),
             "description": best.get("description", ""),
@@ -742,6 +899,10 @@ class WardrobePlugin(Star):
             path = self.store.get_image_path(r["image_path"])
             if path.exists():
                 image_paths.append(str(path))
+            try:
+                await self.db.increment_use_count(r["id"])
+            except Exception:
+                pass
 
         if not image_paths:
             return "图片文件不存在"

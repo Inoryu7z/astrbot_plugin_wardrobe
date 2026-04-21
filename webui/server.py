@@ -135,11 +135,13 @@ class WardrobeWebServer:
             scene = request.args.get("scene", "")
             shot_size = request.args.get("shot_size", "")
             atmosphere = request.args.get("atmosphere", "")
+            favorite = request.args.get("favorite", "")
+            sort_by = request.args.get("sort_by", "created_at")
             lightweight = request.args.get("lightweight", "") == "1"
 
             offset = (page - 1) * per_page
 
-            needs_search = style or scene or atmosphere or shot_size or persona or category
+            needs_search = style or scene or atmosphere or shot_size or persona or category or (favorite in ("favorite", "like"))
             if needs_search:
                 style_list = [style] if style else None
                 scene_list = [scene] if scene else None
@@ -151,6 +153,8 @@ class WardrobeWebServer:
                     scene=scene_list,
                     atmosphere=atmosphere_list,
                     shot_size=shot_size or None,
+                    favorite=favorite if favorite in ("favorite", "like") else None,
+                    sort_by=sort_by,
                     limit=per_page,
                     offset=offset,
                 )
@@ -161,23 +165,36 @@ class WardrobeWebServer:
                     scene=scene_list,
                     atmosphere=atmosphere_list,
                     shot_size=shot_size or None,
+                    favorite=favorite if favorite in ("favorite", "like") else None,
                 )
             elif lightweight:
                 images = await self.plugin.db.list_images_lightweight(
                     category=category or None,
                     shot_size=shot_size or None,
                     persona=persona or None,
+                    favorite=favorite if favorite in ("favorite", "like") else None,
+                    sort_by=sort_by,
                     limit=per_page,
                     offset=offset,
                 )
-                total_stats = await self.plugin.db.get_stats()
-                total = total_stats["total"]
+                total = await self.plugin.db.search_count(
+                    category=category or None,
+                    shot_size=shot_size or None,
+                    persona=persona or None,
+                    favorite=favorite if favorite in ("favorite", "like") else None,
+                )
             else:
                 images = await self.plugin.db.list_images(
-                    category=category or None, shot_size=shot_size or None, limit=per_page, offset=offset
+                    category=category or None, shot_size=shot_size or None,
+                    favorite=favorite if favorite in ("favorite", "like") else None,
+                    sort_by=sort_by,
+                    limit=per_page, offset=offset
                 )
-                total_stats = await self.plugin.db.get_stats()
-                total = total_stats["total"]
+                total = await self.plugin.db.search_count(
+                    category=category or None,
+                    shot_size=shot_size or None,
+                    favorite=favorite if favorite in ("favorite", "like") else None,
+                )
 
             result = {
                 "images": images,
@@ -205,6 +222,166 @@ class WardrobeWebServer:
             if deleted and image.get("image_path"):
                 await self.plugin.store.delete_image(image["image_path"])
             return jsonify({"success": bool(deleted)})
+
+        @app.route("/api/images/<image_id>", methods=["PUT"])
+        async def api_image_update(image_id):
+            await self.plugin._ensure_db()
+            image = await self.plugin.db.get_image(image_id)
+            if not image:
+                return jsonify({"error": "未找到图片"}), 404
+
+            data = await request.get_json(silent=True) or {}
+            if not data:
+                return jsonify({"error": "无更新数据"}), 400
+
+            list_fields = {"style", "scene", "atmosphere", "action_style",
+                           "exposure_features", "key_features", "prop_objects", "allure_features", "body_focus"}
+            update_data = {}
+            for key, val in data.items():
+                if key in list_fields:
+                    if isinstance(val, str):
+                        try:
+                            import json as _json
+                            val = _json.loads(val)
+                        except (ValueError, TypeError):
+                            val = [v.strip() for v in val.replace("，", ",").split(",") if v.strip()]
+                    if not isinstance(val, list):
+                        val = [str(val)]
+                    update_data[key] = val
+                elif key in ("category", "clothing_type", "exposure_level", "pose_type",
+                             "body_orientation", "dynamic_level", "shot_size", "camera_angle",
+                             "expression", "color_tone", "composition", "background",
+                             "description", "user_tags", "persona", "favorite"):
+                    update_data[key] = str(val) if val is not None else ""
+
+            if not update_data:
+                return jsonify({"error": "无有效更新字段"}), 400
+
+            updated = await self.plugin.db.update_image(image_id, **update_data)
+            if not updated:
+                return jsonify({"error": "更新失败"}), 500
+
+            if self.plugin.vector_searcher and self.plugin.vector_searcher.available:
+                try:
+                    updated_image = await self.plugin.db.get_image(image_id)
+                    if updated_image:
+                        await self.plugin._index_to_vector(
+                            image_id,
+                            updated_image.get("description", ""),
+                            updated_image.get("user_tags", ""),
+                            exposure_features=updated_image.get("exposure_features", []),
+                            key_features=updated_image.get("key_features", []),
+                            prop_objects=updated_image.get("prop_objects", []),
+                            category=updated_image.get("category", ""),
+                            persona=updated_image.get("persona", ""),
+                        )
+                except Exception as e:
+                    logger.warning("[Wardrobe] 编辑后向量索引重建失败: %s", e)
+
+            return jsonify({"success": True})
+
+        @app.route("/api/images/<image_id>/reanalyze", methods=["POST"])
+        async def api_image_reanalyze(image_id):
+            await self.plugin._ensure_db()
+            image = await self.plugin.db.get_image(image_id)
+            if not image:
+                return jsonify({"error": "未找到图片"}), 404
+
+            image_path_str = image.get("image_path", "")
+            if not image_path_str:
+                return jsonify({"error": "图片路径为空"}), 400
+
+            path = self.plugin.store.get_image_path(image_path_str)
+            if not path.exists():
+                return jsonify({"error": "图片文件不存在"}), 404
+
+            data = await request.get_json(silent=True) or {}
+            user_description = data.get("description", "").strip()[:2000]
+
+            try:
+                import aiofiles
+                async with aiofiles.open(path, "rb") as f:
+                    image_bytes = await f.read()
+
+                if not image_bytes:
+                    return jsonify({"error": "图片文件为空"}), 400
+
+                primary = str(self.plugin._cfg("save_provider_id", "") or "").strip()
+                secondary = str(self.plugin._cfg("save_secondary_provider_id", "") or "").strip()
+                timeout = float(self.plugin._cfg("save_timeout_seconds", 60.0) or 60.0)
+
+                if not primary and not secondary:
+                    return jsonify({"error": "未配置存图模型"}), 400
+
+                attrs = await self.plugin.analyzer.analyze_image(
+                    image_bytes,
+                    user_description=user_description or None,
+                    primary_provider_id=primary,
+                    secondary_provider_id=secondary,
+                    timeout_seconds=timeout,
+                )
+
+                if not attrs:
+                    return jsonify({"error": "模型分析失败"}), 500
+
+                def _ensure_list(v):
+                    if isinstance(v, list):
+                        return v
+                    if isinstance(v, str) and v:
+                        return [v]
+                    return []
+
+                def _ensure_str(v):
+                    if v is None:
+                        return ""
+                    return str(v)
+
+                update_data = {}
+                for field in ("exposure_features", "key_features", "prop_objects", "allure_features", "body_focus"):
+                    update_data[field] = _ensure_list(attrs.get(field))
+
+                for field in ("style", "scene", "atmosphere", "action_style",
+                              "clothing_type", "exposure_level", "pose_type",
+                              "body_orientation", "dynamic_level", "shot_size",
+                              "camera_angle", "expression", "color_tone",
+                              "composition", "background", "description", "category"):
+                    val = attrs.get(field)
+                    if val is not None:
+                        if isinstance(val, list):
+                            update_data[field] = val
+                        else:
+                            update_data[field] = str(val)
+
+                if user_description:
+                    update_data["user_tags"] = user_description
+
+                await self.plugin.db.update_image(image_id, **update_data)
+
+                if self.plugin.vector_searcher and self.plugin.vector_searcher.available:
+                    try:
+                        updated_image = await self.plugin.db.get_image(image_id)
+                        if updated_image:
+                            await self.plugin._index_to_vector(
+                                image_id,
+                                updated_image.get("description", ""),
+                                updated_image.get("user_tags", ""),
+                                exposure_features=updated_image.get("exposure_features", []),
+                                key_features=updated_image.get("key_features", []),
+                                prop_objects=updated_image.get("prop_objects", []),
+                                allure_features=updated_image.get("allure_features", []),
+                                body_focus=updated_image.get("body_focus", []),
+                                category=updated_image.get("category", ""),
+                                persona=updated_image.get("persona", ""),
+                            )
+                    except Exception as e:
+                        logger.warning("[Wardrobe] 重新分析后向量索引重建失败: %s", e)
+
+                updated = await self.plugin.db.get_image(image_id)
+                return jsonify({"success": True, "image": updated})
+
+            except Exception as e:
+                logger.error("[Wardrobe] 重新分析失败: %s", e, exc_info=True)
+                return jsonify({"error": f"重新分析失败: {e}"}), 500
 
         @app.route("/api/images/batch-delete", methods=["POST"])
         async def api_images_batch_delete():
@@ -259,52 +436,92 @@ class WardrobeWebServer:
                 logger.error("[Wardrobe] WebUI上传异常: %s", e, exc_info=True)
                 return jsonify({"error": f"服务器内部错误: {e}"}), 500
 
+        @app.route("/api/images/batch-upload", methods=["POST"])
+        async def api_images_batch_upload():
+            try:
+                await self.plugin._ensure_db()
+                files = await request.files
+                file_list = files.getlist("images")
+                if not file_list:
+                    return jsonify({"error": "未选择图片"}), 400
+
+                form = await request.form
+                persona = form.get("persona", "")
+                persona = self.plugin._resolve_persona(persona)
+                description = form.get("description", "")
+
+                max_size = int(self.plugin._cfg("max_image_size_mb", 10) or 10)
+                results = []
+                errors = []
+
+                for i, file in enumerate(file_list):
+                    if not file or not file.filename:
+                        continue
+                    image_bytes = file.read()
+                    if not image_bytes:
+                        errors.append({"index": i, "name": file.filename, "error": "图片为空"})
+                        continue
+                    if len(image_bytes) > max_size * 1024 * 1024:
+                        errors.append({"index": i, "name": file.filename, "error": f"图片过大，限制{max_size}MB"})
+                        continue
+
+                    try:
+                        image_id, attrs = await self.plugin._save_image_from_bytes(
+                            image_bytes, persona=persona, created_by="webui", user_description=description
+                        )
+                        if image_id:
+                            results.append({"index": i, "name": file.filename, "image_id": image_id})
+                        else:
+                            errors.append({"index": i, "name": file.filename, "error": "保存失败"})
+                    except Exception as e:
+                        errors.append({"index": i, "name": file.filename, "error": str(e)})
+
+                return jsonify({
+                    "success": True,
+                    "uploaded": len(results),
+                    "failed": len(errors),
+                    "results": results,
+                    "errors": errors,
+                })
+            except Exception as e:
+                logger.error("[Wardrobe] WebUI批量上传异常: %s", e, exc_info=True)
+                return jsonify({"error": f"服务器内部错误: {e}"}), 500
+
+        @app.route("/api/images/<image_id>/favorite", methods=["PATCH"])
+        async def api_image_favorite(image_id):
+            await self.plugin._ensure_db()
+            image = await self.plugin.db.get_image(image_id)
+            if not image:
+                return jsonify({"error": "未找到图片"}), 404
+
+            data = await request.get_json(silent=True) or {}
+            fav = data.get("favorite", "none")
+            if fav not in ("favorite", "like", "none"):
+                return jsonify({"error": "无效的收藏值，应为 favorite/like/none"}), 400
+
+            await self.plugin.db.update_image(image_id, favorite=fav)
+            return jsonify({"success": True, "favorite": fav})
+
         @app.route("/api/search")
         async def api_search():
             await self.plugin._ensure_db()
             query = request.args.get("q", "").strip()
             persona = request.args.get("persona", "")
             category = request.args.get("category", "")
+            favorite = request.args.get("favorite", "")
             limit = min(100, max(1, int(request.args.get("limit", 50))))
 
             if not query:
-                return jsonify({"images": [], "total": 0})
+                return jsonify({"images": []})
 
-            results = []
-
-            vector_searcher = getattr(self.plugin, 'vector_searcher', None)
-            if vector_searcher and vector_searcher.available:
-                try:
-                    fetch_k = limit * 3 if category else limit
-                    wardrobe_ids = await vector_searcher.search(
-                        query=query,
-                        k=fetch_k,
-                        persona=persona,
-                    )
-                    if wardrobe_ids:
-                        for wid in wardrobe_ids:
-                            if len(results) >= limit:
-                                break
-                            img = await self.plugin.db.get_image(wid)
-                            if img:
-                                if category and img.get("category") != category:
-                                    continue
-                                results.append(img)
-                        if results:
-                            logger.info("[Wardrobe] WebUI向量检索命中: %d张", len(results))
-                except Exception as e:
-                    logger.warning("[Wardrobe] WebUI向量检索失败: %s", e)
-
-            if not results:
-                keywords = [k.strip() for k in query.replace("，", ",").split(",") if k.strip()]
-                results = await self.plugin.db.search_by_description(
-                    keywords=keywords,
-                    category=category or None,
-                    persona=persona or None,
-                    limit=limit,
-                )
-
-            return jsonify({"images": results, "total": len(results)})
+            keywords = [k.strip() for k in query.replace("，", ",").split(",") if k.strip()]
+            results = await self.plugin.db.search_by_description(
+                keywords=keywords,
+                category=category or None,
+                persona=persona or None,
+                limit=limit,
+            )
+            return jsonify({"images": results})
 
         @app.route("/api/filters")
         async def api_filters():

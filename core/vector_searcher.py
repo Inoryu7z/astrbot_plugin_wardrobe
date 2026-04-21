@@ -206,6 +206,36 @@ class WardrobeVectorSearcher:
                 tags = rec.get("user_tags", "")
                 if tags:
                     text_parts.append(f"标签: {tags}")
+                exp_feat = rec.get("exposure_features", "")
+                if exp_feat:
+                    if isinstance(exp_feat, list):
+                        exp_feat = " ".join(str(v) for v in exp_feat if v)
+                    if exp_feat:
+                        text_parts.append(f"暴露特征: {exp_feat}")
+                key_feat = rec.get("key_features", "")
+                if key_feat:
+                    if isinstance(key_feat, list):
+                        key_feat = " ".join(str(v) for v in key_feat if v)
+                    if key_feat:
+                        text_parts.append(f"关键特征: {key_feat}")
+                props = rec.get("prop_objects", "")
+                if props:
+                    if isinstance(props, list):
+                        props = " ".join(str(v) for v in props if v)
+                    if props:
+                        text_parts.append(f"道具: {props}")
+                allure = rec.get("allure_features", "")
+                if allure:
+                    if isinstance(allure, list):
+                        allure = " ".join(str(v) for v in allure if v)
+                    if allure:
+                        text_parts.append(f"魅力特征: {allure}")
+                bf = rec.get("body_focus", "")
+                if bf:
+                    if isinstance(bf, list):
+                        bf = " ".join(str(v) for v in bf if v)
+                    if bf:
+                        text_parts.append(f"身体焦点: {bf}")
 
                 text = " ".join(text_parts)
                 if not text.strip():
