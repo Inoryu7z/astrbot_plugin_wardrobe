@@ -48,6 +48,8 @@
     editing:false,
     loading:false,
     allLoaded:false,
+    batchUploading:false,
+    batchUploadProgress:{current:0,total:0,uploaded:0,failed:0},
   };
 
   function getToken(){
@@ -490,6 +492,34 @@
     state.page=1;state.allLoaded=false;loadImages(true);loadStats();
   }
 
+  async function batchReanalyze(){
+    if(state.selectedIds.size===0)return;
+    const ids=[...state.selectedIds];
+    if(!confirm(`确定重新分析选中的 ${ids.length} 张图片？将覆盖现有分析结果。`))return;
+    const btn=$('#batchReanalyzeBtn');
+    btn.disabled=true;
+    btn.textContent='分析中...';
+    try{
+      const resp=await api('/api/images/batch-reanalyze',{
+        method:'POST',
+        json:{ids},
+      });
+      if(!resp||resp.error){toast((resp&&resp.error)||'请求失败','error');return;}
+      const data=await resp.json();
+      if(data.success){
+        toast(`重新分析完成：${data.reanalyzed}成功，${data.failed}失败`,data.reanalyzed>0?'success':'error');
+        state.page=1;state.allLoaded=false;loadImages(true);loadStats();
+      }else{
+        toast(data.error||'重新分析失败','error');
+      }
+    }catch(e){
+      toast('网络错误: '+e.message,'error');
+    }finally{
+      btn.disabled=false;
+      btn.textContent='重新分析';
+    }
+  }
+
   function setupUpload(){
     const zone=$('#uploadZone');
     const fileInput=$('#uploadFile');
@@ -531,9 +561,6 @@
     submitBtn.addEventListener('click',async()=>{
       if(!selectedFiles.length)return;
       submitBtn.disabled=true;
-      const progress=$('#uploadProgress');
-      const progressBar=$('#uploadProgressBar');
-      const progressText=$('#uploadProgressText');
 
       if(selectedFiles.length===1){
         $('#uploadStatus').textContent='上传中...';
@@ -569,48 +596,61 @@
           submitBtn.disabled=false;
         }
       }else{
+        const progress=$('#uploadProgress');
+        const progressBar=$('#uploadProgressBar');
+        const progressText=$('#uploadProgressText');
         progress.classList.remove('hidden');
-        let uploaded=0;
-        let failed=0;
-        for(let i=0;i<selectedFiles.length;i++){
-          progressText.textContent=`${i+1}/${selectedFiles.length}`;
-          progressBar.style.width=((i)/selectedFiles.length*100)+'%';
+
+        const persona=$('#uploadPersona').value;
+        const description=$('#uploadDescription').value;
+        const files=[...selectedFiles];
+
+        state.batchUploading=true;
+        state.batchUploadProgress={current:0,total:files.length,uploaded:0,failed:0};
+
+        $('#uploadModal').classList.add('hidden');
+        toast(`开始批量上传 ${files.length} 张图片，可继续其他操作`,'info');
+
+        for(let i=0;i<files.length;i++){
+          state.batchUploadProgress.current=i+1;
+          updateBatchUploadIndicator();
           const statusEl=document.getElementById('fileStatus'+i);
           const fd=new FormData();
-          fd.append('image',selectedFiles[i]);
-          fd.append('persona',$('#uploadPersona').value);
-          fd.append('description',$('#uploadDescription').value);
+          fd.append('image',files[i]);
+          fd.append('persona',persona);
+          fd.append('description',description);
           try{
             const resp=await api('/api/images/upload',{method:'POST',body:fd});
             if(resp&&!resp.error){
               const data=await resp.json();
               if(data.duplicate){
-                failed++;
+                state.batchUploadProgress.failed++;
                 if(statusEl){statusEl.textContent='重复';statusEl.className='file-status dup';}
               }else if(data.success){
-                uploaded++;
+                state.batchUploadProgress.uploaded++;
                 if(statusEl){statusEl.textContent='✓';statusEl.className='file-status ok';}
               }else{
-                failed++;
+                state.batchUploadProgress.failed++;
                 if(statusEl){statusEl.textContent='✗';statusEl.className='file-status fail';}
               }
             }else{
-              failed++;
+              state.batchUploadProgress.failed++;
               if(statusEl){statusEl.textContent='✗';statusEl.className='file-status fail';}
             }
           }catch(err){
-            failed++;
+            state.batchUploadProgress.failed++;
             if(statusEl){statusEl.textContent='✗';statusEl.className='file-status fail';}
           }
-          progressBar.style.width=((i+1)/selectedFiles.length*100)+'%';
+          updateBatchUploadIndicator();
         }
-        progressText.textContent=`完成: ${uploaded}成功 ${failed}失败`;
-        toast(`批量上传完成：${uploaded}成功，${failed}失败`,uploaded>0?'success':'error');
-        setTimeout(()=>{
-          $('#uploadModal').classList.add('hidden');
-          resetUpload();
-          state.page=1;state.allLoaded=false;loadImages(true);loadStats();
-        },1500);
+
+        const up=state.batchUploadProgress.uploaded;
+        const fl=state.batchUploadProgress.failed;
+        toast(`批量上传完成：${up}成功，${fl}失败`,up>0?'success':'error');
+        state.batchUploading=false;
+        updateBatchUploadIndicator();
+        state.page=1;state.allLoaded=false;loadImages(true);loadStats();
+        resetUpload();
       }
     });
 
@@ -628,7 +668,25 @@
       $('#uploadProgressText').textContent='';
     }
 
-    $('#uploadModalClose').addEventListener('click',()=>{$('#uploadModal').classList.add('hidden');resetUpload();});
+    $('#uploadModalClose').addEventListener('click',()=>{
+      if(state.batchUploading){
+        toast('批量上传正在进行中，请等待完成','warning');
+        return;
+      }
+      $('#uploadModal').classList.add('hidden');
+      resetUpload();
+    });
+  }
+
+  function updateBatchUploadIndicator(){
+    const indicator=$('#batchUploadIndicator');
+    if(!state.batchUploading){
+      indicator.classList.add('hidden');
+      return;
+    }
+    indicator.classList.remove('hidden');
+    const p=state.batchUploadProgress;
+    indicator.textContent=`上传中 ${p.current}/${p.total}（✓${p.uploaded} ✗${p.failed}）`;
   }
 
   function setupUploadPersonaSelect(){
@@ -849,6 +907,7 @@
     });
 
     $('#batchDeleteBtn').addEventListener('click',batchDelete);
+    $('#batchReanalyzeBtn').addEventListener('click',batchReanalyze);
     $('#batchCancelBtn').addEventListener('click',()=>{
       state.batchMode=false;state.selectedIds.clear();
       document.body.classList.remove('batch-mode');
