@@ -23,10 +23,12 @@ class WardrobeVectorSearcher:
         data_dir: str,
         embedding_provider: Any = None,
         db: WardrobeDatabase | None = None,
+        plugin: Any = None,
     ):
         self.data_dir = data_dir
         self.embedding_provider = embedding_provider
         self.db = db
+        self.plugin = plugin
         self._faiss_db = None
         self._initialized = False
         self._id_map: dict[str, str] = {}
@@ -182,13 +184,16 @@ class WardrobeVectorSearcher:
         k: int = 20,
         persona: str = "",
         exclude_persona: str = "",
-        min_similarity: float = 0.5,
+        min_similarity: float | None = None,
     ) -> list[str]:
         if not self.available:
             return []
 
         if not query or not query.strip():
             return []
+
+        if min_similarity is None:
+            min_similarity = float(self.plugin._cfg("vector_search_min_similarity", 0.5) or 0.5) if self.plugin else 0.5
 
         processed_query = query[:2000] if len(query) > 2000 else query
 

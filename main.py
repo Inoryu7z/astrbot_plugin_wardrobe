@@ -36,7 +36,7 @@ _AIIMG_GENERATE_TOOLS = frozenset({"aiimg_generate"})
     "astrbot_plugin_wardrobe",
     "Inoryu7z",
     "图片衣柜管理插件，支持智能分类、语义检索和参考图接口",
-    "2.1.7",
+    "2.1.8",
 )
 class WardrobePlugin(Star):
     def __init__(self, context: Context, config: AstrBotConfig = None):
@@ -90,7 +90,7 @@ class WardrobePlugin(Star):
             if not embedding_provider:
                 logger.info("[Wardrobe] 无可用 Embedding Provider，向量检索已禁用")
                 return None
-            vs = WardrobeVectorSearcher(str(data_dir), embedding_provider=embedding_provider, db=self.db)
+            vs = WardrobeVectorSearcher(str(data_dir), embedding_provider=embedding_provider, db=self.db, plugin=self)
             return vs
         except Exception as e:
             logger.warning("[Wardrobe] 向量检索器初始化失败: %s", e)

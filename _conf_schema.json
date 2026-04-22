@@ -33,6 +33,12 @@
     "type": "string",
     "default": ""
   },
+  "vector_search_min_similarity": {
+    "description": "向量检索相似度阈值",
+    "hint": "0.0-1.0，低于此阈值的结果会被过滤并回退到关键词搜索。值越高越严格，建议 0.4-0.6",
+    "type": "float",
+    "default": 0.5
+  },
   "save_timeout_seconds": {
     "description": "存图模型超时秒数",
     "hint": "单次调用超过此时长即切换模型",
