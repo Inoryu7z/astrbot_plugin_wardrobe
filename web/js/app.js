@@ -336,12 +336,44 @@
     if(result.success){
       state.currentImageData.ref_strength=value;
       updateRefStrengthBtns(value, state.currentImageData.ref_strength_reason||'');
+      updateCardInGrid(state.currentImageId, {ref_strength: value});
       toast(`参考强度: ${RS_OPTIONS.find(o=>o.value===value)?.label||value}`,'success');
     }else{
       toast(result.error||'操作失败','error');
     }
   }
   window.setRefStrength=setRefStrength;
+
+  function updateCardInGrid(id, updates){
+    const card=document.querySelector(`.image-card[data-id="${id}"]`);
+    if(!card)return;
+    if(updates.ref_strength!==undefined){
+      const oldRsMark=card.querySelector('.image-card-rs');
+      if(oldRsMark)oldRsMark.remove();
+      const rs=updates.ref_strength;
+      if(rs&&rs!=='style'){
+        const img=card.querySelector('img');
+        const rsEl=document.createElement('div');
+        rsEl.className=`image-card-rs image-card-rs-${esc(rs)}`;
+        rsEl.textContent=rs==='full'?'📸':rs==='reimagine'?'🔄':'';
+        if(img&&img.nextSibling)img.parentNode.insertBefore(rsEl,img.nextSibling);
+        else card.appendChild(rsEl);
+      }
+    }
+    if(updates.style!==undefined){
+      const oldStyle=card.querySelector('.image-card-style');
+      if(oldStyle)oldStyle.remove();
+      const styleArr=Array.isArray(updates.style)?updates.style:[];
+      if(styleArr.length){
+        const catSpan=card.querySelector('.image-card-category');
+        const styleEl=document.createElement('span');
+        styleEl.className='image-card-style';
+        styleEl.textContent=styleArr.slice(0,2).join(' ');
+        if(catSpan&&catSpan.nextSibling)catSpan.parentNode.insertBefore(styleEl,catSpan.nextSibling);
+        else if(catSpan)catSpan.parentNode.appendChild(styleEl);
+      }
+    }
+  }
 
   function renderDetailFields(img,editMode){
     const container=$('#modalFields');
@@ -521,6 +553,10 @@
       if(freshResp){
         state.currentImageData=await freshResp.json();
         renderDetailFields(state.currentImageData,false);
+        updateCardInGrid(state.currentImageId, {
+          style: state.currentImageData.style,
+          ref_strength: state.currentImageData.ref_strength,
+        });
       }
       updateEditButtons();
     }else{

@@ -353,7 +353,7 @@ class WardrobeWebServer:
                               "clothing_type", "exposure_level", "pose_type",
                               "body_orientation", "dynamic_level", "shot_size",
                               "camera_angle", "expression", "color_tone",
-                              "composition", "background", "description", "category", "ref_strength"):
+                              "composition", "background", "description", "category", "ref_strength", "ref_strength_reason"):
                     val = attrs.get(field)
                     if val is not None:
                         if isinstance(val, list):
@@ -411,6 +411,11 @@ class WardrobeWebServer:
                         deleted_count += 1
                         if image.get("image_path"):
                             await self.plugin.store.delete_image(image["image_path"])
+                        if self.plugin.vector_searcher:
+                            try:
+                                await self.plugin.vector_searcher.remove_image(image_id)
+                            except Exception:
+                                pass
             return jsonify({"success": True, "deleted": deleted_count})
 
         @app.route("/api/images/upload", methods=["POST"])
