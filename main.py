@@ -36,7 +36,7 @@ _AIIMG_GENERATE_TOOLS = frozenset({"aiimg_generate"})
     "astrbot_plugin_wardrobe",
     "Inoryu7z",
     "图片衣柜管理插件，支持智能分类、语义检索和参考图接口",
-    "2.1.8",
+    "2.1.9",
 )
 class WardrobePlugin(Star):
     def __init__(self, context: Context, config: AstrBotConfig = None):
@@ -409,8 +409,7 @@ class WardrobePlugin(Star):
         result = await self._do_get_stats()
         yield event.plain_result(result)
 
-    @filter.on_astrbot_loaded()
-    async def on_loaded(self):
+    async def initialize(self):
         await self._ensure_db()
         logger.info("[Wardrobe] 数据库已就绪")
 

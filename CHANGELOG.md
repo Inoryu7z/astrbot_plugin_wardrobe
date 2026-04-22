@@ -1,3 +1,13 @@
+### v2.1.9
+
+**🐛 Bug 修复**
+
+* 修复 WebUI 热重载失效：将 WebUI 启动从 `on_astrbot_loaded` 改为 `initialize()` 生命周期钩子，现在插件重载后 WebUI 会正确重启
+
+**🔧 改进**
+
+* `search_persona_mode` 配置改为下拉选择（exclude_all / self_first）
+
 ### v2.1.8
 
 **🔧 改进**
