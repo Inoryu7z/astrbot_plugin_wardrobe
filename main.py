@@ -288,7 +288,7 @@ class WardrobePlugin(Star):
                                   "clothing_type", "exposure_level", "pose_type",
                                   "body_orientation", "dynamic_level", "shot_size",
                                   "camera_angle", "expression", "color_tone",
-                                  "composition", "background", "description", "category", "ref_strength"):
+                                  "composition", "background", "description", "category", "ref_strength", "ref_strength_reason"):
                         val = attrs.get(field)
                         if val is not None:
                             if isinstance(val, list):
@@ -913,6 +913,12 @@ class WardrobePlugin(Star):
 
         if image.get("image_path"):
             await self.store.delete_image(image["image_path"])
+
+        if self.vector_searcher:
+            try:
+                await self.vector_searcher.remove_image(image_id)
+            except Exception:
+                pass
 
         return f"已删除图片（ID: {image_id}）"
 
