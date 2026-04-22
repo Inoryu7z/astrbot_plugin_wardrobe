@@ -445,18 +445,53 @@ class WardrobeDatabase:
             return results
 
         bigram_groups = self._bigram_decompose_grouped(keywords)
-        if not bigram_groups:
-            return []
+        if bigram_groups:
+            results = await self._search_with_grouped_keywords(
+                bigram_groups, category=category, persona=persona,
+                exclude_persona=exclude_persona, limit=limit, offset=offset,
+            )
+            if results:
+                return results
 
+        truncate_groups = self._progressive_truncate_grouped(keywords)
+        if truncate_groups:
+            results = await self._search_with_grouped_keywords(
+                truncate_groups, category=category, persona=persona,
+                exclude_persona=exclude_persona, limit=limit, offset=offset,
+            )
+            if results:
+                return results
+
+        char_groups = self._char_and_grouped(keywords)
+        if char_groups:
+            results = await self._search_with_grouped_keywords(
+                char_groups, category=category, persona=persona,
+                exclude_persona=exclude_persona, limit=limit, offset=offset,
+            )
+            if results:
+                return results
+
+        return []
+
+    async def _search_with_grouped_keywords(
+        self,
+        groups: list[list[str]],
+        *,
+        category: Optional[str] = None,
+        persona: str = "",
+        exclude_persona: str = "",
+        limit: int = 20,
+        offset: int = 0,
+    ) -> list[dict[str, Any]]:
         base_conditions, base_params = self._build_search_conditions(
             category=category, persona=persona,
             exclude_persona=exclude_persona, keywords=None,
         )
 
-        for group in bigram_groups:
+        for group in groups:
             group_conds = []
-            for bg in group:
-                escaped = WardrobeDatabase._escape_like(bg)
+            for variant in group:
+                escaped = WardrobeDatabase._escape_like(variant)
                 group_conds.append(
                     "(description LIKE ? ESCAPE '\\' OR user_tags LIKE ? ESCAPE '\\' "
                     "OR exposure_features LIKE ? ESCAPE '\\' OR key_features LIKE ? ESCAPE '\\' "
@@ -467,18 +502,18 @@ class WardrobeDatabase:
                     base_params.append(f'%{escaped}%')
             base_conditions.append(f"({' OR '.join(group_conds)})")
 
-        where_clause2 = ""
+        where_clause = ""
         if base_conditions:
-            where_clause2 = "WHERE " + " AND ".join(base_conditions)
+            where_clause = "WHERE " + " AND ".join(base_conditions)
         base_params.append(limit)
         base_params.append(offset)
 
         async with aiosqlite.connect(self.db_path) as db:
             db.row_factory = aiosqlite.Row
-            sql2 = f"SELECT * FROM images {where_clause2} ORDER BY created_at DESC LIMIT ? OFFSET ?"
-            async with db.execute(sql2, base_params) as cursor:
-                rows2 = await cursor.fetchall()
-                return [self._row_to_dict(row) for row in rows2]
+            sql = f"SELECT * FROM images {where_clause} ORDER BY created_at DESC LIMIT ? OFFSET ?"
+            async with db.execute(sql, base_params) as cursor:
+                rows = await cursor.fetchall()
+                return [self._row_to_dict(row) for row in rows]
 
     @staticmethod
     def _bigram_decompose_grouped(keywords: list[str]) -> list[list[str]]:
@@ -491,6 +526,31 @@ class WardrobeDatabase:
             else:
                 bigrams = [kw[i:i + 2] for i in range(len(kw) - 1)]
                 groups.append(bigrams)
+        return groups
+
+    @staticmethod
+    def _progressive_truncate_grouped(keywords: list[str]) -> list[list[str]]:
+        groups: list[list[str]] = []
+        for kw in keywords:
+            if len(kw) <= 2:
+                continue
+            variants = []
+            for i in range(len(kw) - 1, 0, -1):
+                truncated = kw[:i]
+                if truncated:
+                    variants.append(truncated)
+            if variants:
+                groups.append(variants)
+        return groups
+
+    @staticmethod
+    def _char_and_grouped(keywords: list[str]) -> list[list[str]]:
+        groups: list[list[str]] = []
+        for kw in keywords:
+            if len(kw) <= 1:
+                continue
+            chars = list(kw)
+            groups.append(chars)
         return groups
 
     async def get_stats(self) -> dict[str, Any]:

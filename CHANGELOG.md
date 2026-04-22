@@ -1,3 +1,14 @@
+### v2.1.6
+
+**🐛 Bug 修复**
+
+* 修复向量检索结果重复：`_id_map` 为纯内存字典，重启后丢失导致 `index_existing_images()` 重复索引。现改为启动时从 `wardrobe_vec.db` 重建映射并自动清理重复条目；`search()` 增加 `seen` 集合去重
+
+**🔧 改进**
+
+* LIKE 回退策略增强：新增渐进式前缀截断（`jk服`→`jk`→命中`JK制服`）和字符级 AND 匹配（拆单字要求全部出现）
+* 移除未使用的 WebUI API 端点：`batch-upload` 和 `batch-reanalyze`（前端均未调用）
+
 ### v2.1.5
 
 **✨ 新功能**
