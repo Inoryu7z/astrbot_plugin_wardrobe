@@ -59,6 +59,9 @@ class WardrobeVectorSearcher:
             self._faiss_db = FaissVecDB(db_path, index_path, self.embedding_provider)
             await self._faiss_db.initialize()
             self._initialized = True
+
+            await self._rebuild_id_map()
+
             logger.info("[Wardrobe] 向量检索已初始化")
         except Exception as e:
             logger.warning("[Wardrobe] 向量检索初始化失败（将回退到本地检索）: %s", e)
@@ -84,6 +87,53 @@ class WardrobeVectorSearcher:
                     os.remove(db_path)
         except Exception as e:
             logger.debug("[Wardrobe] 维度检查跳过: %s", e)
+
+    async def _rebuild_id_map(self):
+        if not self._faiss_db:
+            return
+        try:
+            db_path = os.path.join(self.data_dir, "wardrobe_vec.db")
+            if not os.path.exists(db_path):
+                return
+
+            import aiosqlite
+
+            duplicate_doc_ids = []
+            async with aiosqlite.connect(db_path) as conn:
+                conn.row_factory = aiosqlite.Row
+                async with conn.execute("SELECT doc_id, metadata FROM documents") as cursor:
+                    async for row in cursor:
+                        doc_id = str(row[0])
+                        metadata_str = row[1] or "{}"
+                        try:
+                            metadata = json.loads(metadata_str) if isinstance(metadata_str, str) else metadata_str
+                        except (json.JSONDecodeError, TypeError):
+                            metadata = {}
+
+                        wardrobe_id = metadata.get("wardrobe_id", "")
+                        if not wardrobe_id:
+                            continue
+
+                        if wardrobe_id in self._id_map:
+                            duplicate_doc_ids.append(self._id_map[wardrobe_id])
+
+                        self._id_map[wardrobe_id] = doc_id
+                        self._reverse_map[doc_id] = wardrobe_id
+
+            for dup_doc_id in duplicate_doc_ids:
+                self._reverse_map.pop(dup_doc_id, None)
+                try:
+                    await self._faiss_db.delete(dup_doc_id)
+                    logger.debug("[Wardrobe] 清理重复向量索引: doc_id=%s", dup_doc_id)
+                except Exception as e:
+                    logger.debug("[Wardrobe] 清理重复向量索引失败: doc_id=%s error=%s", dup_doc_id, e)
+
+            if duplicate_doc_ids:
+                logger.info("[Wardrobe] 清理重复向量索引: %d条", len(duplicate_doc_ids))
+
+            logger.info("[Wardrobe] 向量索引ID映射重建完成: %d条记录", len(self._id_map))
+        except Exception as e:
+            logger.debug("[Wardrobe] 向量索引ID映射重建跳过: %s", e)
 
     async def add_image(self, wardrobe_id: str, text: str, category: str = "", persona: str = ""):
         if not self.available:
@@ -156,6 +206,7 @@ class WardrobeVectorSearcher:
             )
 
             wardrobe_ids = []
+            seen = set()
             for result in results:
                 doc_data = result.data
                 meta = doc_data.get("metadata", {})
@@ -171,6 +222,10 @@ class WardrobeVectorSearcher:
 
                 if not wid:
                     continue
+
+                if wid in seen:
+                    continue
+                seen.add(wid)
 
                 if exclude_persona:
                     doc_persona = meta.get("persona_id", meta.get("persona", ""))
