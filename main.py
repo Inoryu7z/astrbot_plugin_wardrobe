@@ -37,7 +37,7 @@ _AIIMG_GENERATE_TOOLS = frozenset({"aiimg_generate"})
     "astrbot_plugin_wardrobe",
     "Inoryu7z",
     "图片衣柜管理插件，支持智能分类、语义检索和参考图接口",
-    "2.2.2",
+    "2.2.3",
 )
 class WardrobePlugin(Star):
     def __init__(self, context: Context, config: AstrBotConfig = None):
@@ -289,6 +289,10 @@ class WardrobePlugin(Star):
                                 update_data[field] = val
                             else:
                                 update_data[field] = str(val)
+
+                    rs = str(attrs.get("ref_strength", "") or "").strip().lower()
+                    if rs in ("full", "reimagine", "style"):
+                        update_data["ref_strength"] = rs
 
                     await self.db.update_image(image_id, **update_data)
 
@@ -638,6 +642,10 @@ class WardrobePlugin(Star):
                 return v[0]
             return ""
 
+        ref_strength_raw = str(attrs.get("ref_strength", "") or "").strip().lower()
+        if ref_strength_raw not in ("full", "reimagine"):
+            ref_strength_raw = "style"
+
         filename = await self.store.save_image(image_bytes)
 
         image_id = await self.db.add_image(
@@ -668,6 +676,7 @@ class WardrobePlugin(Star):
             created_by=created_by,
             persona=persona,
             file_hash=file_hash,
+            ref_strength=ref_strength_raw,
         )
 
         desc_text = _ensure_str(attrs.get("description"))
@@ -940,6 +949,7 @@ class WardrobePlugin(Star):
             "description": best.get("description", ""),
             "persona": best.get("persona", ""),
             "image_id": best["id"],
+            "ref_strength": best.get("ref_strength", "style"),
         }
 
     async def _do_search_image(

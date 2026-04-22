@@ -974,6 +974,24 @@ html, body {
   opacity:0.8;
 }
 
+.image-card-ref-strength {
+  position:absolute; bottom:8px; left:8px;
+  font-size:10px; z-index:2;
+  pointer-events:none;
+  padding:2px 6px;
+  border-radius:4px;
+  font-weight:600;
+  letter-spacing:0.3px;
+}
+.image-card-ref-strength.ref-strength-full {
+  background:rgba(16,185,129,0.85);
+  color:#fff;
+}
+.image-card-ref-strength.ref-strength-reimagine {
+  background:rgba(245,158,11,0.85);
+  color:#fff;
+}
+
 .upload-filelist {
   margin-bottom:12px; max-height:120px; overflow-y:auto;
   font-size:12px; color:var(--text-muted);
