@@ -405,6 +405,7 @@ class WardrobeDatabase:
         exclude_persona: str = "",
         shot_size: Optional[str] = None,
         favorite: Optional[str] = None,
+        ref_strength: Optional[str] = None,
     ) -> int:
         conditions, params = self._build_search_conditions(
             category=category, exposure_level=exposure_level,
@@ -412,6 +413,7 @@ class WardrobeDatabase:
             pose_type=pose_type, body_focus=body_focus,
             persona=persona, exclude_persona=exclude_persona,
             shot_size=shot_size, favorite=favorite,
+            ref_strength=ref_strength,
         )
 
         where_clause = ""

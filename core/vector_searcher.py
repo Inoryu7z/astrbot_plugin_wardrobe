@@ -408,6 +408,14 @@ class WardrobeVectorSearcher:
             logger.error("[Wardrobe] 索引已有图片失败: %s", e, exc_info=True)
 
     async def terminate(self):
+        if self._faiss_db:
+            try:
+                if hasattr(self._faiss_db, 'save'):
+                    await self._faiss_db.save()
+                elif hasattr(self._faiss_db, 'persist'):
+                    await self._faiss_db.persist()
+            except Exception as e:
+                logger.debug("[Wardrobe] 向量索引持久化失败: %s", e)
         self._faiss_db = None
         self._initialized = False
         self._id_map.clear()

@@ -37,7 +37,7 @@ _AIIMG_GENERATE_TOOLS = frozenset({"aiimg_generate"})
     "astrbot_plugin_wardrobe",
     "Inoryu7z",
     "图片衣柜管理插件，支持智能分类、语义检索和参考图接口",
-    "2.2.2",
+    "2.2.3",
 )
 class WardrobePlugin(Star):
     def __init__(self, context: Context, config: AstrBotConfig = None):
@@ -61,6 +61,9 @@ class WardrobePlugin(Star):
         self._db_init_event.set()
         self._webui: Optional[WardrobeWebServer] = None
         self._last_auto_saved: dict[str, str] = {}
+        self._bg_tasks: set[asyncio.Task] = set()
+
+        self.context._wardrobe_plugin = self
 
         logger.info("[Wardrobe] 插件初始化完成")
 
@@ -202,8 +205,8 @@ class WardrobePlugin(Star):
                 await self.vector_searcher.initialize()
                 if self.vector_searcher.available:
                     await self.vector_searcher.index_existing_images()
-            asyncio.create_task(self._reanalyze_old_images())
-            asyncio.create_task(self._backfill_file_hashes())
+            self._spawn_bg_task(self._reanalyze_old_images())
+            self._spawn_bg_task(self._backfill_file_hashes())
         finally:
             self._db_init_event.set()
 
@@ -415,6 +418,12 @@ class WardrobePlugin(Star):
 
     def _cfg(self, key: str, default=None):
         return self.config.get(key, default)
+
+    def _spawn_bg_task(self, coro):
+        task = asyncio.create_task(coro)
+        self._bg_tasks.add(task)
+        task.add_done_callback(self._bg_tasks.discard)
+        return task
 
     async def _index_to_vector(self, image_id: str, description: str, user_tags: str,
                                 exposure_features: list | None = None,

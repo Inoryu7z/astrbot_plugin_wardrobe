@@ -113,7 +113,6 @@ class ImageAnalyzer:
                 import os
                 os.write(temp_fd, image_bytes)
             finally:
-                import os
                 os.close(temp_fd)
             resolved_path = str(Path(temp_path).resolve())
         except Exception as e:

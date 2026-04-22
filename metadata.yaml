@@ -4,3 +4,9 @@ version: 2.2.3
 description: 图片衣柜管理插件，支持智能分类、语义检索和参考图接口
 author: Inoryu7z
 repo: https://github.com/Inoryu7z/astrbot_plugin_wardrobe
+dependencies:
+  - aiosqlite>=0.19.0
+  - aiofiles>=23.0
+  - httpx>=0.24.0
+  - quart>=0.19.0
+  - uvicorn>=0.29.0
