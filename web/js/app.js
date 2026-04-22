@@ -200,15 +200,12 @@
       const useCount=img.use_count?`<span class="image-card-uses">🔥${img.use_count}</span>`:'';
       const similarityMark=img._similarity!=null?`<div class="image-card-similarity">${(img._similarity*100).toFixed(0)}%</div>`:'';
       const rsMark=img.ref_strength&&img.ref_strength!=='style'&&img.category==='人物'?`<div class="image-card-rs image-card-rs-${esc(img.ref_strength)}">${img.ref_strength==='full'?'📸':img.ref_strength==='reimagine'?'🔄':''}</div>`:'';
-      const styleTags=Array.isArray(img.style)&&img.style.length?`<span class="image-card-style">${esc(img.style.slice(0,2).join(' '))}</span>`:'';
       card.innerHTML=`
         ${favMark}
         ${similarityMark}
         ${rsMark}
         <img src="/api/image-file/${img.id}" loading="lazy" alt="" onerror="this.src='data:image/svg+xml,<svg xmlns=%22http://www.w3.org/2000/svg%22 width=%22180%22 height=%22240%22><rect fill=%22%23F8F0F4%22 width=%22180%22 height=%22240%22/><text x=%2290%22 y=%22125%22 text-anchor=%22middle%22 fill=%22%23C8B8D0%22 font-size=%2214%22>加载失败</text></svg>'">
         <div class="image-card-overlay">
-          <span class="image-card-category">${esc(img.category||'')}</span>
-          ${styleTags}
           ${useCount}
           ${personaText}
         </div>
