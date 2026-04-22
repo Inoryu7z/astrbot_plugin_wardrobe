@@ -11,6 +11,7 @@ from .database import WardrobeDatabase
 try:
     from astrbot.core.db.vec_db.faiss_impl.vec_db import FaissVecDB
     from astrbot.core.provider.provider import EmbeddingProvider
+    from astrbot.core.provider.provider import RerankProvider
 
     _VECTORD_AVAILABLE = True
 except ImportError:
@@ -29,6 +30,7 @@ class WardrobeVectorSearcher:
         self.embedding_provider = embedding_provider
         self.db = db
         self.plugin = plugin
+        self.rerank_provider: Any = None
         self._faiss_db = None
         self._initialized = False
         self._id_map: dict[str, str] = {}
@@ -211,7 +213,7 @@ class WardrobeVectorSearcher:
                 metadata_filters=metadata_filters if metadata_filters else None,
             )
 
-            wardrobe_results: list[tuple[str, float]] = []
+            filtered: list[tuple[str, float, str]] = []
             seen = set()
             for result in results:
                 if result.similarity < min_similarity:
@@ -241,12 +243,99 @@ class WardrobeVectorSearcher:
                     if doc_persona == exclude_persona:
                         continue
 
-                wardrobe_results.append((wid, result.similarity))
+                doc_content = doc_data.get("content", "")
+                filtered.append((wid, result.similarity, doc_content))
 
-            return wardrobe_results
+            if not filtered:
+                return []
+
+            reranked = await self._rerank_results(processed_query, filtered)
+            if reranked is not None:
+                return reranked
+
+            return [(r[0], r[1]) for r in filtered]
         except Exception as e:
             logger.warning("[Wardrobe] 向量检索失败（将回退到本地检索）: %s", e)
             return []
+
+    async def _rerank_results(
+        self,
+        query: str,
+        candidates: list[tuple[str, float, str]],
+    ) -> list[tuple[str, float]] | None:
+        if not self.rerank_provider:
+            return None
+
+        rerank_min = int(self.plugin._cfg("rerank_min_candidates", 3) or 3) if self.plugin else 3
+        if len(candidates) < rerank_min:
+            logger.debug("[Wardrobe] 候选数(%d)不足重排序最低要求(%d)，跳过", len(candidates), rerank_min)
+            return None
+
+        rerank_top_k = int(self.plugin._cfg("rerank_top_k", 0) or 0) if self.plugin else 0
+
+        if len(query) > 512:
+            query = query[:512]
+
+        documents = []
+        for wid, sim, doc_content in candidates:
+            if doc_content:
+                documents.append(doc_content)
+            else:
+                reconstructed = await self._reconstruct_doc_text(wid)
+                documents.append(reconstructed)
+
+        try:
+            top_n = rerank_top_k if rerank_top_k > 0 else len(documents)
+            rerank_results = await self.rerank_provider.rerank(query, documents, top_n=top_n)
+
+            if not rerank_results:
+                logger.debug("[Wardrobe] 重排序返回空结果，使用原始排序")
+                return None
+
+            output: list[tuple[str, float]] = []
+            for rr in rerank_results:
+                idx = rr.index
+                if 0 <= idx < len(candidates):
+                    output.append((candidates[idx][0], rr.relevance_score))
+
+            logger.info(
+                "[Wardrobe] 重排序完成: 候选%d张 → 保留%d张",
+                len(candidates), len(output),
+            )
+            return output
+        except Exception as e:
+            logger.warning("[Wardrobe] 重排序失败，使用原始排序: %s", e)
+            return None
+
+    async def _reconstruct_doc_text(self, wardrobe_id: str) -> str:
+        if not self.db:
+            return ""
+        try:
+            rec = await self.db.get_image(wardrobe_id)
+            if not rec:
+                return ""
+            text_parts = []
+            desc = rec.get("description", "")
+            if desc:
+                text_parts.append(desc)
+            tags = rec.get("user_tags", "")
+            if tags:
+                text_parts.append(f"标签: {tags}")
+            for field, label in [
+                ("exposure_features", "暴露特征"),
+                ("key_features", "关键特征"),
+                ("prop_objects", "道具"),
+                ("allure_features", "魅力特征"),
+                ("body_focus", "身体焦点"),
+            ]:
+                val = rec.get(field, "")
+                if isinstance(val, list):
+                    val = " ".join(str(v) for v in val if v)
+                if val:
+                    text_parts.append(f"{label}: {val}")
+            return " ".join(text_parts)
+        except Exception:
+            return ""
 
     async def index_existing_images(self):
         if not self.available or not self.db:

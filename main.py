@@ -20,6 +20,7 @@ from .webui import WardrobeWebServer
 try:
     from .core.vector_searcher import WardrobeVectorSearcher
     from astrbot.core.provider.provider import EmbeddingProvider
+    from astrbot.core.provider.provider import RerankProvider
     _VEC_AVAILABLE = True
 except ImportError:
     _VEC_AVAILABLE = False
@@ -36,7 +37,7 @@ _AIIMG_GENERATE_TOOLS = frozenset({"aiimg_generate"})
     "astrbot_plugin_wardrobe",
     "Inoryu7z",
     "图片衣柜管理插件，支持智能分类、语义检索和参考图接口",
-    "2.2.1",
+    "2.2.2",
 )
 class WardrobePlugin(Star):
     def __init__(self, context: Context, config: AstrBotConfig = None):
@@ -50,6 +51,9 @@ class WardrobePlugin(Star):
         self.store = ImageStore(data_dir)
         self.analyzer = ImageAnalyzer(context, plugin=self)
         self.vector_searcher = self._init_vector_searcher(data_dir)
+        self.rerank_provider = self._init_rerank_provider()
+        if self.vector_searcher and self.rerank_provider:
+            self.vector_searcher.rerank_provider = self.rerank_provider
         self.searcher = ImageSearcher(context, self.db, self.store, vector_searcher=self.vector_searcher)
         self.data_dir = data_dir
         self._db_initialized = False
@@ -94,6 +98,23 @@ class WardrobePlugin(Star):
             return vs
         except Exception as e:
             logger.warning("[Wardrobe] 向量检索器初始化失败: %s", e)
+            return None
+
+    def _init_rerank_provider(self):
+        if not _VEC_AVAILABLE:
+            return None
+        try:
+            rerank_id = self._cfg("rerank_provider_id", "")
+            if not rerank_id:
+                return None
+            provider = self.context.get_provider_by_id(rerank_id)
+            if provider and isinstance(provider, RerankProvider):
+                logger.info("[Wardrobe] 使用配置的 Rerank Provider: %s", rerank_id)
+                return provider
+            logger.warning("[Wardrobe] Rerank Provider '%s' 未找到或类型不匹配", rerank_id)
+            return None
+        except Exception as e:
+            logger.warning("[Wardrobe] Rerank Provider 初始化失败: %s", e)
             return None
 
     async def terminate(self):
@@ -173,6 +194,10 @@ class WardrobePlugin(Star):
                 if self.vector_searcher:
                     self.searcher.vector_searcher = self.vector_searcher
                     logger.info("[Wardrobe] 向量检索器延迟初始化成功")
+            if not self.rerank_provider:
+                self.rerank_provider = self._init_rerank_provider()
+                if self.vector_searcher and self.rerank_provider:
+                    self.vector_searcher.rerank_provider = self.rerank_provider
             if self.vector_searcher and not self.vector_searcher._initialized:
                 await self.vector_searcher.initialize()
                 if self.vector_searcher.available:
