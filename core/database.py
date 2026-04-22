@@ -696,8 +696,8 @@ class WardrobeDatabase:
                                 dynamic_level, action_style, shot_size, camera_angle,
                                 expression, color_tone, composition, background,
                                 description, user_tags, exposure_features, key_features, prop_objects, allure_features, body_focus,
-                                persona, image_path, created_at, updated_at, created_by, favorite, use_count, file_hash
-                            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+                                persona, image_path, created_at, updated_at, created_by, favorite, use_count, file_hash, ref_strength
+                            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
                             (
                                 rec.get("id", str(uuid.uuid4())),
                                 rec.get("category", "人物"),
@@ -731,6 +731,7 @@ class WardrobeDatabase:
                                 rec.get("favorite", "none"),
                                 rec.get("use_count", 0),
                                 rec.get("file_hash", ""),
+                                rec.get("ref_strength", "style"),
                             ),
                         )
                         imported += 1
