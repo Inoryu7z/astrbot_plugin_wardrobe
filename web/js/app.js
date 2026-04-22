@@ -14,7 +14,7 @@
   const FIELD_DEFS=[
     {key:'category',label:'分类',type:'select',options:['人物','衣服']},
     {key:'style',label:'风格',type:'tags'},
-    {key:'clothing_type',label:'服装类型',type:'text'},
+    {key:'clothing_type',label:'服装类型',type:'tags'},
     {key:'exposure_level',label:'暴露程度',type:'select',options:['保守','轻微','中等','明显','极限']},
     {key:'exposure_features',label:'暴露特征',type:'tags',hint:'如：露肩、露背、透视、开叉'},
     {key:'key_features',label:'关键特征',type:'tags',hint:'3-5个最突出的视觉特征'},
@@ -394,7 +394,10 @@
         inputWrap.className='field-input-wrap';
 
         if(def.type==='tags'){
-          const tagsArr=Array.isArray(val)?val:(val?String(val).split(',').map(s=>s.trim()).filter(Boolean):[]);
+          let tagsArr=Array.isArray(val)?val:[];
+          if(!tagsArr.length && val){
+            tagsArr=String(val).split(/[,、]/).map(s=>s.trim()).filter(Boolean);
+          }
           const tagInput=document.createElement('div');
           tagInput.className='tag-input-group';
           const tagList=document.createElement('div');
@@ -463,7 +466,10 @@
         valWrap.className='field-value-wrap';
 
         if(def.type==='tags'){
-          const tagsArr=Array.isArray(val)?val:(val?String(val).split(',').map(s=>s.trim()).filter(Boolean):[]);
+          let tagsArr=Array.isArray(val)?val:[];
+          if(!tagsArr.length && val){
+            tagsArr=String(val).split(/[,、]/).map(s=>s.trim()).filter(Boolean);
+          }
           if(tagsArr.length===0){
             valWrap.innerHTML='<span class="field-empty">-</span>';
           }else{
@@ -475,6 +481,12 @@
             });
             colorIdx++;
           }
+        }else if(def.type==='select' && val){
+          const tag=document.createElement('span');
+          tag.className='tag tag-single '+tagColors[colorIdx%4];
+          tag.textContent=val;
+          valWrap.appendChild(tag);
+          colorIdx++;
         }else{
           valWrap.innerHTML=val?`<span class="field-value-text">${esc(String(val))}</span>`:'<span class="field-empty">-</span>';
         }
