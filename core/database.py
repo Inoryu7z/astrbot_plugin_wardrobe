@@ -42,7 +42,8 @@ CREATE TABLE IF NOT EXISTS images (
     created_by TEXT DEFAULT '',
     favorite TEXT DEFAULT 'none',
     use_count INTEGER DEFAULT 0,
-    file_hash TEXT DEFAULT ''
+    file_hash TEXT DEFAULT '',
+    ref_strength TEXT DEFAULT 'style'
 );
 """
 
@@ -61,7 +62,7 @@ _UPDATABLE_FIELDS = frozenset({
     "dynamic_level", "action_style", "shot_size", "camera_angle",
     "expression", "color_tone", "composition", "background",
     "description", "user_tags", "exposure_features", "key_features", "prop_objects", "allure_features", "body_focus",
-    "image_path", "updated_at", "favorite", "use_count", "file_hash",
+    "image_path", "updated_at", "favorite", "use_count", "file_hash", "ref_strength",
 })
 
 
@@ -87,6 +88,7 @@ class WardrobeDatabase:
                     ("favorite", "TEXT DEFAULT 'none'"),
                     ("use_count", "INTEGER DEFAULT 0"),
                     ("file_hash", "TEXT DEFAULT ''"),
+                    ("ref_strength", "TEXT DEFAULT 'style'"),
                 ]:
                     try:
                         await db.execute(f"ALTER TABLE images ADD COLUMN {col} {default}")
@@ -126,6 +128,7 @@ class WardrobeDatabase:
         image_path: str,
         created_by: str = "",
         file_hash: str = "",
+        ref_strength: str = "style",
     ) -> str:
         now = datetime.now(timezone.utc).isoformat()
         image_id = str(uuid.uuid4())
@@ -138,8 +141,8 @@ class WardrobeDatabase:
                         dynamic_level, action_style, shot_size, camera_angle,
                         expression, color_tone, composition, background,
                         description, user_tags, exposure_features, key_features, prop_objects, allure_features, body_focus,
-                        persona, image_path, created_at, updated_at, created_by, favorite, use_count, file_hash
-                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+                        persona, image_path, created_at, updated_at, created_by, favorite, use_count, file_hash, ref_strength
+                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
                     (
                         image_id,
                         category,
@@ -173,6 +176,7 @@ class WardrobeDatabase:
                         "none",
                         0,
                         file_hash,
+                        ref_strength,
                     ),
                 )
                 await db.commit()
@@ -264,6 +268,7 @@ class WardrobeDatabase:
         shot_size: Optional[str] = None,
         keywords: Optional[list[str]] = None,
         favorite: Optional[str] = None,
+        ref_strength: Optional[str] = None,
         sort_by: str = "created_at",
     ) -> tuple[list[str], list[Any]]:
         conditions = []
@@ -312,6 +317,10 @@ class WardrobeDatabase:
             conditions.append("favorite = ?")
             params.append(favorite)
 
+        if ref_strength and ref_strength in ("style", "full", "reimagine"):
+            conditions.append("ref_strength = ?")
+            params.append(ref_strength)
+
         if keywords:
             kw_conds = []
             for kw in keywords:
@@ -347,6 +356,7 @@ class WardrobeDatabase:
         exclude_persona: str = "",
         shot_size: Optional[str] = None,
         favorite: Optional[str] = None,
+        ref_strength: Optional[str] = None,
         sort_by: str = "created_at",
         limit: int = 20,
         offset: int = 0,
@@ -357,6 +367,7 @@ class WardrobeDatabase:
             pose_type=pose_type, body_focus=body_focus,
             persona=persona, exclude_persona=exclude_persona,
             shot_size=shot_size, favorite=favorite,
+            ref_strength=ref_strength,
             sort_by=sort_by,
         )
 
@@ -395,6 +406,7 @@ class WardrobeDatabase:
         exclude_persona: str = "",
         shot_size: Optional[str] = None,
         favorite: Optional[str] = None,
+        ref_strength: Optional[str] = None,
     ) -> int:
         conditions, params = self._build_search_conditions(
             category=category, exposure_level=exposure_level,
@@ -402,6 +414,7 @@ class WardrobeDatabase:
             pose_type=pose_type, body_focus=body_focus,
             persona=persona, exclude_persona=exclude_persona,
             shot_size=shot_size, favorite=favorite,
+            ref_strength=ref_strength,
         )
 
         where_clause = ""
@@ -684,8 +697,8 @@ class WardrobeDatabase:
                                 dynamic_level, action_style, shot_size, camera_angle,
                                 expression, color_tone, composition, background,
                                 description, user_tags, exposure_features, key_features, prop_objects, allure_features, body_focus,
-                                persona, image_path, created_at, updated_at, created_by, favorite, use_count, file_hash
-                            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+                                persona, image_path, created_at, updated_at, created_by, favorite, use_count, file_hash, ref_strength
+                            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
                             (
                                 rec.get("id", str(uuid.uuid4())),
                                 rec.get("category", "人物"),
@@ -719,6 +732,7 @@ class WardrobeDatabase:
                                 rec.get("favorite", "none"),
                                 rec.get("use_count", 0),
                                 rec.get("file_hash", ""),
+                                rec.get("ref_strength", "style"),
                             ),
                         )
                         imported += 1

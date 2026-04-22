@@ -1,3 +1,22 @@
+### v2.2.3
+
+**🔧 优化**
+
+* `ref_strength` 评估标准重写：从"姿势好坏"改为"姿势与构图的参考价值"
+  - `full`：姿势有强烈视觉表现力或身体魅力展示，剪影仍有看点
+  - `style`：姿势有韵味但未达刻意设计，取其氛围和感觉
+  - `reimagine`：纯功能性姿态，"人形衣架"，姿势无视觉叙事
+* 评估标准与服装美观程度完全解耦，避免 LLM 因服装好看而给高姿势评分
+* WebUI 新增 ref_strength 筛选器和标签显示
+
+**✨ 新功能**
+
+* 新增 `ref_strength` 字段：存图时自动评估姿势与构图的参考价值（三档：full/style/reimagine）
+* `get_reference_image` 返回值新增 `ref_strength` 字段
+* `aiimg_wardrobe_preview` 返回值新增参考强度指引
+
+---
+
 ### v2.2.2
 
 **✨ 新功能**
