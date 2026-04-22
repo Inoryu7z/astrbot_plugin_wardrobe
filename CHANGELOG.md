@@ -1,3 +1,15 @@
+### v2.2.5
+
+**✨ 新功能**
+
+* 每日凌晨1点自动备份衣橱数据（数据库记录+图片文件），备份文件位于 `backups/wardrobe_auto_backup.zip`，保留最近1份，可直接通过 WebUI 导入恢复
+
+**🔧 优化**
+
+* 备份 ZIP 构建逻辑从 server.py 提取到 main.py 的 `build_backup_zip()` 共享方法，WebUI 导出和自动备份共用
+
+---
+
 ### v2.2.4
 
 **🐛 Bug 修复**
