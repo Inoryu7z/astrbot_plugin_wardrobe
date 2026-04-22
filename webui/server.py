@@ -1,5 +1,4 @@
 import asyncio
-import io
 import json
 import secrets
 import shutil
@@ -610,35 +609,8 @@ class WardrobeWebServer:
         @app.route("/api/backup/export")
         async def api_backup_export():
             try:
-                await self.plugin._ensure_db()
-                records = await self.plugin.db.get_all_records()
-                images_dir = self.plugin.store.images_dir
-
-                def _build_zip():
-                    buf = io.BytesIO()
-                    with zipfile.ZipFile(buf, "w", zipfile.ZIP_DEFLATED) as zf:
-                        metadata = json.dumps({
-                            "version": "1.0",
-                            "export_time": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
-                            "total_records": len(records),
-                        }, ensure_ascii=False)
-                        zf.writestr("backup_metadata.json", metadata)
-                        zf.writestr("records.json", json.dumps(records, ensure_ascii=False, indent=2))
-
-                        added_files = 0
-                        for rec in records:
-                            img_filename = rec.get("image_path", "")
-                            if not img_filename:
-                                continue
-                            img_path = images_dir / img_filename
-                            if img_path.exists():
-                                zf.write(str(img_path), f"images/{img_filename}")
-                                added_files += 1
-                    buf.seek(0)
-                    return buf, added_files
-
-                buf, added_files = await asyncio.to_thread(_build_zip)
-                logger.info("[Wardrobe] 备份导出: %d条记录, %d个图片文件", len(records), added_files)
+                buf, total_records, added_files = await self.plugin.build_backup_zip()
+                logger.info("[Wardrobe] 备份导出: %d条记录, %d个图片文件", total_records, added_files)
 
                 return await send_file(
                     buf,

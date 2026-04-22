@@ -2,6 +2,10 @@ from pathlib import Path
 from typing import Optional
 import asyncio
 import hashlib
+import io
+import json
+import time
+import zipfile
 
 from astrbot.api import AstrBotConfig, logger
 from astrbot.api.event import AstrMessageEvent, filter
@@ -427,6 +431,64 @@ class WardrobePlugin(Star):
         task.add_done_callback(self._bg_tasks.discard)
         return task
 
+    async def build_backup_zip(self) -> tuple[io.BytesIO, int, int]:
+        await self._ensure_db()
+        records = await self.db.get_all_records()
+        images_dir = self.store.images_dir
+        total_records = len(records)
+
+        def _build():
+            buf = io.BytesIO()
+            with zipfile.ZipFile(buf, "w", zipfile.ZIP_DEFLATED) as zf:
+                metadata = json.dumps({
+                    "version": "1.0",
+                    "export_time": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
+                    "total_records": total_records,
+                }, ensure_ascii=False)
+                zf.writestr("backup_metadata.json", metadata)
+                zf.writestr("records.json", json.dumps(records, ensure_ascii=False, indent=2))
+                added_files = 0
+                for rec in records:
+                    img_filename = rec.get("image_path", "")
+                    if not img_filename:
+                        continue
+                    img_path = images_dir / img_filename
+                    if img_path.exists():
+                        zf.write(str(img_path), f"images/{img_filename}")
+                        added_files += 1
+            buf.seek(0)
+            return buf, added_files
+
+        buf, added_files = await asyncio.to_thread(_build)
+        return buf, total_records, added_files
+
+    async def _auto_backup_loop(self):
+        while True:
+            try:
+                from datetime import datetime, timedelta
+                now = datetime.now()
+                target = now.replace(hour=1, minute=0, second=0, microsecond=0)
+                if target <= now:
+                    target += timedelta(days=1)
+                wait_seconds = (target - now).total_seconds()
+                await asyncio.sleep(wait_seconds)
+
+                buf, total_records, added_files = await self.build_backup_zip()
+                backup_dir = self.data_dir / "backups"
+                backup_dir.mkdir(exist_ok=True)
+                backup_path = backup_dir / "wardrobe_auto_backup.zip"
+
+                def _write():
+                    with open(str(backup_path), "wb") as f:
+                        f.write(buf.getvalue())
+
+                await asyncio.to_thread(_write)
+                logger.info("[Wardrobe] 自动备份完成: %d条记录, %d个图片文件", total_records, added_files)
+            except asyncio.CancelledError:
+                return
+            except Exception as e:
+                logger.error("[Wardrobe] 自动备份失败: %s", e, exc_info=True)
+
     async def _index_to_vector(self, image_id: str, description: str, user_tags: str,
                                 exposure_features: list | None = None,
                                 key_features: list | None = None,
@@ -505,6 +567,8 @@ class WardrobePlugin(Star):
                 await self._start_webui()
             except Exception as e:
                 logger.error("[Wardrobe] WebUI 启动失败: %s", e)
+
+        self._spawn_bg_task(self._auto_backup_loop())
 
     @on_llm_tool_respond()
     async def on_aiimg_tool_respond(self, event: AstrMessageEvent, tool, tool_args, tool_result):
