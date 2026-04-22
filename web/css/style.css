@@ -1066,20 +1066,20 @@ html, body {
 
 .image-card-rs {
   position:absolute; top:8px; left:8px;
-  font-size:14px; z-index:2;
+  font-size:13px; z-index:2;
   pointer-events:none;
   width:24px; height:24px;
   display:flex; align-items:center; justify-content:center;
-  filter:drop-shadow(0 1px 2px rgba(0,0,0,0.5));
+  border-radius:6px;
+  font-weight:600;
 }
 .image-card-rs-full {
-  color:#ff8fa3;
-}
-.image-card-rs-style {
-  color:#a78bfa;
+  background:rgba(255,143,163,0.9);
+  color:#fff;
 }
 .image-card-rs-reimagine {
-  color:#6ecfad;
+  background:rgba(110,207,173,0.9);
+  color:#fff;
 }
 
 .image-card-uses {
