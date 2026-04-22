@@ -173,7 +173,23 @@
         <div class="modal-bottom-actions">
           <button class="btn btn-danger btn-sm" id="modalDeleteBtn">删除此图</button>
           <button class="btn btn-secondary btn-sm" id="modalReanalyzeBtn">重新分析</button>
-          <button class="btn btn-rs btn-sm" id="refStrengthBtn" title="点击切换参考强度">🎨风格参考</button>
+          <div class="rs-dropdown-wrap">
+            <button class="btn btn-rs btn-sm" id="refStrengthBtn" title="选择参考强度">🎨风格参考<span class="rs-dropdown-arrow">▾</span></button>
+            <div class="rs-dropdown hidden" id="refStrengthDropdown">
+              <div class="rs-option" data-value="full" onclick="setRefStrength('full')">
+                <span class="rs-option-label">📸完整参考</span>
+                <span class="rs-option-desc">保留姿势、构图与服装细节</span>
+              </div>
+              <div class="rs-option" data-value="style" onclick="setRefStrength('style')">
+                <span class="rs-option-label">🎨风格参考</span>
+                <span class="rs-option-desc">大致保留姿势与构图，适当微调</span>
+              </div>
+              <div class="rs-option" data-value="reimagine" onclick="setRefStrength('reimagine')">
+                <span class="rs-option-label">🔄重构</span>
+                <span class="rs-option-desc">仅保留服装款式，重新设计姿势与构图</span>
+              </div>
+            </div>
+          </div>
         </div>
         <div class="ref-strength-reason hidden" id="refStrengthReason"></div>
         <div class="modal-reanalyze-section hidden" id="reanalyzeSection">

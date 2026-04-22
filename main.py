@@ -358,7 +358,7 @@ class WardrobePlugin(Star):
 
                         new_rs = ensure_str(attrs.get("ref_strength", "style"))
                         new_reason = ensure_str(attrs.get("ref_strength_reason", ""))
-                        if new_rs and new_rs != "style":
+                        if new_rs in ("full", "style", "reimagine"):
                             await self.db.update_image(image_id, ref_strength=new_rs, ref_strength_reason=new_reason)
                             rs_success += 1
                         else:

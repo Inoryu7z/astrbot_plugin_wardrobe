@@ -200,6 +200,7 @@
       const useCount=img.use_count?`<span class="image-card-uses">🔥${img.use_count}</span>`:'';
       const similarityMark=img._similarity!=null?`<div class="image-card-similarity">${(img._similarity*100).toFixed(0)}%</div>`:'';
       const rsMark=img.ref_strength&&img.ref_strength!=='style'&&img.category==='人物'?`<div class="image-card-rs image-card-rs-${esc(img.ref_strength)}">${img.ref_strength==='full'?'📸':img.ref_strength==='reimagine'?'🔄':''}</div>`:'';
+      const styleTags=Array.isArray(img.style)&&img.style.length?`<span class="image-card-style">${esc(img.style.slice(0,2).join(' '))}</span>`:'';
       card.innerHTML=`
         ${favMark}
         ${similarityMark}
@@ -207,6 +208,7 @@
         <img src="/api/image-file/${img.id}" loading="lazy" alt="" onerror="this.src='data:image/svg+xml,<svg xmlns=%22http://www.w3.org/2000/svg%22 width=%22180%22 height=%22240%22><rect fill=%22%23F8F0F4%22 width=%22180%22 height=%22240%22/><text x=%2290%22 y=%22125%22 text-anchor=%22middle%22 fill=%22%23C8B8D0%22 font-size=%2214%22>加载失败</text></svg>'">
         <div class="image-card-overlay">
           <span class="image-card-category">${esc(img.category||'')}</span>
+          ${styleTags}
           ${useCount}
           ${personaText}
         </div>
@@ -284,13 +286,17 @@
     }
   }
 
-  const RS_LABELS={full:'📸完整参考',style:'🎨风格参考',reimagine:'🔄重构'};
-  const RS_CYCLE=['style','full','reimagine'];
+  const RS_OPTIONS=[
+    {value:'full',label:'📸完整参考',desc:'保留姿势、构图与服装细节'},
+    {value:'style',label:'🎨风格参考',desc:'大致保留姿势与构图，适当微调'},
+    {value:'reimagine',label:'🔄重构',desc:'仅保留服装款式，重新设计姿势与构图'},
+  ];
 
   function updateRefStrengthBtns(rs, reason){
     const btn=$('#refStrengthBtn');
     if(!btn)return;
-    btn.textContent=RS_LABELS[rs]||RS_LABELS.style;
+    const opt=RS_OPTIONS.find(o=>o.value===(rs||'style'))||RS_OPTIONS[1];
+    btn.innerHTML=opt.label+'<span class="rs-dropdown-arrow">▾</span>';
     btn.dataset.value=rs||'style';
     btn.classList.toggle('rs-full',rs==='full');
     btn.classList.toggle('rs-reimagine',rs==='reimagine');
@@ -303,27 +309,39 @@
         reasonEl.classList.add('hidden');
       }
     }
+    const dropdown=$('#refStrengthDropdown');
+    if(dropdown){
+      dropdown.querySelectorAll('.rs-option').forEach(el=>{
+        el.classList.toggle('rs-option-active',el.dataset.value===(rs||'style'));
+      });
+    }
   }
 
-  async function toggleRefStrength(){
+  function toggleRefStrengthDropdown(){
+    const dropdown=$('#refStrengthDropdown');
+    if(!dropdown)return;
+    dropdown.classList.toggle('hidden');
+  }
+
+  async function setRefStrength(value){
     if(!state.currentImageId)return;
-    const current=state.currentImageData?.ref_strength||'style';
-    const idx=RS_CYCLE.indexOf(current);
-    const next=RS_CYCLE[(idx+1)%RS_CYCLE.length];
+    const dropdown=$('#refStrengthDropdown');
+    if(dropdown)dropdown.classList.add('hidden');
     const resp=await api(`/api/images/${state.currentImageId}`,{
       method:'PUT',
-      json:{ref_strength:next},
+      json:{ref_strength:value},
     });
     if(!resp){toast('操作失败','error');return;}
     const result=await resp.json();
     if(result.success){
-      state.currentImageData.ref_strength=next;
-      updateRefStrengthBtns(next, state.currentImageData.ref_strength_reason||'');
-      toast(`参考强度: ${RS_LABELS[next]}`,'success');
+      state.currentImageData.ref_strength=value;
+      updateRefStrengthBtns(value, state.currentImageData.ref_strength_reason||'');
+      toast(`参考强度: ${RS_OPTIONS.find(o=>o.value===value)?.label||value}`,'success');
     }else{
       toast(result.error||'操作失败','error');
     }
   }
+  window.setRefStrength=setRefStrength;
 
   function renderDetailFields(img,editMode){
     const container=$('#modalFields');
@@ -1151,7 +1169,14 @@
     $('#modalSaveBtn').addEventListener('click',saveEdit);
     $('#favFavoriteBtn').addEventListener('click',()=>toggleFavorite('favorite'));
     $('#favLikeBtn').addEventListener('click',()=>toggleFavorite('like'));
-    $('#refStrengthBtn').addEventListener('click',()=>toggleRefStrength());
+    $('#refStrengthBtn').addEventListener('click',()=>toggleRefStrengthDropdown());
+    document.addEventListener('click',(e)=>{
+      const wrap=$('.rs-dropdown-wrap');
+      if(wrap&&!wrap.contains(e.target)){
+        const dd=$('#refStrengthDropdown');
+        if(dd)dd.classList.add('hidden');
+      }
+    });
     $('#modalReanalyzeBtn').addEventListener('click',()=>{
       $('#reanalyzeSection').classList.remove('hidden');
       $('#reanalyzeDesc').value='';
