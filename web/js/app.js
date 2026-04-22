@@ -199,7 +199,8 @@
       const favMark=favIcon?`<div class="image-card-fav">${favIcon}</div>`:'';
       const useCount=img.use_count?`<span class="image-card-uses">🔥${img.use_count}</span>`:'';
       const similarityMark=img._similarity!=null?`<div class="image-card-similarity">${(img._similarity*100).toFixed(0)}%</div>`:'';
-      const rsMark=img.ref_strength&&img.ref_strength!=='style'&&img.category==='人物'?`<div class="image-card-rs image-card-rs-${esc(img.ref_strength)}">${img.ref_strength==='full'?'📸':img.ref_strength==='reimagine'?'🔄':''}</div>`:'';
+      const rsIcon=img.ref_strength==='full'?'📸':img.ref_strength==='reimagine'?'🔄':'🎨';
+      const rsMark=img.ref_strength&&img.category==='人物'?`<div class="image-card-rs image-card-rs-${esc(img.ref_strength||'style')}">${rsIcon}</div>`:'';
       card.innerHTML=`
         ${favMark}
         ${similarityMark}
@@ -347,15 +348,14 @@
     if(updates.ref_strength!==undefined){
       const oldRsMark=card.querySelector('.image-card-rs');
       if(oldRsMark)oldRsMark.remove();
-      const rs=updates.ref_strength;
-      if(rs&&rs!=='style'){
-        const img=card.querySelector('img');
-        const rsEl=document.createElement('div');
-        rsEl.className=`image-card-rs image-card-rs-${esc(rs)}`;
-        rsEl.textContent=rs==='full'?'📸':rs==='reimagine'?'🔄':'';
-        if(img&&img.nextSibling)img.parentNode.insertBefore(rsEl,img.nextSibling);
-        else card.appendChild(rsEl);
-      }
+      const rs=updates.ref_strength||'style';
+      const rsIcon=rs==='full'?'📸':rs==='reimagine'?'🔄':'🎨';
+      const img=card.querySelector('img');
+      const rsEl=document.createElement('div');
+      rsEl.className=`image-card-rs image-card-rs-${esc(rs)}`;
+      rsEl.textContent=rsIcon;
+      if(img&&img.nextSibling)img.parentNode.insertBefore(rsEl,img.nextSibling);
+      else card.appendChild(rsEl);
     }
     if(updates.style!==undefined){
       const oldStyle=card.querySelector('.image-card-style');
