@@ -37,7 +37,6 @@
     {key:'user_tags',label:'用户标签',type:'text'},
     {key:'persona',label:'人格',type:'text'},
     {key:'favorite',label:'收藏',type:'select',options:['none','favorite','like']},
-    {key:'ref_strength',label:'参考强度',type:'select',options:['full','style','reimagine']},
   ];
 
   let state={
@@ -252,6 +251,7 @@
     const metaRO=$('#modalMetaReadonly');
     metaRO.innerHTML=`<span>ID: ${esc(img.id)}</span><span>创建时间: ${esc(img.created_at||'未知')}</span>`;
     updateFavoriteBtns(img.favorite||'none');
+    updateRefStrengthBtns(img.ref_strength||'style', img.ref_strength_reason||'');
     updateEditButtons();
     $('#detailModal').classList.remove('hidden');
   }
@@ -279,6 +279,47 @@
       state.currentImageData.favorite=newFav;
       updateFavoriteBtns(newFav);
       toast(newFav==='none'?'已取消':newFav==='favorite'?'已收藏':'已标记喜欢','success');
+    }else{
+      toast(result.error||'操作失败','error');
+    }
+  }
+
+  const RS_LABELS={full:'📸完整参考',style:'🎨风格参考',reimagine:'🔄重构'};
+  const RS_CYCLE=['style','full','reimagine'];
+
+  function updateRefStrengthBtns(rs, reason){
+    const btn=$('#refStrengthBtn');
+    if(!btn)return;
+    btn.textContent=RS_LABELS[rs]||RS_LABELS.style;
+    btn.dataset.value=rs||'style';
+    btn.classList.toggle('rs-full',rs==='full');
+    btn.classList.toggle('rs-reimagine',rs==='reimagine');
+    const reasonEl=$('#refStrengthReason');
+    if(reasonEl){
+      if(reason){
+        reasonEl.textContent=reason;
+        reasonEl.classList.remove('hidden');
+      }else{
+        reasonEl.classList.add('hidden');
+      }
+    }
+  }
+
+  async function toggleRefStrength(){
+    if(!state.currentImageId)return;
+    const current=state.currentImageData?.ref_strength||'style';
+    const idx=RS_CYCLE.indexOf(current);
+    const next=RS_CYCLE[(idx+1)%RS_CYCLE.length];
+    const resp=await api(`/api/images/${state.currentImageId}`,{
+      method:'PUT',
+      json:{ref_strength:next},
+    });
+    if(!resp){toast('操作失败','error');return;}
+    const result=await resp.json();
+    if(result.success){
+      state.currentImageData.ref_strength=next;
+      updateRefStrengthBtns(next, state.currentImageData.ref_strength_reason||'');
+      toast(`参考强度: ${RS_LABELS[next]}`,'success');
     }else{
       toast(result.error||'操作失败','error');
     }
@@ -1110,6 +1151,7 @@
     $('#modalSaveBtn').addEventListener('click',saveEdit);
     $('#favFavoriteBtn').addEventListener('click',()=>toggleFavorite('favorite'));
     $('#favLikeBtn').addEventListener('click',()=>toggleFavorite('like'));
+    $('#refStrengthBtn').addEventListener('click',()=>toggleRefStrength());
     $('#modalReanalyzeBtn').addEventListener('click',()=>{
       $('#reanalyzeSection').classList.remove('hidden');
       $('#reanalyzeDesc').value='';

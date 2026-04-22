@@ -357,8 +357,9 @@ class WardrobePlugin(Star):
                             continue
 
                         new_rs = ensure_str(attrs.get("ref_strength", "style"))
+                        new_reason = ensure_str(attrs.get("ref_strength_reason", ""))
                         if new_rs and new_rs != "style":
-                            await self.db.update_image(image_id, ref_strength=new_rs)
+                            await self.db.update_image(image_id, ref_strength=new_rs, ref_strength_reason=new_reason)
                             rs_success += 1
                         else:
                             rs_failed += 1
@@ -575,7 +576,7 @@ class WardrobePlugin(Star):
             return f"图片已保存（ID: {image_id}），但模型分析失败，仅保存了原始图片"
 
         logger.info(
-            "[Wardrobe] 分析结果:\n  分类: %s\n  风格: %s\n  服装: %s\n  暴露: %s\n  场景: %s\n  氛围: %s\n  姿势: %s\n  朝向: %s\n  动态: %s\n  动作风格: %s\n  景别: %s\n  角度: %s\n  表情: %s\n  色调: %s\n  构图: %s\n  背景: %s\n  描述: %s\n  用户标签: %s\n  暴露特征: %s\n  关键特征: %s\n  道具: %s\n  魅力特征: %s\n  身体焦点: %s\n  参考强度: %s",
+            "[Wardrobe] 分析结果:\n  分类: %s\n  风格: %s\n  服装: %s\n  暴露: %s\n  场景: %s\n  氛围: %s\n  姿势: %s\n  朝向: %s\n  动态: %s\n  动作风格: %s\n  景别: %s\n  角度: %s\n  表情: %s\n  色调: %s\n  构图: %s\n  背景: %s\n  描述: %s\n  用户标签: %s\n  暴露特征: %s\n  关键特征: %s\n  道具: %s\n  魅力特征: %s\n  身体焦点: %s\n  参考强度: %s\n  评级理由: %s",
             attrs.get("category", "人物"),
             ", ".join(attrs.get("style", [])),
             attrs.get("clothing_type", ""),
@@ -600,6 +601,7 @@ class WardrobePlugin(Star):
             ", ".join(attrs.get("allure_features", [])),
             ", ".join(attrs.get("body_focus", [])),
             attrs.get("ref_strength", "style"),
+            attrs.get("ref_strength_reason", ""),
         )
 
         feedback_enabled = bool(self._cfg("save_feedback_enabled", False))
@@ -679,6 +681,7 @@ class WardrobePlugin(Star):
                 persona=persona,
                 file_hash=file_hash,
                 ref_strength="style",
+                ref_strength_reason="",
             )
             await self._index_to_vector(image_id, user_description or "模型分析失败，无描述", user_description,
                                          category="人物", persona=persona)
@@ -719,6 +722,7 @@ class WardrobePlugin(Star):
             persona=persona,
             file_hash=file_hash,
             ref_strength=ensure_str(attrs.get("ref_strength", "style")),
+            ref_strength_reason=ensure_str(attrs.get("ref_strength_reason", "")),
         )
 
         desc_text = ensure_str(attrs.get("description"))

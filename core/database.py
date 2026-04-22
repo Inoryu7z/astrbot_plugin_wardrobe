@@ -43,7 +43,8 @@ CREATE TABLE IF NOT EXISTS images (
     favorite TEXT DEFAULT 'none',
     use_count INTEGER DEFAULT 0,
     file_hash TEXT DEFAULT '',
-    ref_strength TEXT DEFAULT 'style'
+    ref_strength TEXT DEFAULT 'style',
+    ref_strength_reason TEXT DEFAULT ''
 );
 """
 
@@ -64,6 +65,7 @@ _UPDATABLE_FIELDS = frozenset({
     "description", "user_tags", "exposure_features", "key_features", "prop_objects", "allure_features", "body_focus",
     "image_path", "updated_at", "favorite", "use_count", "file_hash",
     "ref_strength",
+    "ref_strength_reason",
 })
 
 
@@ -90,6 +92,7 @@ class WardrobeDatabase:
                     ("use_count", "INTEGER DEFAULT 0"),
                     ("file_hash", "TEXT DEFAULT ''"),
                     ("ref_strength", "TEXT DEFAULT 'style'"),
+                    ("ref_strength_reason", "TEXT DEFAULT ''"),
                 ]:
                     try:
                         await db.execute(f"ALTER TABLE images ADD COLUMN {col} {default}")
@@ -130,6 +133,7 @@ class WardrobeDatabase:
         created_by: str = "",
         file_hash: str = "",
         ref_strength: str = "style",
+        ref_strength_reason: str = "",
     ) -> str:
         now = datetime.now(timezone.utc).isoformat()
         image_id = str(uuid.uuid4())
@@ -142,8 +146,8 @@ class WardrobeDatabase:
                         dynamic_level, action_style, shot_size, camera_angle,
                         expression, color_tone, composition, background,
                         description, user_tags, exposure_features, key_features, prop_objects, allure_features, body_focus,
-                        persona, image_path, created_at, updated_at, created_by, favorite, use_count, file_hash, ref_strength
-                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+                        persona, image_path, created_at, updated_at, created_by, favorite, use_count, file_hash, ref_strength, ref_strength_reason
+                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
                     (
                         image_id,
                         category,
@@ -178,6 +182,7 @@ class WardrobeDatabase:
                         0,
                         file_hash,
                         ref_strength,
+                        ref_strength_reason,
                     ),
                 )
                 await db.commit()
@@ -704,8 +709,8 @@ class WardrobeDatabase:
                                 dynamic_level, action_style, shot_size, camera_angle,
                                 expression, color_tone, composition, background,
                                 description, user_tags, exposure_features, key_features, prop_objects, allure_features, body_focus,
-                                persona, image_path, created_at, updated_at, created_by, favorite, use_count, file_hash, ref_strength
-                            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+                                persona, image_path, created_at, updated_at, created_by, favorite, use_count, file_hash, ref_strength, ref_strength_reason
+                            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
                             (
                                 rec.get("id", str(uuid.uuid4())),
                                 rec.get("category", "人物"),
@@ -740,6 +745,7 @@ class WardrobeDatabase:
                                 rec.get("use_count", 0),
                                 rec.get("file_hash", ""),
                                 rec.get("ref_strength", "style"),
+                                rec.get("ref_strength_reason", ""),
                             ),
                         )
                         imported += 1

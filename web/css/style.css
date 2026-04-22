@@ -905,7 +905,32 @@ html, body {
 .modal-bottom-actions {
   display:flex; gap:8px; margin-top:16px;
   padding-top:12px; border-top:1px solid var(--border);
+  align-items:center;
 }
+
+.btn-rs {
+  margin-left:auto;
+  background:var(--bg-sidebar);
+  color:var(--text);
+  border:1px solid var(--border);
+  font-size:12px;
+  transition:all .2s;
+  cursor:pointer;
+}
+.btn-rs:hover { background:var(--pink-light); border-color:var(--pink); }
+.btn-rs.rs-full { background:#E8F5E9; border-color:var(--mint); color:#2E7D32; }
+.btn-rs.rs-reimagine { background:#FFF3E0; border-color:var(--peach); color:#E65100; }
+
+.ref-strength-reason {
+  margin-top:6px;
+  padding:6px 10px;
+  font-size:11px;
+  color:var(--text-muted);
+  background:rgba(244,231,244,0.3);
+  border-radius:6px;
+  line-height:1.4;
+}
+.ref-strength-reason.hidden { display:none; }
 
 .modal-reanalyze-section {
   margin-bottom:12px;
