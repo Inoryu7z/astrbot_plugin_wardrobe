@@ -222,9 +222,10 @@ class WardrobePlugin(Star):
                 allure = rec.get("allure_features", [])
                 bf = rec.get("body_focus", [])
                 rs = rec.get("ref_strength", "style")
+                rs_reason = rec.get("ref_strength_reason", "")
                 if (isinstance(exp, list) and not exp) and (isinstance(key, list) and not key) and (isinstance(prop, list) and not prop) and (isinstance(allure, list) and not allure) and (isinstance(bf, list) and not bf):
                     need_reanalyze.append(rec)
-                elif rs == "style" and rec.get("category", "") == "人物":
+                elif rec.get("category", "") == "人物" and not rs_reason:
                     has_features = (isinstance(exp, list) and exp) or (isinstance(key, list) and key) or (isinstance(prop, list) and prop) or (isinstance(allure, list) and allure) or (isinstance(bf, list) and bf)
                     if has_features:
                         need_ref_strength_backfill.append(rec)
