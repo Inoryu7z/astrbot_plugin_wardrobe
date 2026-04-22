@@ -182,6 +182,7 @@ class WardrobeVectorSearcher:
         k: int = 20,
         persona: str = "",
         exclude_persona: str = "",
+        min_similarity: float = 0.5,
     ) -> list[str]:
         if not self.available:
             return []
@@ -208,6 +209,9 @@ class WardrobeVectorSearcher:
             wardrobe_ids = []
             seen = set()
             for result in results:
+                if result.similarity < min_similarity:
+                    continue
+
                 doc_data = result.data
                 meta = doc_data.get("metadata", {})
                 if isinstance(meta, str):
@@ -234,6 +238,7 @@ class WardrobeVectorSearcher:
 
                 wardrobe_ids.append(wid)
 
+            logger.debug("[Wardrobe] 向量检索: query=%s 返回%d张(阈值%.2f)", query[:50], len(wardrobe_ids), min_similarity)
             return wardrobe_ids
         except Exception as e:
             logger.warning("[Wardrobe] 向量检索失败（将回退到本地检索）: %s", e)
