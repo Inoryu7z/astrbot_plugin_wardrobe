@@ -63,6 +63,13 @@ class WardrobeWebServer:
         app.config["MAX_CONTENT_LENGTH"] = 512 * 1024 * 1024
         app.config["BODY_TIMEOUT"] = 600
 
+        @app.errorhandler(404)
+        async def handle_404(e):
+            logger.debug("[Wardrobe] WebUI 404: %s %s", request.method, request.path)
+            if request.path.startswith("/api/"):
+                return jsonify({"error": "未找到"}), 404
+            return jsonify({"error": "未找到"}), 404
+
         @app.errorhandler(Exception)
         async def handle_exception(e):
             logger.error("[Wardrobe] WebUI未捕获异常: %s", e, exc_info=True)

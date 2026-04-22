@@ -141,6 +141,7 @@ class ImageSearcher:
         persona_names: str = "",
         exclude_current_persona: bool = False,
         persona_mode: str = "exclude_all",
+        prioritize_unused: bool = False,
     ) -> tuple[list[dict[str, Any]], dict[str, Any]]:
         meta = {"persona_mismatch": False, "searched_persona": persona, "persona_scope": "global"}
 
@@ -185,6 +186,9 @@ class ImageSearcher:
         if not candidates:
             logger.info("[Wardrobe] 未找到候选图片 scope=%s persona=%s", persona_scope, named_persona or "无")
             return [], meta
+
+        if prioritize_unused:
+            candidates.sort(key=lambda r: r.get("use_count", 0) or 0)
 
         if len(candidates) <= max_select:
             selected = candidates
