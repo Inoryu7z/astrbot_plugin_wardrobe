@@ -14,7 +14,7 @@ from .core.analyzer import ImageAnalyzer
 from .core.database import WardrobeDatabase
 from .core.image_store import ImageStore
 from .core.searcher import ImageSearcher
-from .core.utils import detect_image_mime, mime_to_ext
+from .core.utils import detect_image_mime, ensure_list, ensure_str, mime_to_ext
 from .webui import WardrobeWebServer
 
 try:
@@ -37,7 +37,7 @@ _AIIMG_GENERATE_TOOLS = frozenset({"aiimg_generate"})
     "astrbot_plugin_wardrobe",
     "Inoryu7z",
     "图片衣柜管理插件，支持智能分类、语义检索和参考图接口",
-    "2.2.3",
+    "2.2.2",
 )
 class WardrobePlugin(Star):
     def __init__(self, context: Context, config: AstrBotConfig = None):
@@ -266,16 +266,9 @@ class WardrobePlugin(Star):
                         logger.warning("[Wardrobe] 旧图重分析失败 id=%s", image_id)
                         continue
 
-                    def _ensure_list(v):
-                        if isinstance(v, list):
-                            return v
-                        if isinstance(v, str) and v:
-                            return [v]
-                        return []
-
                     update_data = {}
                     for field in ("exposure_features", "key_features", "prop_objects", "allure_features", "body_focus"):
-                        val = _ensure_list(attrs.get(field))
+                        val = ensure_list(attrs.get(field))
                         update_data[field] = val
 
                     for field in ("style", "scene", "atmosphere", "action_style",
@@ -290,10 +283,6 @@ class WardrobePlugin(Star):
                             else:
                                 update_data[field] = str(val)
 
-                    rs = str(attrs.get("ref_strength", "") or "").strip().lower()
-                    if rs in ("full", "reimagine", "style"):
-                        update_data["ref_strength"] = rs
-
                     await self.db.update_image(image_id, **update_data)
 
                     if self.vector_searcher and self.vector_searcher.available:
@@ -301,11 +290,11 @@ class WardrobePlugin(Star):
                         tags = rec.get("user_tags", "")
                         await self._index_to_vector(
                             image_id, desc, tags,
-                            exposure_features=_ensure_list(attrs.get("exposure_features")),
-                            key_features=_ensure_list(attrs.get("key_features")),
-                            prop_objects=_ensure_list(attrs.get("prop_objects")),
-                            allure_features=_ensure_list(attrs.get("allure_features")),
-                            body_focus=_ensure_list(attrs.get("body_focus")),
+                            exposure_features=ensure_list(attrs.get("exposure_features")),
+                            key_features=ensure_list(attrs.get("key_features")),
+                            prop_objects=ensure_list(attrs.get("prop_objects")),
+                            allure_features=ensure_list(attrs.get("allure_features")),
+                            body_focus=ensure_list(attrs.get("body_focus")),
                             category=str(attrs.get("category", rec.get("category", ""))),
                             persona=rec.get("persona", ""),
                         )
@@ -519,7 +508,7 @@ class WardrobePlugin(Star):
             return f"图片已保存（ID: {image_id}），但模型分析失败，仅保存了原始图片"
 
         logger.info(
-            "[Wardrobe] 分析结果:\n  分类: %s\n  风格: %s\n  服装: %s\n  暴露: %s\n  场景: %s\n  氛围: %s\n  姿势: %s\n  朝向: %s\n  动态: %s\n  动作风格: %s\n  景别: %s\n  角度: %s\n  表情: %s\n  色调: %s\n  构图: %s\n  背景: %s\n  描述: %s\n  用户标签: %s\n  暴露特征: %s\n  关键特征: %s\n  道具: %s",
+            "[Wardrobe] 分析结果:\n  分类: %s\n  风格: %s\n  服装: %s\n  暴露: %s\n  场景: %s\n  氛围: %s\n  姿势: %s\n  朝向: %s\n  动态: %s\n  动作风格: %s\n  景别: %s\n  角度: %s\n  表情: %s\n  色调: %s\n  构图: %s\n  背景: %s\n  描述: %s\n  用户标签: %s\n  暴露特征: %s\n  关键特征: %s\n  道具: %s\n  魅力特征: %s\n  身体焦点: %s\n  参考强度: %s",
             attrs.get("category", "人物"),
             ", ".join(attrs.get("style", [])),
             attrs.get("clothing_type", ""),
@@ -541,6 +530,9 @@ class WardrobePlugin(Star):
             ", ".join(attrs.get("exposure_features", [])),
             ", ".join(attrs.get("key_features", [])),
             ", ".join(attrs.get("prop_objects", [])),
+            ", ".join(attrs.get("allure_features", [])),
+            ", ".join(attrs.get("body_focus", [])),
+            attrs.get("ref_strength", "style"),
         )
 
         feedback_enabled = bool(self._cfg("save_feedback_enabled", False))
@@ -628,65 +620,46 @@ class WardrobePlugin(Star):
         if category not in ("人物", "衣服"):
             category = "人物"
 
-        def _ensure_list(v):
-            if isinstance(v, list):
-                return v
-            if isinstance(v, str) and v:
-                return [v]
-            return []
-
-        def _ensure_str(v):
-            if isinstance(v, str):
-                return v
-            if isinstance(v, list) and v:
-                return v[0]
-            return ""
-
-        ref_strength_raw = str(attrs.get("ref_strength", "") or "").strip().lower()
-        if ref_strength_raw not in ("full", "reimagine"):
-            ref_strength_raw = "style"
-
         filename = await self.store.save_image(image_bytes)
 
         image_id = await self.db.add_image(
             category=category,
-            style=_ensure_list(attrs.get("style")),
-            clothing_type=_ensure_str(attrs.get("clothing_type")),
-            exposure_level=_ensure_str(attrs.get("exposure_level")),
-            scene=_ensure_list(attrs.get("scene")),
-            atmosphere=_ensure_list(attrs.get("atmosphere")),
-            pose_type=_ensure_str(attrs.get("pose_type")),
-            body_orientation=_ensure_str(attrs.get("body_orientation")),
-            dynamic_level=_ensure_str(attrs.get("dynamic_level")),
-            action_style=_ensure_list(attrs.get("action_style")),
-            shot_size=_ensure_str(attrs.get("shot_size")),
-            camera_angle=_ensure_str(attrs.get("camera_angle")),
-            expression=_ensure_str(attrs.get("expression")),
-            color_tone=_ensure_str(attrs.get("color_tone")),
-            composition=_ensure_str(attrs.get("composition")),
-            background=_ensure_str(attrs.get("background")),
-            description=_ensure_str(attrs.get("description")),
+            style=ensure_list(attrs.get("style")),
+            clothing_type=ensure_str(attrs.get("clothing_type")),
+            exposure_level=ensure_str(attrs.get("exposure_level")),
+            scene=ensure_list(attrs.get("scene")),
+            atmosphere=ensure_list(attrs.get("atmosphere")),
+            pose_type=ensure_str(attrs.get("pose_type")),
+            body_orientation=ensure_str(attrs.get("body_orientation")),
+            dynamic_level=ensure_str(attrs.get("dynamic_level")),
+            action_style=ensure_list(attrs.get("action_style")),
+            shot_size=ensure_str(attrs.get("shot_size")),
+            camera_angle=ensure_str(attrs.get("camera_angle")),
+            expression=ensure_str(attrs.get("expression")),
+            color_tone=ensure_str(attrs.get("color_tone")),
+            composition=ensure_str(attrs.get("composition")),
+            background=ensure_str(attrs.get("background")),
+            description=ensure_str(attrs.get("description")),
             user_tags=user_description,
-            exposure_features=_ensure_list(attrs.get("exposure_features")),
-            key_features=_ensure_list(attrs.get("key_features")),
-            prop_objects=_ensure_list(attrs.get("prop_objects")),
-            allure_features=_ensure_list(attrs.get("allure_features")),
-            body_focus=_ensure_list(attrs.get("body_focus")),
+            exposure_features=ensure_list(attrs.get("exposure_features")),
+            key_features=ensure_list(attrs.get("key_features")),
+            prop_objects=ensure_list(attrs.get("prop_objects")),
+            allure_features=ensure_list(attrs.get("allure_features")),
+            body_focus=ensure_list(attrs.get("body_focus")),
             image_path=filename,
             created_by=created_by,
             persona=persona,
             file_hash=file_hash,
-            ref_strength=ref_strength_raw,
         )
 
-        desc_text = _ensure_str(attrs.get("description"))
+        desc_text = ensure_str(attrs.get("description"))
         await self._index_to_vector(
             image_id, desc_text, user_description,
-            exposure_features=_ensure_list(attrs.get("exposure_features")),
-            key_features=_ensure_list(attrs.get("key_features")),
-            prop_objects=_ensure_list(attrs.get("prop_objects")),
-            allure_features=_ensure_list(attrs.get("allure_features")),
-            body_focus=_ensure_list(attrs.get("body_focus")),
+            exposure_features=ensure_list(attrs.get("exposure_features")),
+            key_features=ensure_list(attrs.get("key_features")),
+            prop_objects=ensure_list(attrs.get("prop_objects")),
+            allure_features=ensure_list(attrs.get("allure_features")),
+            body_focus=ensure_list(attrs.get("body_focus")),
             category=category, persona=persona,
         )
 
@@ -949,7 +922,6 @@ class WardrobePlugin(Star):
             "description": best.get("description", ""),
             "persona": best.get("persona", ""),
             "image_id": best["id"],
-            "ref_strength": best.get("ref_strength", "style"),
         }
 
     async def _do_search_image(
@@ -1210,5 +1182,8 @@ class WardrobePlugin(Star):
             angle = attrs.get("camera_angle", "")
             if angle:
                 lines.append(f"角度：{angle}")
+            ref_strength = attrs.get("ref_strength", "style")
+            ref_labels = {"full": "📸完整参考", "style": "🎨风格参考", "reimagine": "🔄重构"}
+            lines.append(f"参考强度：{ref_labels.get(ref_strength, ref_strength)}")
 
         return "\n".join(lines)
