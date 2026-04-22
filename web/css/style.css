@@ -970,6 +970,24 @@ html, body {
   font-weight:500;
 }
 
+.image-card-rs {
+  position:absolute; top:8px; left:8px;
+  font-size:13px; z-index:2;
+  pointer-events:none;
+  width:24px; height:24px;
+  display:flex; align-items:center; justify-content:center;
+  border-radius:6px;
+  font-weight:600;
+}
+.image-card-rs-full {
+  background:rgba(255,143,163,0.9);
+  color:#fff;
+}
+.image-card-rs-reimagine {
+  background:rgba(110,207,173,0.9);
+  color:#fff;
+}
+
 .image-card-uses {
   font-size:11px;
   opacity:0.8;

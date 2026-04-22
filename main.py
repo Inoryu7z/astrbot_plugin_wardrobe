@@ -211,19 +211,29 @@ class WardrobePlugin(Star):
         try:
             records = await self.db.get_all_records()
             need_reanalyze = []
+            need_ref_strength_backfill = []
             for rec in records:
                 exp = rec.get("exposure_features", [])
                 key = rec.get("key_features", [])
                 prop = rec.get("prop_objects", [])
                 allure = rec.get("allure_features", [])
                 bf = rec.get("body_focus", [])
+                rs = rec.get("ref_strength", "style")
                 if (isinstance(exp, list) and not exp) and (isinstance(key, list) and not key) and (isinstance(prop, list) and not prop) and (isinstance(allure, list) and not allure) and (isinstance(bf, list) and not bf):
                     need_reanalyze.append(rec)
+                elif rs == "style" and rec.get("category", "") == "人物":
+                    has_features = (isinstance(exp, list) and exp) or (isinstance(key, list) and key) or (isinstance(prop, list) and prop) or (isinstance(allure, list) and allure) or (isinstance(bf, list) and bf)
+                    if has_features:
+                        need_ref_strength_backfill.append(rec)
 
-            if not need_reanalyze:
+            if not need_reanalyze and not need_ref_strength_backfill:
                 return
 
-            logger.info("[Wardrobe] 发现 %d 张旧图需要补充分析新字段，开始逐张重分析...", len(need_reanalyze))
+            if need_reanalyze:
+                logger.info("[Wardrobe] 发现 %d 张旧图需要补充分析新字段，开始逐张重分析...", len(need_reanalyze))
+
+            if need_ref_strength_backfill:
+                logger.info("[Wardrobe] 发现 %d 张人物图需要回填 ref_strength，开始逐张重分析...", len(need_ref_strength_backfill))
 
             primary = str(self._cfg("save_provider_id", "") or "").strip()
             secondary = str(self._cfg("save_secondary_provider_id", "") or "").strip()
@@ -310,6 +320,54 @@ class WardrobePlugin(Star):
                     logger.warning("[Wardrobe] 旧图重分析异常 id=%s error=%s", image_id, e)
 
             logger.info("[Wardrobe] 旧图重分析完成: 成功%d 失败%d 共%d张", success, failed, len(need_reanalyze))
+
+            if need_ref_strength_backfill:
+                rs_success = 0
+                rs_failed = 0
+                for i, rec in enumerate(need_ref_strength_backfill):
+                    image_id = rec.get("id", "")
+                    image_path_str = rec.get("image_path", "")
+                    if not image_path_str:
+                        continue
+
+                    path = self.store.get_image_path(image_path_str)
+                    if not path.exists():
+                        continue
+
+                    try:
+                        import aiofiles
+                        async with aiofiles.open(path, "rb") as f:
+                            image_bytes = await f.read()
+
+                        if not image_bytes:
+                            continue
+
+                        attrs = await self.analyzer.analyze_image(
+                            image_bytes,
+                            primary_provider_id=primary,
+                            secondary_provider_id=secondary,
+                            timeout_seconds=timeout,
+                        )
+
+                        if not attrs:
+                            rs_failed += 1
+                            continue
+
+                        new_rs = ensure_str(attrs.get("ref_strength", "style"))
+                        if new_rs and new_rs != "style":
+                            await self.db.update_image(image_id, ref_strength=new_rs)
+                            rs_success += 1
+                        else:
+                            rs_failed += 1
+
+                        if i < len(need_ref_strength_backfill) - 1:
+                            await asyncio.sleep(2)
+
+                    except Exception as e:
+                        rs_failed += 1
+                        logger.warning("[Wardrobe] ref_strength 回填异常 id=%s error=%s", image_id, e)
+
+                logger.info("[Wardrobe] ref_strength 回填完成: 成功%d 失败%d 共%d张", rs_success, rs_failed, len(need_ref_strength_backfill))
         except Exception as e:
             logger.error("[Wardrobe] 旧图重分析任务异常: %s", e, exc_info=True)
 

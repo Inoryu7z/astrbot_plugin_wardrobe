@@ -144,12 +144,13 @@ class WardrobeWebServer:
             shot_size = request.args.get("shot_size", "")
             atmosphere = request.args.get("atmosphere", "")
             favorite = request.args.get("favorite", "")
+            ref_strength = request.args.get("ref_strength", "")
             sort_by = request.args.get("sort_by", "created_at")
             lightweight = request.args.get("lightweight", "") == "1"
 
             offset = (page - 1) * per_page
 
-            needs_search = style or scene or atmosphere or shot_size or persona or category or (favorite in ("favorite", "like"))
+            needs_search = style or scene or atmosphere or shot_size or persona or category or (favorite in ("favorite", "like")) or ref_strength
             if needs_search:
                 style_list = [style] if style else None
                 scene_list = [scene] if scene else None
@@ -162,6 +163,7 @@ class WardrobeWebServer:
                     atmosphere=atmosphere_list,
                     shot_size=shot_size or None,
                     favorite=favorite if favorite in ("favorite", "like") else None,
+                    ref_strength=ref_strength or None,
                     sort_by=sort_by,
                     limit=per_page,
                     offset=offset,
@@ -181,6 +183,7 @@ class WardrobeWebServer:
                     shot_size=shot_size or None,
                     persona=persona or None,
                     favorite=favorite if favorite in ("favorite", "like") else None,
+                    ref_strength=ref_strength or None,
                     sort_by=sort_by,
                     limit=per_page,
                     offset=offset,
@@ -195,6 +198,7 @@ class WardrobeWebServer:
                 images = await self.plugin.db.list_images(
                     category=category or None, shot_size=shot_size or None,
                     favorite=favorite if favorite in ("favorite", "like") else None,
+                    ref_strength=ref_strength or None,
                     sort_by=sort_by,
                     limit=per_page, offset=offset
                 )

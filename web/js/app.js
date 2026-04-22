@@ -42,7 +42,7 @@
 
   let state={
     page:1, perPage:24, total:0,
-    category:'', persona:'', style:'', scene:'', shot_size:'', atmosphere:'', favorite:'', sort_by:'created_at',
+    category:'', persona:'', style:'', scene:'', shot_size:'', atmosphere:'', favorite:'', ref_strength:'', sort_by:'created_at',
     searchQuery:'', batchMode:false,
     selectedIds:new Set(),
     currentImageId:null,
@@ -154,7 +154,7 @@
     if(state.searchQuery){
       url=`/api/search?q=${encodeURIComponent(state.searchQuery)}&persona=${encodeURIComponent(state.persona)}&category=${encodeURIComponent(state.category)}&favorite=${encodeURIComponent(state.favorite)}&limit=${state.perPage}`;
     }else{
-      url=`/api/images?page=${state.page}&per_page=${state.perPage}&category=${encodeURIComponent(state.category)}&persona=${encodeURIComponent(state.persona)}&style=${encodeURIComponent(state.style)}&scene=${encodeURIComponent(state.scene)}&shot_size=${encodeURIComponent(state.shot_size)}&atmosphere=${encodeURIComponent(state.atmosphere)}&favorite=${encodeURIComponent(state.favorite)}&sort_by=${encodeURIComponent(state.sort_by)}&lightweight=1`;
+      url=`/api/images?page=${state.page}&per_page=${state.perPage}&category=${encodeURIComponent(state.category)}&persona=${encodeURIComponent(state.persona)}&style=${encodeURIComponent(state.style)}&scene=${encodeURIComponent(state.scene)}&shot_size=${encodeURIComponent(state.shot_size)}&atmosphere=${encodeURIComponent(state.atmosphere)}&favorite=${encodeURIComponent(state.favorite)}&ref_strength=${encodeURIComponent(state.ref_strength)}&sort_by=${encodeURIComponent(state.sort_by)}&lightweight=1`;
     }
 
     const resp=await api(url);
@@ -200,9 +200,11 @@
       const favMark=favIcon?`<div class="image-card-fav">${favIcon}</div>`:'';
       const useCount=img.use_count?`<span class="image-card-uses">🔥${img.use_count}</span>`:'';
       const similarityMark=img._similarity!=null?`<div class="image-card-similarity">${(img._similarity*100).toFixed(0)}%</div>`:'';
+      const rsMark=img.ref_strength&&img.ref_strength!=='style'&&img.category==='人物'?`<div class="image-card-rs image-card-rs-${esc(img.ref_strength)}">${img.ref_strength==='full'?'📸':img.ref_strength==='reimagine'?'🔄':''}</div>`:'';
       card.innerHTML=`
         ${favMark}
         ${similarityMark}
+        ${rsMark}
         <img src="/api/image-file/${img.id}" loading="lazy" alt="" onerror="this.src='data:image/svg+xml,<svg xmlns=%22http://www.w3.org/2000/svg%22 width=%22180%22 height=%22240%22><rect fill=%22%23F8F0F4%22 width=%22180%22 height=%22240%22/><text x=%2290%22 y=%22125%22 text-anchor=%22middle%22 fill=%22%23C8B8D0%22 font-size=%2214%22>加载失败</text></svg>'">
         <div class="image-card-overlay">
           <span class="image-card-category">${esc(img.category||'')}</span>
@@ -1038,6 +1040,10 @@
 
     $('#sortByFilter').addEventListener('change',e=>{
       state.sort_by=e.target.value;state.page=1;state.allLoaded=false;loadImages(true);
+    });
+
+    $('#refStrengthFilter').addEventListener('change',e=>{
+      state.ref_strength=e.target.value;state.page=1;state.allLoaded=false;loadImages(true);
     });
 
     $('#poolsBtn').addEventListener('click',()=>{$('#poolsModal').classList.remove('hidden');loadPoolsModal();});
