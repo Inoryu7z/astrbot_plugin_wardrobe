@@ -611,6 +611,7 @@ class WardrobePlugin(Star):
                 created_by=created_by,
                 persona=persona,
                 file_hash=file_hash,
+                ref_strength="style",
             )
             await self._index_to_vector(image_id, user_description or "模型分析失败，无描述", user_description,
                                          category="人物", persona=persona)
@@ -650,6 +651,7 @@ class WardrobePlugin(Star):
             created_by=created_by,
             persona=persona,
             file_hash=file_hash,
+            ref_strength=ensure_str(attrs.get("ref_strength", "style")),
         )
 
         desc_text = ensure_str(attrs.get("description"))
