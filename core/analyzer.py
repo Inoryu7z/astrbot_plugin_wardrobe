@@ -26,7 +26,7 @@ ANALYZE_SYSTEM_PROMPT = """# 角色
 {{
   "category": "人物 或 衣服",
   "style": ["优先从风格池选择，也可自行填写，可多选"],
-  "clothing_type": "优先从服装类型池选择，也可自行填写",
+  "clothing_type": "优先从服装类型池选择，也可自行填写。多个服装类型用顿号分隔，如：跳裙（JSK）、连裤袜、高跟鞋",
   "exposure_level": "从暴露程度池中选择",
   "exposure_features": ["非常规暴露的身体部位"],
   "key_features": ["3-5个最突出的视觉标识"],
