@@ -73,7 +73,11 @@
     "description": "取图人格搜索策略",
     "hint": "exclude_all：优先搜无人格图，找不到再搜其他人格的图；self_first：优先搜当前人格图，找不到再搜全局",
     "type": "string",
-    "default": "exclude_all"
+    "default": "exclude_all",
+    "options": [
+      "exclude_all",
+      "self_first"
+    ]
   },
   "max_image_size_mb": {
     "description": "图片大小限制(MB)",
