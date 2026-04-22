@@ -1,3 +1,28 @@
+### v2.2.4
+
+**🐛 Bug 修复**
+
+* 修复版本号不一致：main.py 版本号与 metadata.yaml 对齐
+* 修复 `search_count` 缺少 `ref_strength` 参数导致 WebUI 分页总数不准确
+* 修复备份导出同步阻塞事件循环：大量图片时 WebUI 不再卡死
+* 修复 `create_task` 无引用导致后台任务可能被 GC 回收
+* 修复 `_wardrobe_plugin` 从未被设置导致自定义池子在搜索中永远不生效
+* 修复 `vector_searcher.terminate` 不尝试持久化 FAISS 索引
+* 修复 `analyzer.py` 重复 `import os`
+* 修复 `metadata.yaml` 缺少 `dependencies` 字段
+
+**✨ 新功能**
+
+* 新增 `ref_strength_reason` 字段：模型分析时输出评级理由，仅在日志和 WebUI 可见，取图时屏蔽
+* `ref_strength` 按钮置顶：从字段列表底部移至详情弹窗底部操作栏（删除/重新分析右方），点击循环切换
+
+**🔧 优化**
+
+* 备份导出改为异步线程执行（`asyncio.to_thread`），避免阻塞事件循环
+* 后台任务改用 `_spawn_bg_task` 保存引用，防止被垃圾回收
+
+---
+
 ### v2.2.3
 
 **🔧 优化**
