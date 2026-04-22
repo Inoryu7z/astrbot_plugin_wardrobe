@@ -675,10 +675,20 @@ class WardrobeDatabase:
             order_clause = "created_at DESC"
         async with aiosqlite.connect(self.db_path) as db:
             db.row_factory = aiosqlite.Row
-            sql = f"SELECT id, category, persona, image_path, created_at, favorite, use_count, ref_strength FROM images {where_clause} ORDER BY {order_clause} LIMIT ? OFFSET ?"
+            sql = f"SELECT id, category, style, persona, image_path, created_at, favorite, use_count, ref_strength FROM images {where_clause} ORDER BY {order_clause} LIMIT ? OFFSET ?"
             async with db.execute(sql, params) as cursor:
                 rows = await cursor.fetchall()
-                return [dict(row) for row in rows]
+                results = []
+                for row in rows:
+                    d = dict(row)
+                    style_val = d.get("style")
+                    if isinstance(style_val, str):
+                        try:
+                            d["style"] = json.loads(style_val)
+                        except (json.JSONDecodeError, TypeError):
+                            d["style"] = []
+                    results.append(d)
+                return results
 
     async def get_all_records(self) -> list[dict[str, Any]]:
         async with aiosqlite.connect(self.db_path) as db:
