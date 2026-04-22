@@ -10,6 +10,22 @@
 * 修复 `vector_searcher.terminate` 不尝试持久化 FAISS 索引
 * 修复 `analyzer.py` 重复 `import os`
 * 修复 `metadata.yaml` 缺少 `dependencies` 字段
+* 修复删除图片时未清理向量索引（命令删除 + WebUI 批量删除）
+* 修复重分析时未更新 `ref_strength_reason` 字段（旧图重分析 + WebUI 重新分析）
+* 修复 ref_strength 回填逻辑：模型返回 style 时不应算失败
+* 修复 WebUI 编辑/切换参考强度后卡片不实时更新
+
+**✨ 新功能**
+
+* 新增 `ref_strength_reason` 字段：模型分析时输出评级理由，仅在日志和 WebUI 可见，取图时屏蔽
+* `ref_strength` 按钮置顶：从字段列表底部移至详情弹窗底部操作栏，面板式三档选择
+* 卡片显示风格标签：图片网格卡片上显示前两个风格标签
+* 轻量列表 API 返回 `style` 字段
+
+**🔧 优化**
+
+* 备份导出改为异步线程执行（`asyncio.to_thread`），避免阻塞事件循环
+* 后台任务改用 `_spawn_bg_task` 保存引用，防止被垃圾回收
 
 **✨ 新功能**
 
