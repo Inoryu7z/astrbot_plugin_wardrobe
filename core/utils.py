@@ -77,3 +77,19 @@ def mime_to_ext(mime: str) -> str:
         "image/webp": "webp",
         "image/bmp": "bmp",
     }.get(mime, "jpg")
+
+
+def ensure_list(v) -> list:
+    if isinstance(v, list):
+        return v
+    if isinstance(v, str) and v:
+        return [v]
+    return []
+
+
+def ensure_str(v) -> str:
+    if isinstance(v, str):
+        return v
+    if isinstance(v, list) and v:
+        return v[0]
+    return ""

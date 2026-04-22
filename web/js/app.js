@@ -36,12 +36,11 @@
     {key:'user_tags',label:'用户标签',type:'text'},
     {key:'persona',label:'人格',type:'text'},
     {key:'favorite',label:'收藏',type:'select',options:['none','favorite','like']},
-    {key:'ref_strength',label:'参考强度',type:'select',options:['style','full','reimagine']},
   ];
 
   let state={
     page:1, perPage:24, total:0,
-    category:'', persona:'', style:'', scene:'', shot_size:'', atmosphere:'', favorite:'', ref_strength:'', sort_by:'created_at',
+    category:'', persona:'', style:'', scene:'', shot_size:'', atmosphere:'', favorite:'', sort_by:'created_at',
     searchQuery:'', batchMode:false,
     selectedIds:new Set(),
     currentImageId:null,
@@ -153,7 +152,7 @@
     if(state.searchQuery){
       url=`/api/search?q=${encodeURIComponent(state.searchQuery)}&persona=${encodeURIComponent(state.persona)}&category=${encodeURIComponent(state.category)}&favorite=${encodeURIComponent(state.favorite)}&limit=${state.perPage}`;
     }else{
-      url=`/api/images?page=${state.page}&per_page=${state.perPage}&category=${encodeURIComponent(state.category)}&persona=${encodeURIComponent(state.persona)}&style=${encodeURIComponent(state.style)}&scene=${encodeURIComponent(state.scene)}&shot_size=${encodeURIComponent(state.shot_size)}&atmosphere=${encodeURIComponent(state.atmosphere)}&favorite=${encodeURIComponent(state.favorite)}&ref_strength=${encodeURIComponent(state.ref_strength)}&sort_by=${encodeURIComponent(state.sort_by)}&lightweight=1`;
+      url=`/api/images?page=${state.page}&per_page=${state.perPage}&category=${encodeURIComponent(state.category)}&persona=${encodeURIComponent(state.persona)}&style=${encodeURIComponent(state.style)}&scene=${encodeURIComponent(state.scene)}&shot_size=${encodeURIComponent(state.shot_size)}&atmosphere=${encodeURIComponent(state.atmosphere)}&favorite=${encodeURIComponent(state.favorite)}&sort_by=${encodeURIComponent(state.sort_by)}&lightweight=1`;
     }
 
     const resp=await api(url);
@@ -199,11 +198,9 @@
       const favMark=favIcon?`<div class="image-card-fav">${favIcon}</div>`:'';
       const useCount=img.use_count?`<span class="image-card-uses">🔥${img.use_count}</span>`:'';
       const similarityMark=img._similarity!=null?`<div class="image-card-similarity">${(img._similarity*100).toFixed(0)}%</div>`:'';
-      const refStrengthMark=img.ref_strength&&img.ref_strength!=='style'?`<div class="image-card-ref-strength ref-strength-${img.ref_strength}">${img.ref_strength==='full'?'📸完整参考':img.ref_strength==='reimagine'?'🔄重构':''}</div>`:'';
       card.innerHTML=`
         ${favMark}
         ${similarityMark}
-        ${refStrengthMark}
         <img src="/api/image-file/${img.id}" loading="lazy" alt="" onerror="this.src='data:image/svg+xml,<svg xmlns=%22http://www.w3.org/2000/svg%22 width=%22180%22 height=%22240%22><rect fill=%22%23F8F0F4%22 width=%22180%22 height=%22240%22/><text x=%2290%22 y=%22125%22 text-anchor=%22middle%22 fill=%22%23C8B8D0%22 font-size=%2214%22>加载失败</text></svg>'">
         <div class="image-card-overlay">
           <span class="image-card-category">${esc(img.category||'')}</span>
@@ -595,12 +592,13 @@
     panel.classList.remove('hidden');
     const done=state.batchOps.filter(o=>o.status==='done').length;
     const failed=state.batchOps.filter(o=>o.status==='failed').length;
+    const skipped=state.batchOps.filter(o=>o.status==='skipped').length;
     const pending=state.batchOps.filter(o=>o.status==='pending').length;
     const analyzing=state.batchOps.filter(o=>o.status==='analyzing').length;
-    summary.textContent=`共${state.batchOps.length}张 | ✓${done} ✗${failed} ⏳${pending+analyzing}`;
+    summary.textContent=`共${state.batchOps.length}张 | ✓${done} ✗${failed} ⊘${skipped} ⏳${pending+analyzing}`;
     list.innerHTML=state.batchOps.map((o,idx)=>{
-      const icon=o.status==='done'?'✓':o.status==='failed'?'✗':o.status==='analyzing'?'⏳':'○';
-      const cls=o.status==='done'?'op-done':o.status==='failed'?'op-fail':o.status==='analyzing'?'op-active':'op-pending';
+      const icon=o.status==='done'?'✓':o.status==='failed'?'✗':o.status==='skipped'?'⊘':o.status==='analyzing'?'⏳':'○';
+      const cls=o.status==='done'?'op-done':o.status==='failed'?'op-fail':o.status==='skipped'?'op-skip':o.status==='analyzing'?'op-active':'op-pending';
       const retryBtn=o.status==='failed'?`<button class="op-retry-btn" onclick="retrySingleOp(${idx})">↻</button>`:'';
       return `<div class="batch-op-item ${cls}"><span class="op-icon">${icon}</span><span class="op-id">${o.id.length>12?o.id.slice(0,8):o.id}</span>${retryBtn}</div>`;
     }).join('');
@@ -772,8 +770,7 @@
               if(resp&&typeof resp.json==='function'&&!resp.error){
                 const data=await resp.json();
                 if(data.duplicate){
-                  state.batchUploadProgress.failed++;
-                  state.batchOps[i].status='failed';
+                  state.batchOps[i].status='skipped';
                 }else if(data.success){
                   state.batchUploadProgress.uploaded++;
                   state.batchOps[i].status='done';
@@ -806,7 +803,11 @@
 
         const up=state.batchUploadProgress.uploaded;
         const fl=state.batchUploadProgress.failed;
-        toast(`批量上传完成：${up}成功，${fl}失败`,up>0?'success':'error');
+        const sk=state.batchOps.filter(o=>o.status==='skipped').length;
+        const parts=[`${up}成功`];
+        if(fl)parts.push(`${fl}失败`);
+        if(sk)parts.push(`${sk}跳过(重复)`);
+        toast(`批量上传完成：${parts.join('，')}`,up>0?'success':'error');
         state.batchUploading=false;
         updateBatchUploadIndicator();
         state.page=1;state.allLoaded=false;loadImages(true);loadStats();
@@ -1030,12 +1031,6 @@
     $$('input[name="favorite"]').forEach(inp=>{
       inp.addEventListener('change',()=>{
         state.favorite=inp.value;state.page=1;state.allLoaded=false;loadImages(true);
-      });
-    });
-
-    $$('input[name="ref_strength"]').forEach(inp=>{
-      inp.addEventListener('change',()=>{
-        state.ref_strength=inp.value;state.page=1;state.allLoaded=false;loadImages(true);
       });
     });
 

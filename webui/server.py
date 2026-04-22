@@ -144,13 +144,12 @@ class WardrobeWebServer:
             shot_size = request.args.get("shot_size", "")
             atmosphere = request.args.get("atmosphere", "")
             favorite = request.args.get("favorite", "")
-            ref_strength = request.args.get("ref_strength", "")
             sort_by = request.args.get("sort_by", "created_at")
             lightweight = request.args.get("lightweight", "") == "1"
 
             offset = (page - 1) * per_page
 
-            needs_search = style or scene or atmosphere or shot_size or persona or category or (favorite in ("favorite", "like")) or (ref_strength in ("style", "full", "reimagine"))
+            needs_search = style or scene or atmosphere or shot_size or persona or category or (favorite in ("favorite", "like"))
             if needs_search:
                 style_list = [style] if style else None
                 scene_list = [scene] if scene else None
@@ -163,7 +162,6 @@ class WardrobeWebServer:
                     atmosphere=atmosphere_list,
                     shot_size=shot_size or None,
                     favorite=favorite if favorite in ("favorite", "like") else None,
-                    ref_strength=ref_strength if ref_strength in ("style", "full", "reimagine") else None,
                     sort_by=sort_by,
                     limit=per_page,
                     offset=offset,
@@ -176,7 +174,6 @@ class WardrobeWebServer:
                     atmosphere=atmosphere_list,
                     shot_size=shot_size or None,
                     favorite=favorite if favorite in ("favorite", "like") else None,
-                    ref_strength=ref_strength if ref_strength in ("style", "full", "reimagine") else None,
                 )
             elif lightweight:
                 images = await self.plugin.db.list_images_lightweight(
@@ -262,7 +259,7 @@ class WardrobeWebServer:
                 elif key in ("category", "clothing_type", "exposure_level", "pose_type",
                              "body_orientation", "dynamic_level", "shot_size", "camera_angle",
                              "expression", "color_tone", "composition", "background",
-                             "description", "user_tags", "persona", "favorite", "ref_strength"):
+                             "description", "user_tags", "persona", "favorite"):
                     update_data[key] = str(val) if val is not None else ""
 
             if not update_data:
@@ -339,21 +336,11 @@ class WardrobeWebServer:
                     logger.warning("[Wardrobe] WebUI重新分析失败: 模型返回空结果 id=%s", image_id)
                     return jsonify({"error": "模型分析失败"}), 500
 
-                def _ensure_list(v):
-                    if isinstance(v, list):
-                        return v
-                    if isinstance(v, str) and v:
-                        return [v]
-                    return []
-
-                def _ensure_str(v):
-                    if v is None:
-                        return ""
-                    return str(v)
+                from ..core.utils import ensure_list
 
                 update_data = {}
                 for field in ("exposure_features", "key_features", "prop_objects", "allure_features", "body_focus"):
-                    update_data[field] = _ensure_list(attrs.get(field))
+                    update_data[field] = ensure_list(attrs.get(field))
 
                 for field in ("style", "scene", "atmosphere", "action_style",
                               "clothing_type", "exposure_level", "pose_type",
@@ -366,10 +353,6 @@ class WardrobeWebServer:
                             update_data[field] = val
                         else:
                             update_data[field] = str(val)
-
-                rs = str(attrs.get("ref_strength", "") or "").strip().lower()
-                if rs in ("full", "reimagine", "style"):
-                    update_data["ref_strength"] = rs
 
                 if user_description:
                     update_data["user_tags"] = user_description
