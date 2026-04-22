@@ -69,6 +69,12 @@
     "type": "int",
     "default": 1
   },
+  "search_prioritize_unused": {
+    "description": "取图优先低热度",
+    "hint": "开启后，取图时优先返回使用次数少的图片，让还没被用过的图更容易被选中",
+    "type": "bool",
+    "default": false
+  },
   "search_persona_mode": {
     "description": "取图人格搜索策略",
     "hint": "exclude_all：优先搜无人格图，找不到再搜其他人格的图；self_first：优先搜当前人格图，找不到再搜全局",
