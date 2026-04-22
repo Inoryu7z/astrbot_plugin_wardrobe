@@ -8,6 +8,7 @@
     'body_orientation':'朝向','dynamic_level':'动态程度','action_style':'动作风格',
     'shot_size':'景别','camera_angle':'角度','expression':'表情',
     'exposure_features':'暴露特征','key_features':'关键特征','prop_objects':'道具物品','allure_features':'魅力特征','body_focus':'身体焦点',
+    'ref_strength':'参考强度',
   };
 
   const FIELD_DEFS=[
@@ -36,6 +37,7 @@
     {key:'user_tags',label:'用户标签',type:'text'},
     {key:'persona',label:'人格',type:'text'},
     {key:'favorite',label:'收藏',type:'select',options:['none','favorite','like']},
+    {key:'ref_strength',label:'参考强度',type:'select',options:['full','style','reimagine']},
   ];
 
   let state={

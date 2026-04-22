@@ -275,7 +275,7 @@ class WardrobePlugin(Star):
                                   "clothing_type", "exposure_level", "pose_type",
                                   "body_orientation", "dynamic_level", "shot_size",
                                   "camera_angle", "expression", "color_tone",
-                                  "composition", "background", "description", "category"):
+                                  "composition", "background", "description", "category", "ref_strength"):
                         val = attrs.get(field)
                         if val is not None:
                             if isinstance(val, list):
@@ -924,6 +924,7 @@ class WardrobePlugin(Star):
             "description": best.get("description", ""),
             "persona": best.get("persona", ""),
             "image_id": best["id"],
+            "ref_strength": best.get("ref_strength", "style"),
         }
 
     async def _do_search_image(
