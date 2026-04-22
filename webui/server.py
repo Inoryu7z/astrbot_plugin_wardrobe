@@ -280,6 +280,8 @@ class WardrobeWebServer:
                             exposure_features=updated_image.get("exposure_features", []),
                             key_features=updated_image.get("key_features", []),
                             prop_objects=updated_image.get("prop_objects", []),
+                            allure_features=updated_image.get("allure_features", []),
+                            body_focus=updated_image.get("body_focus", []),
                             category=updated_image.get("category", ""),
                             persona=updated_image.get("persona", ""),
                         )
@@ -487,11 +489,14 @@ class WardrobeWebServer:
             if not query:
                 return jsonify({"images": []})
 
+            exclude_persona = request.args.get("exclude_persona", "")
+
             vec_results = []
             if self.plugin.vector_searcher and self.plugin.vector_searcher.available:
                 try:
                     wardrobe_results = await self.plugin.vector_searcher.search(
                         query=query, k=limit, persona=persona or "",
+                        exclude_persona=exclude_persona or "",
                     )
                     if wardrobe_results:
                         for wid, similarity in wardrobe_results:
@@ -515,6 +520,7 @@ class WardrobeWebServer:
                 keywords=keywords,
                 category=category or None,
                 persona=persona or None,
+                exclude_persona=exclude_persona or None,
                 limit=limit,
             )
             logger.info("[Wardrobe] WebUI搜索LIKE检索: %d张 query=%s", len(results), query[:50])
@@ -696,6 +702,13 @@ class WardrobeWebServer:
                     await asyncio.to_thread(_copy_images)
 
                 imported = await self.plugin.db.import_records(records, skip_existing=True)
+
+                if imported > 0 and self.plugin.vector_searcher and self.plugin.vector_searcher.available:
+                    try:
+                        await self.plugin.vector_searcher.index_existing_images()
+                        logger.info("[Wardrobe] 备份恢复后向量索引重建完成")
+                    except Exception as e:
+                        logger.warning("[Wardrobe] 备份恢复后向量索引重建失败: %s", e)
 
                 logger.info("[Wardrobe] 备份恢复: 导入%d条记录, 复制%d个图片文件", imported, copied_files)
                 return jsonify({

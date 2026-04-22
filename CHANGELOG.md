@@ -1,3 +1,17 @@
+### v2.2.2
+
+**✨ 新功能**
+
+* 新增重排序模型集成：向量检索后可选 Rerank 精排，进一步提升搜索精度
+* 新增 `rerank_provider_id`、`rerank_top_k`、`rerank_min_candidates` 三个配置项
+
+**🐛 Bug 修复**
+
+* 修复版本号不一致：metadata.yaml 与 @register 版本号对齐
+* 修复 WebUI 搜索缺少 `exclude_persona` 参数
+* 修复编辑后向量索引重建漏传 `allure_features` 和 `body_focus`
+* 修复备份恢复后向量索引未重建
+
 ### v2.2.1
 
 **✨ 新功能**

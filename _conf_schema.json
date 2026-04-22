@@ -33,6 +33,24 @@
     "type": "string",
     "default": ""
   },
+  "rerank_provider_id": {
+    "description": "重排序模型",
+    "hint": "用于对向量检索结果做精排的 Rerank 模型 ID。配置后会在向量检索后对候选结果重新打分排序，进一步提升搜索精度；未配置则使用向量相似度排序。",
+    "type": "string",
+    "default": ""
+  },
+  "rerank_top_k": {
+    "description": "重排序保留数量",
+    "hint": "重排序后保留的结果数量。0 表示不限制，仅重新排序；设为具体数值则只保留最相关的前 N 个结果",
+    "type": "int",
+    "default": 0
+  },
+  "rerank_min_candidates": {
+    "description": "重排序最低候选数",
+    "hint": "候选结果少于此数量时不触发重排序，避免少量结果做无意义重排",
+    "type": "int",
+    "default": 3
+  },
   "vector_search_min_similarity": {
     "description": "向量检索相似度阈值",
     "hint": "0.0-1.0，低于此阈值的结果会被过滤并回退到关键词搜索。值越高越严格，建议 0.4-0.6",
