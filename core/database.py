@@ -603,6 +603,9 @@ class WardrobeDatabase:
         if favorite and favorite in ("favorite", "like"):
             conditions.append("favorite = ?")
             params.append(favorite)
+        if ref_strength:
+            conditions.append("ref_strength = ?")
+            params.append(ref_strength)
         where_clause = ""
         if conditions:
             where_clause = "WHERE " + " AND ".join(conditions)
@@ -650,6 +653,9 @@ class WardrobeDatabase:
         if favorite and favorite in ("favorite", "like"):
             conditions.append("favorite = ?")
             params.append(favorite)
+        if ref_strength:
+            conditions.append("ref_strength = ?")
+            params.append(ref_strength)
         where_clause = ""
         if conditions:
             where_clause = "WHERE " + " AND ".join(conditions)
@@ -662,7 +668,7 @@ class WardrobeDatabase:
             order_clause = "created_at DESC"
         async with aiosqlite.connect(self.db_path) as db:
             db.row_factory = aiosqlite.Row
-            sql = f"SELECT id, category, persona, image_path, created_at, favorite, use_count FROM images {where_clause} ORDER BY {order_clause} LIMIT ? OFFSET ?"
+            sql = f"SELECT id, category, persona, image_path, created_at, favorite, use_count, ref_strength FROM images {where_clause} ORDER BY {order_clause} LIMIT ? OFFSET ?"
             async with db.execute(sql, params) as cursor:
                 rows = await cursor.fetchall()
                 return [dict(row) for row in rows]
