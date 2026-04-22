@@ -285,23 +285,24 @@ class ImageSearcher:
 
         logger.info("[Wardrobe] 向量检索开始: query=%s k=%d persona=%s exclude_persona=%s",
                     user_query[:100], k, persona or "全局", exclude_persona or "无")
-        wardrobe_ids = await self.vector_searcher.search(
+        wardrobe_results = await self.vector_searcher.search(
             query=user_query,
             k=k,
             persona=persona,
             exclude_persona=exclude_persona,
         )
-        if not wardrobe_ids:
+        if not wardrobe_results:
             logger.info("[Wardrobe] 向量检索无结果: query=%s", user_query[:100])
             return []
 
         results = []
-        for wid in wardrobe_ids:
+        for wid, similarity in wardrobe_results:
             img = await self.db.get_image(wid)
             if img:
+                img["_similarity"] = similarity
                 results.append(img)
         logger.info("[Wardrobe] 向量检索命中: %d张 (原始返回%d个ID, 数据库匹配%d张)",
-                    len(results), len(wardrobe_ids), len(results))
+                    len(results), len(wardrobe_results), len(results))
         return results
 
     async def _query_candidates_excluding_persona(

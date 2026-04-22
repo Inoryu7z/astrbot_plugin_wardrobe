@@ -483,17 +483,18 @@ class WardrobeWebServer:
             vec_results = []
             if self.plugin.vector_searcher and self.plugin.vector_searcher.available:
                 try:
-                    wardrobe_ids = await self.plugin.vector_searcher.search(
+                    wardrobe_results = await self.plugin.vector_searcher.search(
                         query=query, k=limit, persona=persona or "",
                     )
-                    if wardrobe_ids:
-                        for wid in wardrobe_ids:
+                    if wardrobe_results:
+                        for wid, similarity in wardrobe_results:
                             img = await self.plugin.db.get_image(wid)
                             if img:
                                 if category and img.get("category") != category:
                                     continue
                                 if favorite in ("favorite", "like") and img.get("favorite") != favorite:
                                     continue
+                                img["_similarity"] = similarity
                                 vec_results.append(img)
                         logger.info("[Wardrobe] WebUI搜索向量检索命中: %d张 query=%s", len(vec_results), query[:50])
                 except Exception as e:
