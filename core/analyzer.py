@@ -46,7 +46,8 @@ ANALYZE_SYSTEM_PROMPT = """# 角色
   "composition": "自由填写画面构图描述",
   "background": "自由填写背景环境描述",
   "description": "详细描述图片内容，用于语义检索",
-  "ref_strength": "style / full / reimagine（仅人物分类需要，衣服分类填 style）"
+  "ref_strength": "style / full / reimagine（仅人物分类需要，衣服分类填 style）",
+  "ref_strength_reason": "ref_strength 评级的简要理由，一句话说明为什么是这个等级（仅人物分类需要，衣服分类填空字符串）"
 }}
 ```
 
