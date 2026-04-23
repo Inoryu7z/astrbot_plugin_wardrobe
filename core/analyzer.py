@@ -147,7 +147,9 @@ class ImageAnalyzer:
                     )
                     elapsed = time.perf_counter() - t0
                     logger.info("[Wardrobe] 图片分析完成 provider=%s 耗时=%.2fs", provider_id, elapsed)
-                    return result
+                    if result:
+                        return result
+                    logger.warning("[Wardrobe] 模型返回结果解析失败 provider=%s，尝试下一个模型", provider_id)
                 except asyncio.TimeoutError:
                     logger.warning("[Wardrobe] 存图模型超时 provider=%s", provider_id)
                 except Exception as e:
