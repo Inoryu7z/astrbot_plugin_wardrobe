@@ -93,6 +93,12 @@
     "type": "bool",
     "default": false
   },
+  "search_include_user_tags": {
+    "description": "取图结果包含用户标注",
+    "hint": "开启后，取图返回给聊天模型的描述中会额外包含用户保存时添加的标注信息",
+    "type": "bool",
+    "default": false
+  },
   "search_persona_mode": {
     "description": "取图人格搜索策略",
     "hint": "no_persona_only：只搜无人格图，搜不到直接返回空；fallback_other：优先搜无人格图，搜不到再搜其他人格的图",
