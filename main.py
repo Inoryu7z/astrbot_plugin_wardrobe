@@ -1137,11 +1137,16 @@ class WardrobePlugin(Star):
 
         parts = [f"已发送 {len(image_paths)} 张匹配的图片"]
 
+        include_user_tags = bool(self._cfg("search_include_user_tags", False))
         for i, r in enumerate(results[:3], 1):
             desc = r.get("description", "")
             img_persona = r.get("persona", "")
             if desc:
                 parts.append(f"图片{i}描述：{desc[:200]}")
+            if include_user_tags:
+                ut = r.get("user_tags", "")
+                if ut:
+                    parts.append(f"图片{i}用户标注：{ut[:100]}")
 
         if search_meta.get("persona_mismatch") and current_persona:
             scope = search_meta.get("persona_scope", "global")
