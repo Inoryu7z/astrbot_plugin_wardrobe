@@ -130,6 +130,16 @@
         });
         sel.onchange=()=>{state[cfg.stateKey]=sel.value;state.page=1;state.allLoaded=false;loadImages(true);};
       });
+
+      const statsPersonaSel=$('#statsPersonaFilter');
+      if(statsPersonaSel){
+        statsPersonaSel.innerHTML='<option value="">全部人格</option>';
+        (data.personas||[]).forEach(p=>{
+          const opt=document.createElement('option');
+          opt.value=p;opt.textContent=p;
+          statsPersonaSel.appendChild(opt);
+        });
+      }
     }catch(e){
       console.error('[Wardrobe] loadFilters error:',e);
     }
@@ -1129,6 +1139,252 @@
     });
   }
 
+  let _statsCharts=[];
+
+  const STATS_COLORS=[
+    '#c084fc','#f0abfc','#e879f9','#d946ef','#a855f7',
+    '#818cf8','#93c5fd','#67e8f9','#5eead4','#86efac',
+    '#fde68a','#fdba74','#fca5a5','#f9a8d4','#c4b5fd',
+    '#a5b4fc','#99f6e4','#bef264','#fcd34d','#fda4af',
+  ];
+
+  function _top5(counts){
+    return Object.entries(counts).sort((a,b)=>b[1]-a[1]).slice(0,5);
+  }
+
+  function _renderTop5(containerId,counts,total){
+    const top5=_top5(counts);
+    if(!top5.length){$('#'+containerId).innerHTML='';return;}
+    const html=top5.map(([name,count])=>{
+      const pct=total?((count/total)*100).toFixed(1):'0';
+      return `<span class="stats-top5-tag">${name} <b>${count}</b> <small>${pct}%</small></span>`;
+    }).join('');
+    $('#'+containerId).innerHTML=html;
+  }
+
+  function _mergeSmall(counts,threshold=0.05){
+    const total=Object.values(counts).reduce((a,b)=>a+b,0);
+    if(total===0)return counts;
+    const merged={};
+    let otherCount=0;
+    const otherItems=[];
+    for(const [k,v] of Object.entries(counts)){
+      if(v/total<threshold){
+        otherCount+=v;
+        otherItems.push(k);
+      }else{
+        merged[k]=v;
+      }
+    }
+    if(otherCount>0){
+      merged['其他']=otherCount;
+    }
+    return merged;
+  }
+
+  function _buildTreemapData(counts,groups){
+    const tagToGroup={};
+    for(const [gName,tags] of Object.entries(groups)){
+      for(const t of tags){tagToGroup[t]=gName;}
+    }
+    const groupData={};
+    for(const [gName] of Object.entries(groups)){
+      groupData[gName]={name:gName,children:[]};
+    }
+    if(!groupData['自定义'])groupData['自定义']={name:'自定义',children:[]};
+
+    for(const [tag,count] of Object.entries(counts)){
+      const gName=tagToGroup[tag]||'自定义';
+      if(!groupData[gName])groupData[gName]={name:gName,children:[]};
+      groupData[gName].children.push({name:tag,value:count});
+    }
+
+    return Object.values(groupData).filter(g=>g.children.length>0);
+  }
+
+  function _renderPieChart(containerId,counts,chartTitle,filterKey){
+    const merged=_mergeSmall(counts,0.05);
+    const data=Object.entries(merged).map(([name,value])=>({name,value}));
+    const dom=$('#'+containerId);
+    if(!dom)return;
+    const chart=echarts.init(dom);
+    _statsCharts.push(chart);
+    chart.setOption({
+      title:{text:chartTitle,left:'center',top:0,textStyle:{fontSize:14,color:'#9ca3af'}},
+      tooltip:{trigger:'item',formatter:'{b}: {c} ({d}%)'},
+      color:STATS_COLORS,
+      series:[{
+        type:containerId==='chartShotSize'?'pie':'pie',
+        radius:containerId==='chartShotSize'?'55%':['40%','65%'],
+        center:['50%','55%'],
+        data,
+        label:{
+          formatter:'{b}\n{d}%',
+          fontSize:11,
+          color:'#d1d5db',
+        },
+        emphasis:{
+          itemStyle:{shadowBlur:10,shadowOffsetX:0,shadowColor:'rgba(0,0,0,0.5)'},
+        },
+        animationType:'scale',
+        animationEasing:'elasticOut',
+      }],
+    });
+    chart.on('click',(params)=>{
+      if(params.name&&params.name!=='其他'){
+        _statsChartClick(filterKey,params.name);
+      }
+    });
+  }
+
+  function _renderTreemapChart(containerId,counts,groups,filterKey){
+    const treemapData=_buildTreemapData(counts,groups);
+    const dom=$('#'+containerId);
+    if(!dom)return;
+    const chart=echarts.init(dom);
+    _statsCharts.push(chart);
+    chart.setOption({
+      tooltip:{formatter:function(info){
+        const val=info.value;
+        const treePathInfo=info.treePathInfo;
+        const treePath=[];
+        for(let i=1;i<treePathInfo.length;i++){treePath.push(treePathInfo[i].name);}
+        return treePath.join(' / ')+'<br/>数量: '+val;
+      }},
+      series:[{
+        type:'treemap',
+        data:treemapData,
+        width:'95%',
+        height:'90%',
+        top:10,
+        roam:false,
+        nodeClick:false,
+        breadcrumb:{show:false},
+        label:{
+          show:true,
+          formatter:'{b}',
+          fontSize:11,
+          color:'#fff',
+        },
+        upperLabel:{
+          show:true,
+          height:24,
+          formatter:'{b}',
+          fontSize:12,
+          fontWeight:'bold',
+          color:'#fff',
+        },
+        itemStyle:{
+          borderColor:'#1f2937',
+          borderWidth:2,
+          gapWidth:2,
+        },
+        levels:[{
+          itemStyle:{
+            borderColor:'#374151',
+            borderWidth:3,
+            gapWidth:4,
+          },
+          upperLabel:{show:true},
+        },{
+          colorSaturation:[0.3,0.7],
+          itemStyle:{
+            borderColorSaturation:0.6,
+            gapWidth:1,
+            borderWidth:1,
+          },
+        }],
+        colorMappingBy:'index',
+        color:STATS_COLORS,
+      }],
+      animation:true,
+      animationDuration:800,
+      animationEasing:'cubicOut',
+    });
+    chart.on('click',(params)=>{
+      if(params.data&&params.data.name&&!params.data.children){
+        _statsChartClick(filterKey,params.data.name);
+      }
+    });
+  }
+
+  function _statsChartClick(filterKey,value){
+    toggleStatsView(false);
+    if(filterKey==='style'){state.style=value;$('#styleFilter').value=value;}
+    else if(filterKey==='scene'){state.scene=value;$('#sceneFilter').value=value;}
+    else if(filterKey==='atmosphere'){state.atmosphere=value;$('#atmosphereFilter').value=value;}
+    else if(filterKey==='shot_size'){state.shot_size=value;$('#shotSizeFilter').value=value;}
+    state.page=1;state.allLoaded=false;loadImages(true);
+  }
+
+  async function loadStatsDetail(){
+    _statsCharts.forEach(c=>{try{c.dispose();}catch(e){}});
+    _statsCharts=[];
+
+    const category=$('#statsCategoryFilter').value;
+    const persona=$('#statsPersonaFilter').value;
+    const favorite=$('#statsFavoriteFilter').value;
+
+    const params=new URLSearchParams();
+    if(category)params.set('category',category);
+    if(persona)params.set('persona',persona);
+    if(favorite)params.set('favorite',favorite);
+
+    const resp=await api('/api/stats/detail?'+params.toString());
+    if(!resp||!resp.ok)return;
+    const data=await resp.json();
+
+    $('#statsOverviewTotal').textContent=data.total||0;
+
+    const statsResp=await api('/api/stats');
+    if(statsResp&&statsResp.ok){
+      const stats=await statsResp.json();
+      $('#statsOverviewPerson').textContent=stats.by_category?.人物||0;
+      $('#statsOverviewCloth').textContent=stats.by_category?.衣服||0;
+    }
+
+    _renderTop5('statsTop5ShotSize',data.shot_size||{},data.total);
+    _renderTop5('statsTop5Atmosphere',data.atmosphere||{},data.total);
+    _renderTop5('statsTop5Style',data.style||{},data.total);
+    _renderTop5('statsTop5Scene',data.scene||{},data.total);
+
+    _renderPieChart('chartShotSize',data.shot_size||{},'景别','shot_size');
+    _renderPieChart('chartAtmosphere',data.atmosphere||{},'氛围','atmosphere');
+    _renderTreemapChart('chartStyle',data.style||{},data.style_groups||{},'style');
+    _renderTreemapChart('chartScene',data.scene||{},data.scene_groups||{},'scene');
+  }
+
+  function toggleStatsView(show){
+    const statsView=$('#statsView');
+    const imageGrid=$('#imageGrid');
+    const emptyState=$('#emptyState');
+    const loadMoreSection=$('#loadMoreSection');
+    const loadingIndicator=$('#loadingIndicator');
+    const batchBar=$('#batchBar');
+    const sidebar=$('#sidebar');
+
+    if(show){
+      statsView.classList.remove('hidden');
+      imageGrid.classList.add('hidden');
+      emptyState.classList.add('hidden');
+      loadMoreSection.classList.add('hidden');
+      loadingIndicator.classList.add('hidden');
+      batchBar.classList.add('hidden');
+      sidebar.classList.add('hidden');
+      $('#statsViewBtn').classList.add('btn-accent');
+      $('#statsViewBtn').classList.remove('btn-secondary');
+      loadStatsDetail();
+    }else{
+      statsView.classList.add('hidden');
+      imageGrid.classList.remove('hidden');
+      sidebar.classList.remove('hidden');
+      $('#statsViewBtn').classList.remove('btn-accent');
+      $('#statsViewBtn').classList.add('btn-secondary');
+      _statsCharts.forEach(c=>{try{c.dispose();}catch(e){}});
+      _statsCharts=[];
+    }
+  }
+
   function init(){
     $$('input[name="category"]').forEach(inp=>{
       inp.addEventListener('change',()=>{
@@ -1179,6 +1435,23 @@
       $('#batchModeBtn').classList.toggle('btn-accent',state.batchMode);
       $('#batchModeBtn').classList.toggle('btn-secondary',!state.batchMode);
       updateBatchUI();
+    });
+
+    $('#statsViewBtn').addEventListener('click',()=>{
+      const statsView=$('#statsView');
+      if(statsView.classList.contains('hidden')){
+        toggleStatsView(true);
+      }else{
+        toggleStatsView(false);
+      }
+    });
+    $('#statsBackBtn').addEventListener('click',()=>toggleStatsView(false));
+    $('#statsCategoryFilter').addEventListener('change',()=>loadStatsDetail());
+    $('#statsPersonaFilter').addEventListener('change',()=>loadStatsDetail());
+    $('#statsFavoriteFilter').addEventListener('change',()=>loadStatsDetail());
+
+    window.addEventListener('resize',()=>{
+      _statsCharts.forEach(c=>{try{c.resize();}catch(e){}});
     });
 
     $('#batchDeleteBtn').addEventListener('click',batchDelete);
