@@ -1132,6 +1132,10 @@ html, body {
   animation:fadeIn .3s ease;
 }
 
+.stats-view-active .content {
+  margin-left:0;
+}
+
 .stats-toolbar {
   display:flex; gap:10px; align-items:center;
   margin-bottom:20px; flex-wrap:wrap;

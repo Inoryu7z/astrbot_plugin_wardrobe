@@ -1237,12 +1237,36 @@
     });
   }
 
+  const GROUP_COLORS={
+    '洛丽塔系':'#c084fc','JK系':'#818cf8','汉服系':'#f87171','甜系':'#fb7185',
+    '纯欲系':'#f0abfc','法式优雅系':'#fbbf24','暗黑系':'#6366f1','日韩系':'#34d399',
+    '性感系':'#f472b6','其他':'#94a3b8','自定义':'#a78bfa',
+    '日常':'#34d399','社交':'#fbbf24','拍摄':'#818cf8','季节':'#fb923c',
+    '氛围场景':'#c084fc','私密':'#f472b6',
+  };
+
   function _renderTreemapChart(containerId,counts,groups,filterKey){
     const treemapData=_buildTreemapData(counts,groups);
     const dom=$('#'+containerId);
     if(!dom)return;
     const chart=echarts.init(dom);
     _statsCharts.push(chart);
+
+    treemapData.forEach(group=>{
+      const baseColor=GROUP_COLORS[group.name]||'#94a3b8';
+      group.itemStyle={color:baseColor};
+      if(group.children){
+        group.children.forEach((child,i)=>{
+          const n=group.children.length;
+          const lightness=40+Math.round((i/Math.max(n-1,1))*30);
+          child.itemStyle={
+            color:baseColor,
+            colorAlpha:[0.5+((i%3)*0.15),0.7+((i%3)*0.1)],
+          };
+        });
+      }
+    });
+
     chart.setOption({
       tooltip:{formatter:function(info){
         const val=info.value;
@@ -1258,8 +1282,20 @@
         height:'90%',
         top:10,
         roam:false,
-        nodeClick:false,
-        breadcrumb:{show:false},
+        nodeClick:'link',
+        breadcrumb:{
+          show:true,
+          top:0,
+          left:0,
+          height:22,
+          itemStyle:{
+            color:'rgba(196,168,224,0.2)',
+            borderColor:'rgba(196,168,224,0.4)',
+            borderWidth:1,
+          },
+          textStyle:{color:'#d1d5db',fontSize:11},
+          emphasis:{itemStyle:{color:'rgba(196,168,224,0.4)'}},
+        },
         label:{
           show:true,
           formatter:'{b}',
@@ -1287,15 +1323,13 @@
           },
           upperLabel:{show:true},
         },{
-          colorSaturation:[0.3,0.7],
+          colorSaturation:[0.4,0.8],
           itemStyle:{
             borderColorSaturation:0.6,
             gapWidth:1,
             borderWidth:1,
           },
         }],
-        colorMappingBy:'index',
-        color:STATS_COLORS,
       }],
       animation:true,
       animationDuration:800,
@@ -1310,6 +1344,9 @@
 
   function _statsChartClick(filterKey,value){
     toggleStatsView(false);
+    state.style='';state.scene='';state.atmosphere='';state.shot_size='';
+    $('#styleFilter').value='';$('#sceneFilter').value='';
+    $('#atmosphereFilter').value='';$('#shotSizeFilter').value='';
     if(filterKey==='style'){state.style=value;$('#styleFilter').value=value;}
     else if(filterKey==='scene'){state.scene=value;$('#sceneFilter').value=value;}
     else if(filterKey==='atmosphere'){state.atmosphere=value;$('#atmosphereFilter').value=value;}
@@ -1430,6 +1467,7 @@
     const sidebar=$('#sidebar');
 
     if(show){
+      document.body.classList.add('stats-view-active');
       statsView.classList.remove('hidden');
       imageGrid.classList.add('hidden');
       emptyState.classList.add('hidden');
@@ -1441,6 +1479,7 @@
       $('#statsViewBtn').classList.remove('btn-secondary');
       loadStatsDetail();
     }else{
+      document.body.classList.remove('stats-view-active');
       statsView.classList.add('hidden');
       imageGrid.classList.remove('hidden');
       sidebar.classList.remove('hidden');
