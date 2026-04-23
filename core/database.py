@@ -570,6 +570,71 @@ class WardrobeDatabase:
             groups.append(chars)
         return groups
 
+    async def get_tag_distribution(
+        self,
+        *,
+        category: Optional[str] = None,
+        persona: Optional[str] = None,
+        favorite: Optional[str] = None,
+    ) -> dict[str, Any]:
+        conditions = []
+        params: list[Any] = []
+        if category:
+            conditions.append("category = ?")
+            params.append(category)
+        if persona:
+            conditions.append("persona = ?")
+            params.append(persona)
+        if favorite and favorite in ("favorite", "like"):
+            conditions.append("favorite = ?")
+            params.append(favorite)
+        where_clause = ""
+        if conditions:
+            where_clause = "WHERE " + " AND ".join(conditions)
+
+        style_counts: dict[str, int] = {}
+        scene_counts: dict[str, int] = {}
+        atmosphere_counts: dict[str, int] = {}
+        shot_size_counts: dict[str, int] = {}
+        total = 0
+
+        async with aiosqlite.connect(self.db_path) as db:
+            sql = f"SELECT style, scene, atmosphere, shot_size FROM images {where_clause}"
+            async with db.execute(sql, params) as cursor:
+                rows = await cursor.fetchall()
+            total = len(rows)
+            for row in rows:
+                style_raw, scene_raw, atmo_raw, shot_raw = row
+                for field_raw, counter in [
+                    (style_raw, style_counts),
+                    (scene_raw, scene_counts),
+                    (atmo_raw, atmosphere_counts),
+                ]:
+                    if not field_raw:
+                        continue
+                    try:
+                        tags = json.loads(field_raw) if isinstance(field_raw, str) else field_raw
+                    except (json.JSONDecodeError, TypeError):
+                        tags = [field_raw] if field_raw else []
+                    if isinstance(tags, str):
+                        tags = [tags]
+                    for t in tags:
+                        t = str(t).strip()
+                        if t:
+                            counter[t] = counter.get(t, 0) + 1
+                if shot_raw:
+                    s = str(shot_raw).strip()
+                    if s:
+                        shot_size_counts[s] = shot_size_counts.get(s, 0) + 1
+
+        return {
+            "total": total,
+            "style": style_counts,
+            "scene": scene_counts,
+            "atmosphere": atmosphere_counts,
+            "shot_size": shot_size_counts,
+        }
+
     async def get_stats(self) -> dict[str, Any]:
         async with aiosqlite.connect(self.db_path) as db:
             async with db.execute("SELECT COUNT(*) FROM images") as cursor:

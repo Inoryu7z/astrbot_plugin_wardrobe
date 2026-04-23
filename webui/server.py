@@ -22,6 +22,28 @@ from astrbot.api import logger
 
 _TOKEN_TTL = 86400 * 7
 
+STYLE_GROUPS = {
+    "洛丽塔系": ["甜系洛丽塔", "古典洛丽塔", "哥特洛丽塔", "中华风洛丽塔", "海军风洛丽塔", "田园风洛丽塔", "蒸汽朋克洛丽塔", "公主风洛丽塔", "古董风洛丽塔", "朋克洛丽塔", "Ero洛丽塔"],
+    "JK系": ["水手服JK", "西装JK", "连衣裙JK", "知性学院风", "英伦学院风", "预科生风格", "百褶裙学院风", "制服通勤风", "超短裙JK"],
+    "汉服系": ["魏晋风汉服", "唐风汉服", "宋风汉服", "明风汉服", "新中式禅意风", "改良汉服", "东方古典氛围感", "明制日常汉服", "宋制雅致汉服"],
+    "甜系": ["奶甜幼态风", "清甜初恋风", "宫廷甜妹风", "芭蕾少女风", "仙气公主风", "软萌居家风", "梦幻奶油风", "草莓少女风", "性感甜妹风"],
+    "纯欲系": ["柔焦纯欲风", "轻熟纯欲风", "居家纯欲氛围感", "纯欲少女风", "雾面纯欲风", "清透纯欲风", "诱惑纯欲风"],
+    "法式优雅系": ["法式优雅风", "法式浪漫风", "温柔淑女风", "轻礼服千金风", "精致约会风", "英式复古优雅风"],
+    "暗黑系": ["哥特暗黑风", "赛博朋克风", "暗黑少女风", "维多利亚暗黑风", "暗黑哥特风"],
+    "日韩系": ["日系软妹风", "日系森女风", "韩系甜美风", "韩系温柔风", "日系通勤风", "韩系清冷风"],
+    "性感系": ["性感兔女郎风", "性感女仆风", "高开叉旗袍风", "魅惑吊带风"],
+    "其他": ["女仆风", "旗袍风", "改良韩服风", "复古风", "波西米亚风", "维多利亚复古风", "赛博机械风", "cosplay风"],
+}
+
+SCENE_GROUPS = {
+    "日常": ["日常休闲", "通勤上学", "居家休息", "逛街购物", "校园日常", "办公室通勤", "居家懒人风", "街头随拍"],
+    "社交": ["约会", "聚会派对", "下午茶", "餐厅用餐", "朋友聚会", "正式晚宴", "夜店派对", "咖啡厅约会"],
+    "拍摄": ["拍照写真", "cosplay", "漫展活动", "舞台表演", "婚礼场合", "艺术写真", "商业拍摄", "私房写真"],
+    "季节": ["春季穿搭", "夏季穿搭", "秋季穿搭", "冬季穿搭", "初夏清凉风", "深秋复古风", "寒冬保暖风"],
+    "氛围场景": ["浪漫氛围", "度假氛围", "酷帅氛围", "梦幻氛围", "清新田园氛围", "复古怀旧氛围", "赛博未来氛围"],
+    "私密": ["夜晚诱惑约会", "卧室情趣场景", "性感私密写真", "魅惑室内拍摄"],
+}
+
 
 class WardrobeWebServer:
     def __init__(self, plugin, config: dict):
@@ -130,6 +152,43 @@ class WardrobeWebServer:
             await self.plugin._ensure_db()
             stats = await self.plugin.db.get_stats()
             return jsonify(stats)
+
+        @app.route("/api/stats/detail")
+        async def api_stats_detail():
+            await self.plugin._ensure_db()
+            category = request.args.get("category", "")
+            persona = request.args.get("persona", "")
+            favorite = request.args.get("favorite", "")
+
+            dist = await self.plugin.db.get_tag_distribution(
+                category=category or None,
+                persona=persona or None,
+                favorite=favorite if favorite in ("favorite", "like") else None,
+            )
+
+            try:
+                pools = await self.plugin.get_merged_pools()
+            except Exception:
+                pools = {}
+
+            custom_style = set(pools.get("style", [])) - set(STYLE_GROUPS.get("其他", []))
+            for group_tags in STYLE_GROUPS.values():
+                custom_style -= set(group_tags)
+            style_groups = dict(STYLE_GROUPS)
+            if custom_style:
+                style_groups["自定义"] = sorted(custom_style)
+
+            custom_scene = set(pools.get("scene", [])) - set(SCENE_GROUPS.get("私密", []))
+            for group_tags in SCENE_GROUPS.values():
+                custom_scene -= set(group_tags)
+            scene_groups = dict(SCENE_GROUPS)
+            if custom_scene:
+                scene_groups["自定义"] = sorted(custom_scene)
+
+            dist["style_groups"] = style_groups
+            dist["scene_groups"] = scene_groups
+
+            return jsonify(dist)
 
         @app.route("/api/images")
         async def api_images():

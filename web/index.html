@@ -6,7 +6,8 @@
 <title>衣橱图鉴</title>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link href="https://fonts.googleapis.com/css2?family=Fredoka:wght@400;500;600;700&family=Nunito:wght@300;400;500;600;700&display=swap" rel="stylesheet">
-<link rel="stylesheet" href="/static/css/style.css?v=2.2.6">
+<link rel="stylesheet" href="/static/css/style.css?v=2.2.7">
+<script src="https://cdn.jsdelivr.net/npm/echarts@5.5.1/dist/echarts.min.js"></script>
 </head>
 <body>
 <header class="topbar">
@@ -37,6 +38,10 @@
     <button id="batchModeBtn" class="btn btn-secondary" title="批量操作">
       <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="18" height="18"><rect x="3" y="3" width="7" height="7"/><rect x="14" y="3" width="7" height="7"/><rect x="3" y="14" width="7" height="7"/><rect x="14" y="14" width="7" height="7"/></svg>
       批量
+    </button>
+    <button id="statsViewBtn" class="btn btn-secondary" title="统计分析">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="18" height="18"><path d="M18 20V10"/><path d="M12 20V4"/><path d="M6 20v-6"/></svg>
+      统计
     </button>
     <button id="logoutBtn" class="btn btn-ghost" title="退出登录">
       <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="18" height="18"><path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"/><polyline points="16 17 21 12 16 7"/><line x1="21" y1="12" x2="9" y2="12"/></svg>
@@ -130,6 +135,56 @@
     </div>
 
     <div class="image-grid" id="imageGrid"></div>
+
+    <div class="stats-view hidden" id="statsView">
+      <div class="stats-toolbar">
+        <select id="statsCategoryFilter" class="stats-filter-select">
+          <option value="">全部分类</option>
+          <option value="人物">人物</option>
+          <option value="衣服">衣服</option>
+        </select>
+        <select id="statsPersonaFilter" class="stats-filter-select">
+          <option value="">全部人格</option>
+        </select>
+        <select id="statsFavoriteFilter" class="stats-filter-select">
+          <option value="">全部</option>
+          <option value="favorite">仅收藏</option>
+          <option value="like">仅喜欢</option>
+        </select>
+        <button class="btn btn-ghost btn-sm" id="statsBackBtn">← 返回图库</button>
+      </div>
+      <div class="stats-overview" id="statsOverview">
+        <div class="stats-overview-card"><span class="stats-overview-num" id="statsOverviewTotal">-</span><span class="stats-overview-label">总图片</span></div>
+        <div class="stats-overview-card"><span class="stats-overview-num" id="statsOverviewPerson">-</span><span class="stats-overview-label">人物</span></div>
+        <div class="stats-overview-card"><span class="stats-overview-num" id="statsOverviewCloth">-</span><span class="stats-overview-label">衣服</span></div>
+      </div>
+      <div class="stats-charts-row">
+        <div class="stats-chart-box stats-chart-small">
+          <h3 class="stats-chart-title">景别分布</h3>
+          <div class="stats-top5" id="statsTop5ShotSize"></div>
+          <div class="stats-chart-container" id="chartShotSize"></div>
+        </div>
+        <div class="stats-chart-box stats-chart-small">
+          <h3 class="stats-chart-title">氛围分布</h3>
+          <div class="stats-top5" id="statsTop5Atmosphere"></div>
+          <div class="stats-chart-container" id="chartAtmosphere"></div>
+        </div>
+      </div>
+      <div class="stats-charts-row">
+        <div class="stats-chart-box stats-chart-full">
+          <h3 class="stats-chart-title">风格分布</h3>
+          <div class="stats-top5" id="statsTop5Style"></div>
+          <div class="stats-chart-container stats-chart-tall" id="chartStyle"></div>
+        </div>
+      </div>
+      <div class="stats-charts-row">
+        <div class="stats-chart-box stats-chart-full">
+          <h3 class="stats-chart-title">场景分布</h3>
+          <div class="stats-top5" id="statsTop5Scene"></div>
+          <div class="stats-chart-container stats-chart-tall" id="chartScene"></div>
+        </div>
+      </div>
+    </div>
 
     <div class="empty-state hidden" id="emptyState">
       <span class="empty-icon">🎀</span>
@@ -301,6 +356,6 @@
     <div class="batch-ops-list hidden" id="batchOpsList"></div>
   </div>
 
-<script src="/static/js/app.js?v=2.2.6"></script>
+<script src="/static/js/app.js?v=2.2.7"></script>
 </body>
 </html>
