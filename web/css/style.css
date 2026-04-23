@@ -251,6 +251,9 @@ html, body {
   border-radius:var(--radius-md);
   font-size:14px; font-weight:500;
   color:var(--lavender-dark);
+  position:sticky;
+  top:var(--topbar-h);
+  z-index:20;
 }
 
 .image-grid {
