@@ -1352,6 +1352,72 @@
     _renderPieChart('chartAtmosphere',data.atmosphere||{},'氛围','atmosphere');
     _renderTreemapChart('chartStyle',data.style||{},data.style_groups||{},'style');
     _renderTreemapChart('chartScene',data.scene||{},data.scene_groups||{},'scene');
+
+    _loadTimeline(params);
+  }
+
+  async function _loadTimeline(params){
+    const resp=await api('/api/stats/timeline?'+params.toString());
+    if(!resp||!resp.ok)return;
+    const data=await resp.json();
+    if(!data||!data.length)return;
+
+    const dates=data.map(d=>d.date);
+    const counts=data.map(d=>d.count);
+    const dom=$('#chartTimeline');
+    if(!dom)return;
+    const chart=echarts.init(dom);
+    _statsCharts.push(chart);
+    chart.setOption({
+      tooltip:{
+        trigger:'axis',
+        formatter:function(p){
+          return p[0].axisValue+'<br/>存图: '+p[0].value+' 张';
+        },
+      },
+      grid:{left:50,right:20,top:20,bottom:30},
+      xAxis:{
+        type:'category',
+        data:dates,
+        axisLabel:{
+          fontSize:10,
+          color:'#9ca3af',
+          formatter:function(v){
+            return v.slice(5);
+          },
+        },
+        axisLine:{lineStyle:{color:'#374151'}},
+      },
+      yAxis:{
+        type:'value',
+        minInterval:1,
+        axisLabel:{fontSize:10,color:'#9ca3af'},
+        splitLine:{lineStyle:{color:'rgba(55,65,81,0.5)'}},
+      },
+      series:[{
+        type:'line',
+        data:counts,
+        smooth:true,
+        symbol:'circle',
+        symbolSize:4,
+        lineStyle:{
+          width:2,
+          color:new echarts.graphic.LinearGradient(0,0,1,0,[
+            {offset:0,color:'#c084fc'},
+            {offset:1,color:'#f472b6'},
+          ]),
+        },
+        areaStyle:{
+          color:new echarts.graphic.LinearGradient(0,0,0,1,[
+            {offset:0,color:'rgba(192,132,252,0.3)'},
+            {offset:1,color:'rgba(192,132,252,0.02)'},
+          ]),
+        },
+        itemStyle:{color:'#c084fc'},
+        animationDuration:1200,
+        animationEasing:'cubicOut',
+      }],
+    });
   }
 
   function toggleStatsView(show){

@@ -635,6 +635,35 @@ class WardrobeDatabase:
             "shot_size": shot_size_counts,
         }
 
+    async def get_timeline(
+        self,
+        *,
+        category: Optional[str] = None,
+        persona: Optional[str] = None,
+        favorite: Optional[str] = None,
+    ) -> list[dict[str, Any]]:
+        conditions = []
+        params: list[Any] = []
+        if category:
+            conditions.append("category = ?")
+            params.append(category)
+        if persona:
+            conditions.append("persona = ?")
+            params.append(persona)
+        if favorite and favorite in ("favorite", "like"):
+            conditions.append("favorite = ?")
+            params.append(favorite)
+        where_clause = ""
+        if conditions:
+            where_clause = "WHERE " + " AND ".join(conditions)
+
+        async with aiosqlite.connect(self.db_path) as db:
+            sql = f"SELECT DATE(created_at) AS day, COUNT(*) AS cnt FROM images {where_clause} GROUP BY day ORDER BY day"
+            async with db.execute(sql, params) as cursor:
+                rows = await cursor.fetchall()
+
+        return [{"date": r[0], "count": r[1]} for r in rows if r[0]]
+
     async def get_stats(self) -> dict[str, Any]:
         async with aiosqlite.connect(self.db_path) as db:
             async with db.execute("SELECT COUNT(*) FROM images") as cursor:

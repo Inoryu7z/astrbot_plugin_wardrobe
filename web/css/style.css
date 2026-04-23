@@ -1254,3 +1254,7 @@ html, body {
 .stats-chart-tall {
   height:400px;
 }
+
+.stats-chart-wide {
+  height:250px;
+}

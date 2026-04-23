@@ -190,6 +190,19 @@ class WardrobeWebServer:
 
             return jsonify(dist)
 
+        @app.route("/api/stats/timeline")
+        async def api_stats_timeline():
+            await self.plugin._ensure_db()
+            category = request.args.get("category", "")
+            persona = request.args.get("persona", "")
+            favorite = request.args.get("favorite", "")
+            timeline = await self.plugin.db.get_timeline(
+                category=category or None,
+                persona=persona or None,
+                favorite=favorite if favorite in ("favorite", "like") else None,
+            )
+            return jsonify(timeline)
+
         @app.route("/api/images")
         async def api_images():
             await self.plugin._ensure_db()
