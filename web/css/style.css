@@ -1047,7 +1047,7 @@ html, body {
 }
 
 .image-card-fav {
-  position:absolute; top:8px; left:8px;
+  position:absolute; top:32px; left:8px;
   font-size:14px; z-index:2;
   pointer-events:none;
   text-shadow:0 1px 3px rgba(0,0,0,0.4);

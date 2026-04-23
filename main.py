@@ -41,7 +41,7 @@ _AIIMG_GENERATE_TOOLS = frozenset({"aiimg_generate"})
     "astrbot_plugin_wardrobe",
     "Inoryu7z",
     "图片衣柜管理插件，支持智能分类、语义检索和参考图接口",
-    "2.2.5",
+    "2.2.6",
 )
 class WardrobePlugin(Star):
     def __init__(self, context: Context, config: AstrBotConfig = None):
@@ -1103,7 +1103,7 @@ class WardrobePlugin(Star):
             persona=resolved_persona,
             persona_names=persona_names,
             current_persona=current_persona,
-            persona_mode=str(self._cfg("search_persona_mode", "exclude_all") or "exclude_all"),
+            persona_mode=str(self._cfg("search_persona_mode", "no_persona_only") or "no_persona_only"),
             prioritize_unused=bool(self._cfg("search_prioritize_unused", False)),
         )
 
