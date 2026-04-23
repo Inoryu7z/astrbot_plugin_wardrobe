@@ -1,3 +1,17 @@
+### v2.2.6
+
+**🔧 优化**
+
+* 取图人格搜索策略更名：`exclude_all` → `no_persona_only`（只搜无人格图，搜不到返回空），`self_first` → `fallback_other`（优先搜无人格图，搜不到回退其他人格图）
+* 取图选择策略优先级调整：clothing_type/body_focus/description中的服装与姿势表述 提升为最高优先级，style/atmosphere 降级为辅助参考
+* 取图匹配策略放宽：不完全不匹配就返回，宁可多返回不漏掉
+
+**🐛 Bug 修复**
+
+* 修复 WebUI 卡片左上角参考强度与喜爱程度标签重叠
+
+---
+
 ### v2.2.5
 
 **✨ 新功能**

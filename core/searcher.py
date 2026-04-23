@@ -61,10 +61,10 @@ SEARCH_PARSE_SYSTEM_PROMPT = """# 角色
 5. keywords 用于捕捉无法用预定义值表达的特征"""
 
 SEARCH_SELECT_SYSTEM_PROMPT = """# 角色
-你是图片选择助手。从给定的候选图片中，选出最符合用户需求的图片。
+你是图片选择助手。从给定的候选图片中，选出符合用户需求的图片。
 
 # 任务
-根据用户的检索描述和候选图片的属性信息，选出最匹配的图片。
+根据用户的检索描述和候选图片的属性信息，选出匹配的图片。
 
 # 输出格式
 输出 JSON 对象：
@@ -75,16 +75,16 @@ SEARCH_SELECT_SYSTEM_PROMPT = """# 角色
 }}
 ```
 
-# 选择策略
-1. 优先匹配 style（风格）和 atmosphere（氛围），这两个维度最能体现图片的整体感觉
-2. 其次匹配 scene（场景）和 clothing_type（服装类型）
-3. description 字段包含最丰富的语义信息，当其他属性都不太匹配时，以 description 的语义相似度为准
-4. 如果候选图片都不匹配用户需求，返回空列表 selected_ids: []
+# 选择策略（优先级从高到低）
+1. **最高优先级**：clothing_type（服装类型）、description 中的服装与姿势表述、body_focus（身体焦点）——这些直接决定"拍的是什么"
+2. **中等优先级**：scene（场景）
+3. **低优先级**：composition（构图）
+4. style（风格）和 atmosphere（氛围）仅作为辅助参考，不作为主要匹配依据
 
 # 规则
 1. 最多选择 {max_select} 张图片
-2. 优先选择最匹配用户描述的图片
-3. 如果没有合理匹配的，可以返回空列表
+2. 匹配标准宽松：完全匹配、大部分匹配、语义可能相关的图片都应返回；只有完全不匹配才排除
+3. 宁可多返回也不要漏掉可能匹配的图片，空结果是最差体验
 4. 只输出 JSON，不要输出解释"""
 
 
@@ -140,7 +140,7 @@ class ImageSearcher:
         current_persona: str = "",
         persona_names: str = "",
         exclude_current_persona: bool = False,
-        persona_mode: str = "exclude_all",
+        persona_mode: str = "no_persona_only",
         prioritize_unused: bool = False,
     ) -> tuple[list[dict[str, Any]], dict[str, Any]]:
         meta = {"persona_mismatch": False, "searched_persona": persona, "persona_scope": "global"}
@@ -219,7 +219,7 @@ class ImageSearcher:
         limit: int,
         meta: dict[str, Any],
         user_query: str = "",
-        persona_mode: str = "exclude_all",
+        persona_mode: str = "no_persona_only",
     ) -> list[dict[str, Any]]:
         logger.info(
             "[Wardrobe] 搜索策略: scope=%s current_persona=%s named_persona=%s persona_mode=%s",
@@ -227,12 +227,15 @@ class ImageSearcher:
         )
 
         if persona_scope == "self" and current_persona:
-            if persona_mode == "exclude_all":
-                candidates = await self._query_candidates(conditions, limit=limit, persona="", user_query=user_query)
-                logger.info("[Wardrobe] 无人格池搜索结果: %d张", len(candidates))
-                if candidates:
-                    meta["searched_persona"] = ""
-                    return candidates
+            candidates = await self._query_candidates(conditions, limit=limit, persona="", user_query=user_query)
+            logger.info("[Wardrobe] 无人格池搜索结果: %d张", len(candidates))
+            if candidates:
+                meta["searched_persona"] = ""
+                return candidates
+            if persona_mode == "no_persona_only":
+                logger.info("[Wardrobe] 无人格池无结果，no_persona_only模式不回退其他人格")
+                return []
+            else:
                 candidates = await self._query_candidates_excluding_persona(
                     conditions, limit=limit, exclude_persona=current_persona, user_query=user_query,
                 )
@@ -242,17 +245,6 @@ class ImageSearcher:
                     meta["searched_persona"] = f"非{current_persona}"
                     return candidates
                 return []
-            else:
-                candidates = await self._query_candidates(conditions, limit=limit, persona=current_persona, user_query=user_query)
-                logger.info("[Wardrobe] 人格池搜索结果: %d张 persona=%s", len(candidates), current_persona)
-                if candidates:
-                    meta["searched_persona"] = current_persona
-                    return candidates
-                logger.info("[Wardrobe] 当前人格池无结果，回退全局搜索 persona=%s", current_persona)
-                meta["persona_mismatch"] = True
-                candidates = await self._query_candidates(conditions, limit=limit, persona="", user_query=user_query)
-                meta["searched_persona"] = ""
-                return candidates
 
         if persona_scope == "other" and current_persona:
             candidates = await self._query_candidates_excluding_persona(conditions, limit=limit, exclude_persona=current_persona, user_query=user_query)

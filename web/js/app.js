@@ -286,7 +286,7 @@
 
   const RS_OPTIONS=[
     {value:'full',label:'📸完整参考',desc:'保留姿势、构图与服装细节'},
-    {value:'style',label:'🎨风格参考',desc:'大致保留姿势与构图，适当微调'},
+    {value:'style',label:'🎨风格参考',desc:'保留服装与氛围，必须对姿势或构图做明确小变动'},
     {value:'reimagine',label:'🔄重构',desc:'仅保留服装款式，重新设计姿势与构图'},
   ];
 
