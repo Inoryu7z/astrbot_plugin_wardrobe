@@ -196,11 +196,15 @@ class WardrobePlugin(Star):
         try:
             await self.db.init()
             self._db_initialized = True
-            if not self.vector_searcher:
+            if not self.vector_searcher or not self.vector_searcher.available:
+                old_vs = self.vector_searcher
                 self.vector_searcher = self._init_vector_searcher(self.data_dir)
                 if self.vector_searcher:
                     self.searcher.vector_searcher = self.vector_searcher
-                    logger.info("[Wardrobe] 向量检索器延迟初始化成功")
+                    if not old_vs:
+                        logger.info("[Wardrobe] 向量检索器延迟初始化成功")
+                    else:
+                        logger.info("[Wardrobe] 向量检索器重新初始化成功")
             if not self.rerank_provider:
                 self.rerank_provider = self._init_rerank_provider()
                 if self.vector_searcher and self.rerank_provider:
@@ -1009,6 +1013,7 @@ class WardrobePlugin(Star):
         self, query: str, current_persona: str = ""
     ) -> Optional[dict]:
         await self._ensure_db()
+        await self._ensure_vector_searcher()
 
         primary = str(self._cfg("search_provider_id", "") or "").strip()
         secondary = str(self._cfg("search_secondary_provider_id", "") or "").strip()
@@ -1069,10 +1074,28 @@ class WardrobePlugin(Star):
             "ref_strength": best.get("ref_strength", "style"),
         }
 
+    async def _ensure_vector_searcher(self):
+        if self.vector_searcher and self.vector_searcher.available:
+            return
+        new_vs = self._init_vector_searcher(self.data_dir)
+        if new_vs:
+            self.vector_searcher = new_vs
+            self.searcher.vector_searcher = new_vs
+            if not new_vs._initialized:
+                await new_vs.initialize()
+            if new_vs.available:
+                await new_vs.index_existing_images()
+                logger.info("[Wardrobe] 向量检索器延迟初始化成功（搜索时触发）")
+            if not self.rerank_provider:
+                self.rerank_provider = self._init_rerank_provider()
+                if self.rerank_provider:
+                    new_vs.rerank_provider = self.rerank_provider
+
     async def _do_search_image(
         self, event: AstrMessageEvent, query: str, persona: str = ""
     ) -> str:
         await self._ensure_db()
+        await self._ensure_vector_searcher()
 
         raw_persona = persona.strip()
         resolved_persona = self._resolve_persona(raw_persona)
