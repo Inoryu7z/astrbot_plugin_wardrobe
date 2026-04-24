@@ -41,7 +41,7 @@ _AIIMG_GENERATE_TOOLS = frozenset({"aiimg_generate"})
     "astrbot_plugin_wardrobe",
     "Inoryu7z",
     "图片衣柜管理插件，支持智能分类、语义检索和参考图接口",
-    "2.2.7",
+    "2.2.8",
 )
 class WardrobePlugin(Star):
     def __init__(self, context: Context, config: AstrBotConfig = None):
@@ -577,12 +577,12 @@ class WardrobePlugin(Star):
     @on_llm_tool_respond()
     async def on_aiimg_tool_respond(self, event: AstrMessageEvent, tool, tool_args, tool_result):
         '''AiImg 生图工具调用后的自动存图钩子'''
-        await self._auto_save_aiimg_image(event, tool)
+        self._spawn_bg_task(self._auto_save_aiimg_image(event, tool))
 
     @filter.after_message_sent()
     async def on_after_message_sent(self, event: AstrMessageEvent):
         '''消息发送后钩子：检测 AiImg 命令方式生成的图片并自动存图'''
-        await self._auto_save_aiimg_image(event, tool=None)
+        self._spawn_bg_task(self._auto_save_aiimg_image(event, tool=None))
 
     @filter.llm_tool(name="save_wardrobe_image")
     async def save_wardrobe_image_tool(self, event: AstrMessageEvent, user_description: str = "", persona: str = "") -> str:

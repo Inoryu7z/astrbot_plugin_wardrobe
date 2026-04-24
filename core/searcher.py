@@ -145,46 +145,62 @@ class ImageSearcher:
     ) -> tuple[list[dict[str, Any]], dict[str, Any]]:
         meta = {"persona_mismatch": False, "searched_persona": persona, "persona_scope": "global"}
 
-        query_conditions = await self._parse_query(
-            user_query,
-            primary_provider_id=primary_provider_id,
-            secondary_provider_id=secondary_provider_id,
-            timeout_seconds=timeout_seconds,
-            current_persona=current_persona,
-            persona_names=persona_names,
-        )
-        if not query_conditions:
-            query_conditions = {"keywords": [user_query]}
-
-        existing_keywords = query_conditions.get("keywords") or []
-        if user_query not in existing_keywords:
-            query_conditions["keywords"] = [user_query] + existing_keywords
-
-        persona_scope = query_conditions.pop("persona_scope", "global")
-        named_persona = query_conditions.pop("persona", "")
-        meta["persona_scope"] = persona_scope
-
-        if exclude_current_persona and current_persona:
-            candidates = await self._query_candidates_excluding_persona(
-                query_conditions, exclude_persona=current_persona, limit=candidate_limit,
-                user_query=user_query,
-            )
+        if self.vector_searcher and self.vector_searcher.available and exclude_current_persona and current_persona:
+            candidates = await self._vector_search(user_query, k=candidate_limit, exclude_persona=current_persona)
             logger.info(
-                "[Wardrobe] 排除人格搜索结果: %d张 exclude=%s",
+                "[Wardrobe] 向量检索（排除人格）: %d张 exclude=%s",
                 len(candidates), current_persona,
             )
+            if candidates:
+                candidates = self._sort_by_favorite(candidates)
+                meta["searched_persona"] = f"非{current_persona}"
+                for c in candidates:
+                    if c.get("persona") and c["persona"] != current_persona:
+                        meta["persona_mismatch"] = True
+                        break
             if not candidates:
                 return [], meta
         else:
-            candidates = await self._search_by_scope(
-                query_conditions, persona_scope=persona_scope,
-                named_persona=named_persona, current_persona=current_persona,
-                limit=candidate_limit, meta=meta, user_query=user_query,
-                persona_mode=persona_mode,
+            query_conditions = await self._parse_query(
+                user_query,
+                primary_provider_id=primary_provider_id,
+                secondary_provider_id=secondary_provider_id,
+                timeout_seconds=timeout_seconds,
+                current_persona=current_persona,
+                persona_names=persona_names,
             )
+            if not query_conditions:
+                query_conditions = {"keywords": [user_query]}
+
+            existing_keywords = query_conditions.get("keywords") or []
+            if user_query not in existing_keywords:
+                query_conditions["keywords"] = [user_query] + existing_keywords
+
+            persona_scope = query_conditions.pop("persona_scope", "global")
+            named_persona = query_conditions.pop("persona", "")
+            meta["persona_scope"] = persona_scope
+
+            if exclude_current_persona and current_persona:
+                candidates = await self._query_candidates_excluding_persona(
+                    query_conditions, exclude_persona=current_persona, limit=candidate_limit,
+                    user_query=user_query,
+                )
+                logger.info(
+                    "[Wardrobe] 排除人格搜索结果: %d张 exclude=%s",
+                    len(candidates), current_persona,
+                )
+                if not candidates:
+                    return [], meta
+            else:
+                candidates = await self._search_by_scope(
+                    query_conditions, persona_scope=persona_scope,
+                    named_persona=named_persona, current_persona=current_persona,
+                    limit=candidate_limit, meta=meta, user_query=user_query,
+                    persona_mode=persona_mode,
+                )
 
         if not candidates:
-            logger.info("[Wardrobe] 未找到候选图片 scope=%s persona=%s", persona_scope, named_persona or "无")
+            logger.info("[Wardrobe] 未找到候选图片")
             return [], meta
 
         if prioritize_unused:
