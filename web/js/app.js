@@ -2,6 +2,18 @@
   const $=s=>document.querySelector(s);
   const $$=s=>document.querySelectorAll(s);
 
+  function _fmtRelative(iso){
+    if(!iso)return '';
+    const d=new Date(iso);
+    const now=Date.now();
+    const diff=now-d.getTime();
+    if(diff<60000)return '刚刚';
+    if(diff<3600000)return Math.floor(diff/60000)+'分钟前';
+    if(diff<86400000)return Math.floor(diff/3600000)+'小时前';
+    if(diff<2592000000)return Math.floor(diff/86400000)+'天前';
+    return Math.floor(diff/2592000000)+'月前';
+  }
+
   const POOL_LABELS={
     'style':'风格','clothing_type':'服装类型','exposure_level':'暴露程度',
     'scene':'场景','atmosphere':'氛围','pose_type':'姿势',
@@ -208,6 +220,7 @@
       const favIcon=img.favorite==='favorite'?'❤️':img.favorite==='like'?'👍':'';
       const favMark=favIcon?`<div class="image-card-fav">${favIcon}</div>`:'';
       const useCount=img.use_count?`<span class="image-card-uses">🔥${img.use_count}</span>`:'';
+      const lastUsed=img.last_used_at?`<span class="image-card-last-used">🕐${_fmtRelative(img.last_used_at)}</span>`:'';
       const similarityMark=img._similarity!=null?`<div class="image-card-similarity">${(img._similarity*100).toFixed(0)}%</div>`:'';
       const rsIcon=img.ref_strength==='full'?'📸':img.ref_strength==='reimagine'?'🔄':'🎨';
       const rsMark=img.ref_strength&&img.category==='人物'?`<div class="image-card-rs image-card-rs-${esc(img.ref_strength||'style')}">${rsIcon}</div>`:'';
@@ -218,6 +231,7 @@
         <img src="/api/image-file/${img.id}" loading="lazy" alt="" onerror="this.src='data:image/svg+xml,<svg xmlns=%22http://www.w3.org/2000/svg%22 width=%22180%22 height=%22240%22><rect fill=%22%23F8F0F4%22 width=%22180%22 height=%22240%22/><text x=%2290%22 y=%22125%22 text-anchor=%22middle%22 fill=%22%23C8B8D0%22 font-size=%2214%22>加载失败</text></svg>'">
         <div class="image-card-overlay">
           ${useCount}
+          ${lastUsed}
           ${personaText}
         </div>
         <div class="image-card-checkbox" data-id="${img.id}"></div>

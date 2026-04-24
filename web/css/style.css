@@ -1090,6 +1090,11 @@ html, body {
   opacity:0.8;
 }
 
+.image-card-last-used {
+  font-size:11px;
+  opacity:0.8;
+}
+
 .upload-filelist {
   margin-bottom:12px; max-height:120px; overflow-y:auto;
   font-size:12px; color:var(--text-muted);

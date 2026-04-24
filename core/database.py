@@ -44,7 +44,8 @@ CREATE TABLE IF NOT EXISTS images (
     use_count INTEGER DEFAULT 0,
     file_hash TEXT DEFAULT '',
     ref_strength TEXT DEFAULT 'style',
-    ref_strength_reason TEXT DEFAULT ''
+    ref_strength_reason TEXT DEFAULT '',
+    last_used_at TEXT DEFAULT ''
 );
 """
 
@@ -93,6 +94,7 @@ class WardrobeDatabase:
                     ("file_hash", "TEXT DEFAULT ''"),
                     ("ref_strength", "TEXT DEFAULT 'style'"),
                     ("ref_strength_reason", "TEXT DEFAULT ''"),
+                    ("last_used_at", "TEXT DEFAULT ''"),
                 ]:
                     try:
                         await db.execute(f"ALTER TABLE images ADD COLUMN {col} {default}")
@@ -247,11 +249,12 @@ class WardrobeDatabase:
                 return cursor.rowcount > 0
 
     async def increment_use_count(self, image_id: str) -> None:
+        now = datetime.now(timezone.utc).isoformat()
         async with self._lock:
             async with aiosqlite.connect(self.db_path) as db:
                 await db.execute(
-                    "UPDATE images SET use_count = COALESCE(use_count, 0) + 1, updated_at = ? WHERE id = ?",
-                    (datetime.now(timezone.utc).isoformat(), image_id),
+                    "UPDATE images SET use_count = COALESCE(use_count, 0) + 1, updated_at = ?, last_used_at = ? WHERE id = ?",
+                    (now, now, image_id),
                 )
                 await db.commit()
 
@@ -386,6 +389,8 @@ class WardrobeDatabase:
             order_clause = "use_count DESC, created_at DESC"
         elif sort_by == "favorite":
             order_clause = "CASE favorite WHEN 'favorite' THEN 1 WHEN 'like' THEN 2 ELSE 3 END, created_at DESC"
+        elif sort_by == "last_used_at":
+            order_clause = "COALESCE(last_used_at, '') DESC, created_at DESC"
         else:
             order_clause = "created_at DESC"
 
@@ -715,6 +720,8 @@ class WardrobeDatabase:
             order_clause = "use_count DESC, created_at DESC"
         elif sort_by == "favorite":
             order_clause = "CASE favorite WHEN 'favorite' THEN 1 WHEN 'like' THEN 2 ELSE 3 END, created_at DESC"
+        elif sort_by == "last_used_at":
+            order_clause = "COALESCE(last_used_at, '') DESC, created_at DESC"
         else:
             order_clause = "created_at DESC"
         async with aiosqlite.connect(self.db_path) as db:
@@ -765,11 +772,13 @@ class WardrobeDatabase:
             order_clause = "use_count DESC, created_at DESC"
         elif sort_by == "favorite":
             order_clause = "CASE favorite WHEN 'favorite' THEN 1 WHEN 'like' THEN 2 ELSE 3 END, created_at DESC"
+        elif sort_by == "last_used_at":
+            order_clause = "COALESCE(last_used_at, '') DESC, created_at DESC"
         else:
             order_clause = "created_at DESC"
         async with aiosqlite.connect(self.db_path) as db:
             db.row_factory = aiosqlite.Row
-            sql = f"SELECT id, category, style, persona, image_path, created_at, favorite, use_count, ref_strength FROM images {where_clause} ORDER BY {order_clause} LIMIT ? OFFSET ?"
+            sql = f"SELECT id, category, style, persona, image_path, created_at, favorite, use_count, ref_strength, last_used_at FROM images {where_clause} ORDER BY {order_clause} LIMIT ? OFFSET ?"
             async with db.execute(sql, params) as cursor:
                 rows = await cursor.fetchall()
                 results = []
