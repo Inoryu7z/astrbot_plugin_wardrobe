@@ -294,9 +294,12 @@ class WardrobeDatabase:
             conditions.append("pose_type LIKE ? ESCAPE '\\'")
             params.append(f'%{WardrobeDatabase._escape_like(pose_type)}%')
 
-        if persona:
-            conditions.append("persona = ?")
-            params.append(persona)
+        if persona is not None:
+            if persona == "":
+                conditions.append("(persona = '' OR persona IS NULL)")
+            else:
+                conditions.append("persona = ?")
+                params.append(persona)
 
         if exclude_persona:
             conditions.append("persona != ?")
@@ -360,7 +363,7 @@ class WardrobeDatabase:
         atmosphere: Optional[list[str]] = None,
         pose_type: Optional[str] = None,
         body_focus: Optional[list[str]] = None,
-        persona: str = "",
+        persona: Optional[str] = None,
         exclude_persona: str = "",
         shot_size: Optional[str] = None,
         favorite: Optional[str] = None,
@@ -411,7 +414,7 @@ class WardrobeDatabase:
         atmosphere: Optional[list[str]] = None,
         pose_type: Optional[str] = None,
         body_focus: Optional[list[str]] = None,
-        persona: str = "",
+        persona: Optional[str] = None,
         exclude_persona: str = "",
         shot_size: Optional[str] = None,
         favorite: Optional[str] = None,
@@ -439,7 +442,7 @@ class WardrobeDatabase:
         *,
         keywords: list[str],
         category: Optional[str] = None,
-        persona: str = "",
+        persona: Optional[str] = None,
         exclude_persona: str = "",
         limit: int = 20,
         offset: int = 0,
@@ -500,7 +503,7 @@ class WardrobeDatabase:
         groups: list[list[str]],
         *,
         category: Optional[str] = None,
-        persona: str = "",
+        persona: Optional[str] = None,
         exclude_persona: str = "",
         limit: int = 20,
         offset: int = 0,
@@ -736,7 +739,7 @@ class WardrobeDatabase:
         *,
         category: Optional[str] = None,
         shot_size: Optional[str] = None,
-        persona: str = "",
+        persona: Optional[str] = None,
         exclude_persona: str = "",
         favorite: Optional[str] = None,
         ref_strength: Optional[str] = None,
@@ -752,9 +755,12 @@ class WardrobeDatabase:
         if shot_size:
             conditions.append("shot_size = ?")
             params.append(shot_size)
-        if persona:
-            conditions.append("persona = ?")
-            params.append(persona)
+        if persona is not None:
+            if persona == "":
+                conditions.append("(persona = '' OR persona IS NULL)")
+            else:
+                conditions.append("persona = ?")
+                params.append(persona)
         if exclude_persona:
             conditions.append("persona != ?")
             params.append(exclude_persona)
