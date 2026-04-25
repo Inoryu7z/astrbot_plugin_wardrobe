@@ -146,20 +146,39 @@ class ImageSearcher:
         meta = {"persona_mismatch": False, "searched_persona": persona, "persona_scope": "global"}
 
         if self.vector_searcher and self.vector_searcher.available and exclude_current_persona and current_persona:
-            candidates = await self._vector_search(user_query, k=candidate_limit, exclude_persona=current_persona)
-            logger.info(
-                "[Wardrobe] 向量检索（排除人格）: %d张 exclude=%s",
-                len(candidates), current_persona,
-            )
-            if candidates:
-                candidates = self._sort_by_favorite(candidates)
-                meta["searched_persona"] = f"非{current_persona}"
-                for c in candidates:
-                    if c.get("persona") and c["persona"] != current_persona:
+            if persona_mode == "no_persona_only":
+                candidates = await self._vector_search(user_query, k=candidate_limit, persona="")
+                logger.info(
+                    "[Wardrobe] 向量检索（no_persona_only）: %d张 persona=无人格",
+                    len(candidates),
+                )
+                if candidates:
+                    candidates = self._sort_by_favorite(candidates)
+                    meta["searched_persona"] = ""
+                else:
+                    logger.info("[Wardrobe] 无人格池无结果，no_persona_only模式不回退其他人格")
+                    return [], meta
+            else:
+                candidates = await self._vector_search(user_query, k=candidate_limit, persona="")
+                logger.info(
+                    "[Wardrobe] 向量检索（fallback_other优先无人格）: %d张 persona=无人格",
+                    len(candidates),
+                )
+                if candidates:
+                    candidates = self._sort_by_favorite(candidates)
+                    meta["searched_persona"] = ""
+                else:
+                    candidates = await self._vector_search(user_query, k=candidate_limit, exclude_persona=current_persona)
+                    logger.info(
+                        "[Wardrobe] 向量检索（fallback_other回退）: %d张 exclude=%s",
+                        len(candidates), current_persona,
+                    )
+                    if candidates:
+                        candidates = self._sort_by_favorite(candidates)
+                        meta["searched_persona"] = f"非{current_persona}"
                         meta["persona_mismatch"] = True
-                        break
-            if not candidates:
-                return [], meta
+                    else:
+                        return [], meta
         else:
             query_conditions = await self._parse_query(
                 user_query,
@@ -181,16 +200,43 @@ class ImageSearcher:
             meta["persona_scope"] = persona_scope
 
             if exclude_current_persona and current_persona:
-                candidates = await self._query_candidates_excluding_persona(
-                    query_conditions, exclude_persona=current_persona, limit=candidate_limit,
-                    user_query=user_query,
-                )
-                logger.info(
-                    "[Wardrobe] 排除人格搜索结果: %d张 exclude=%s",
-                    len(candidates), current_persona,
-                )
-                if not candidates:
-                    return [], meta
+                if persona_mode == "no_persona_only":
+                    candidates = await self._query_candidates(
+                        query_conditions, limit=candidate_limit, persona="", user_query=user_query,
+                    )
+                    logger.info(
+                        "[Wardrobe] 无人格池搜索结果: %d张 (no_persona_only)",
+                        len(candidates),
+                    )
+                    if candidates:
+                        meta["searched_persona"] = ""
+                    else:
+                        logger.info("[Wardrobe] 无人格池无结果，no_persona_only模式不回退其他人格")
+                        return [], meta
+                else:
+                    candidates = await self._query_candidates(
+                        query_conditions, limit=candidate_limit, persona="", user_query=user_query,
+                    )
+                    logger.info(
+                        "[Wardrobe] 无人格池搜索结果: %d张 (fallback_other)",
+                        len(candidates),
+                    )
+                    if candidates:
+                        meta["searched_persona"] = ""
+                    else:
+                        candidates = await self._query_candidates_excluding_persona(
+                            query_conditions, exclude_persona=current_persona, limit=candidate_limit,
+                            user_query=user_query,
+                        )
+                        logger.info(
+                            "[Wardrobe] 排除人格搜索结果: %d张 exclude=%s (fallback_other回退)",
+                            len(candidates), current_persona,
+                        )
+                        if candidates:
+                            meta["searched_persona"] = f"非{current_persona}"
+                            meta["persona_mismatch"] = True
+                        else:
+                            return [], meta
             else:
                 candidates = await self._search_by_scope(
                     query_conditions, persona_scope=persona_scope,

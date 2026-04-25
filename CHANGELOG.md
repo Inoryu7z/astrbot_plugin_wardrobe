@@ -1,3 +1,16 @@
+### v2.3.0
+
+**🐛 Bug 修复**
+
+* 修复 `exclude_current_persona=True`（AiImg 参考图搜索）时忽略 `search_persona_mode` 配置的 bug：之前该路径直接排除当前人格后返回其他人格的图，完全绕过了 `no_persona_only` / `fallback_other` 策略。现在正确遵循策略：`no_persona_only` 只搜无人格图，`fallback_other` 优先搜无人格图再回退其他人格
+* `get_reference_image` 现在显式传入 `persona_mode` 配置值，而非依赖默认参数
+
+**🔧 日志优化**
+
+* 移除所有信息日志中的描述/提示词截断（`[:100]`/`[:200]`），输出完整内容便于排查
+
+---
+
 ### v2.2.9
 
 **🐛 Bug 修复**

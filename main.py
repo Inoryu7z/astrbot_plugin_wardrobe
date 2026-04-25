@@ -896,7 +896,7 @@ class WardrobePlugin(Star):
                     logger.info(
                         "[Wardrobe] AiImg 自动存图完成 ID=%s 分类=%s 描述=%s",
                         image_id, attrs.get("category", ""),
-                        attrs.get("description", "")[:100],
+                        attrs.get("description", ""),
                     )
                 else:
                     logger.info("[Wardrobe] AiImg 自动存图完成（分析失败）ID=%s", image_id)
@@ -1043,6 +1043,7 @@ class WardrobePlugin(Star):
             persona_names=persona_names,
             current_persona=resolved_persona,
             exclude_current_persona=True,
+            persona_mode=str(self._cfg("search_persona_mode", "no_persona_only")),
             prioritize_unused=bool(self._cfg("search_prioritize_unused", False)),
         )
 
@@ -1058,7 +1059,7 @@ class WardrobePlugin(Star):
 
         logger.info(
             "[Wardrobe] 参考图搜索完成: ID=%s 描述=%s",
-            best["id"], best.get("description", "")[:100],
+            best["id"], best.get("description", ""),
         )
 
         try:
@@ -1165,11 +1166,11 @@ class WardrobePlugin(Star):
             desc = r.get("description", "")
             img_persona = r.get("persona", "")
             if desc:
-                parts.append(f"图片{i}描述：{desc[:200]}")
+                parts.append(f"图片{i}描述：{desc}")
             if include_user_tags:
                 ut = r.get("user_tags", "")
                 if ut:
-                    parts.append(f"图片{i}用户标注：{ut[:100]}")
+                    parts.append(f"图片{i}用户标注：{ut}")
 
         if search_meta.get("persona_mismatch") and current_persona:
             scope = search_meta.get("persona_scope", "global")
