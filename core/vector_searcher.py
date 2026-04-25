@@ -184,7 +184,7 @@ class WardrobeVectorSearcher:
         self,
         query: str,
         k: int = 20,
-        persona: str = "",
+        persona: Optional[str] = None,
         exclude_persona: str = "",
         min_similarity: float | None = None,
     ) -> list[tuple[str, float]]:
@@ -201,10 +201,13 @@ class WardrobeVectorSearcher:
 
         try:
             metadata_filters = {}
-            if persona:
+            filter_no_persona = persona is not None and persona == ""
+            if persona and not filter_no_persona:
                 metadata_filters["persona_id"] = persona
 
             fetch_k = k * 3 if metadata_filters else k * 2
+            if filter_no_persona or exclude_persona:
+                fetch_k = max(fetch_k, k * 3)
             results = await self._faiss_db.retrieve(
                 query=processed_query,
                 k=k,
@@ -238,8 +241,12 @@ class WardrobeVectorSearcher:
                     continue
                 seen.add(wid)
 
+                doc_persona = meta.get("persona_id", meta.get("persona", ""))
+                if filter_no_persona:
+                    if doc_persona:
+                        continue
+
                 if exclude_persona:
-                    doc_persona = meta.get("persona_id", meta.get("persona", ""))
                     if doc_persona == exclude_persona:
                         continue
 

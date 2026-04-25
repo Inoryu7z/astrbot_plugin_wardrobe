@@ -288,7 +288,7 @@ class ImageSearcher:
         logger.info("[Wardrobe] 全局搜索")
         return await self._query_candidates(conditions, limit=limit, persona="", user_query=user_query)
 
-    async def _vector_search(self, user_query: str, k: int, persona: str = "", exclude_persona: str = "") -> list[dict[str, Any]]:
+    async def _vector_search(self, user_query: str, k: int, persona: Optional[str] = None, exclude_persona: str = "") -> list[dict[str, Any]]:
         if not self.vector_searcher or not self.vector_searcher.available:
             logger.info("[Wardrobe] 向量检索不可用: vector_searcher=%s available=%s",
                         self.vector_searcher is not None,
@@ -296,7 +296,7 @@ class ImageSearcher:
             return []
 
         logger.info("[Wardrobe] 向量检索开始: query=%s k=%d persona=%s exclude_persona=%s",
-                    user_query[:100], k, persona or "全局", exclude_persona or "无")
+                    user_query[:100], k, "无人格" if persona == "" else (persona or "全局"), exclude_persona or "无")
         wardrobe_results = await self.vector_searcher.search(
             query=user_query,
             k=k,
@@ -344,7 +344,7 @@ class ImageSearcher:
             atmosphere=atmosphere,
             pose_type=pose_type,
             body_focus=body_focus,
-            persona="",
+            persona=None,
             exclude_persona=exclude_persona,
             shot_size=shot_size,
             limit=limit,
@@ -354,7 +354,7 @@ class ImageSearcher:
             results = await self.db.search_by_description(
                 keywords=keywords,
                 category=category,
-                persona="",
+                persona=None,
                 exclude_persona=exclude_persona,
                 limit=limit,
             )
@@ -362,7 +362,7 @@ class ImageSearcher:
         if not results and keywords and category:
             results = await self.db.search_by_description(
                 keywords=keywords,
-                persona="",
+                persona=None,
                 exclude_persona=exclude_persona,
                 limit=limit,
             )
@@ -426,10 +426,10 @@ class ImageSearcher:
 
         vec_results = await self._vector_search(user_query or " ".join(keywords or []), k=limit, persona=persona)
         if vec_results:
-            logger.info("[Wardrobe] 向量检索命中: %d张 persona=%s", len(vec_results), persona or "全局")
+            logger.info("[Wardrobe] 向量检索命中: %d张 persona=%s", len(vec_results), "无人格" if persona == "" else (persona or "全局"))
             return self._sort_by_favorite(vec_results)
 
-        logger.info("[Wardrobe] 向量检索无结果，回退LIKE检索 persona=%s", persona or "全局")
+        logger.info("[Wardrobe] 向量检索无结果，回退LIKE检索 persona=%s", "无人格" if persona == "" else (persona or "全局"))
         results = await self.db.search_images(
             category=category,
             exposure_level=exposure_level,
