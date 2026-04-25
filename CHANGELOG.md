@@ -4,6 +4,12 @@
 
 * 修复 `exclude_current_persona=True`（AiImg 参考图搜索）时忽略 `search_persona_mode` 配置的 bug：之前该路径直接排除当前人格后返回其他人格的图，完全绕过了 `no_persona_only` / `fallback_other` 策略。现在正确遵循策略：`no_persona_only` 只搜无人格图，`fallback_other` 优先搜无人格图再回退其他人格
 * `get_reference_image` 现在显式传入 `persona_mode` 配置值，而非依赖默认参数
+* 修复 Bot 自己取图时错误应用 `search_persona_mode` 策略的问题：`persona_mode` 仅影响 AiImg 参考图搜索，Bot 取图时 `self` scope 只搜当前人格、`other` scope 只搜非当前人格、`named` scope 只搜指定人格、`global` scope 搜所有图，搜不到直接返回空，不再回退
+* 修复 `persona=""` 在数据库层和向量搜索层被当作"不过滤人格"处理的问题：统一语义 `persona=None` 不过滤，`persona=""` 只搜无人格图
+
+**🔧 优化**
+
+* `search_persona_mode` 配置项更名为"参考图人格搜索策略"，描述明确仅影响 AiImg 参考图搜索
 
 **🔧 日志优化**
 

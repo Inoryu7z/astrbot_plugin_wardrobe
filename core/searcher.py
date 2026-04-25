@@ -242,7 +242,6 @@ class ImageSearcher:
                     query_conditions, persona_scope=persona_scope,
                     named_persona=named_persona, current_persona=current_persona,
                     limit=candidate_limit, meta=meta, user_query=user_query,
-                    persona_mode=persona_mode,
                 )
 
         if not candidates:
@@ -281,32 +280,19 @@ class ImageSearcher:
         limit: int,
         meta: dict[str, Any],
         user_query: str = "",
-        persona_mode: str = "no_persona_only",
     ) -> list[dict[str, Any]]:
         logger.info(
-            "[Wardrobe] 搜索策略: scope=%s current_persona=%s named_persona=%s persona_mode=%s",
-            persona_scope, current_persona or "无", named_persona or "无", persona_mode,
+            "[Wardrobe] 搜索策略: scope=%s current_persona=%s named_persona=%s",
+            persona_scope, current_persona or "无", named_persona or "无",
         )
 
         if persona_scope == "self" and current_persona:
-            candidates = await self._query_candidates(conditions, limit=limit, persona="", user_query=user_query)
-            logger.info("[Wardrobe] 无人格池搜索结果: %d张", len(candidates))
+            candidates = await self._query_candidates(conditions, limit=limit, persona=current_persona, user_query=user_query)
+            logger.info("[Wardrobe] 当前人格池搜索结果: %d张 persona=%s", len(candidates), current_persona)
             if candidates:
-                meta["searched_persona"] = ""
+                meta["searched_persona"] = current_persona
                 return candidates
-            if persona_mode == "no_persona_only":
-                logger.info("[Wardrobe] 无人格池无结果，no_persona_only模式不回退其他人格")
-                return []
-            else:
-                candidates = await self._query_candidates_excluding_persona(
-                    conditions, limit=limit, exclude_persona=current_persona, user_query=user_query,
-                )
-                logger.info("[Wardrobe] 其他人格池搜索结果: %d张 exclude=%s", len(candidates), current_persona)
-                if candidates:
-                    meta["persona_mismatch"] = True
-                    meta["searched_persona"] = f"非{current_persona}"
-                    return candidates
-                return []
+            return []
 
         if persona_scope == "other" and current_persona:
             candidates = await self._query_candidates_excluding_persona(conditions, limit=limit, exclude_persona=current_persona, user_query=user_query)
@@ -314,10 +300,7 @@ class ImageSearcher:
             if candidates:
                 meta["searched_persona"] = f"非{current_persona}"
                 return candidates
-            logger.info("[Wardrobe] 非当前人格池无结果，回退全局搜索")
-            candidates = await self._query_candidates(conditions, limit=limit, persona="", user_query=user_query)
-            meta["searched_persona"] = ""
-            return candidates
+            return []
 
         if persona_scope == "named" and named_persona:
             candidates = await self._query_candidates(conditions, limit=limit, persona=named_persona, user_query=user_query)
@@ -325,14 +308,10 @@ class ImageSearcher:
             if candidates:
                 meta["searched_persona"] = named_persona
                 return candidates
-            logger.info("[Wardrobe] 指定人格池无结果，回退全局搜索 persona=%s", named_persona)
-            meta["persona_mismatch"] = True
-            candidates = await self._query_candidates(conditions, limit=limit, persona="", user_query=user_query)
-            meta["searched_persona"] = ""
-            return candidates
+            return []
 
         logger.info("[Wardrobe] 全局搜索")
-        return await self._query_candidates(conditions, limit=limit, persona="", user_query=user_query)
+        return await self._query_candidates(conditions, limit=limit, persona=None, user_query=user_query)
 
     async def _vector_search(self, user_query: str, k: int, persona: Optional[str] = None, exclude_persona: str = "") -> list[dict[str, Any]]:
         if not self.vector_searcher or not self.vector_searcher.available:

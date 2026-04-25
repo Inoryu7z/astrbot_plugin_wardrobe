@@ -100,8 +100,8 @@
     "default": false
   },
   "search_persona_mode": {
-    "description": "取图人格搜索策略",
-    "hint": "no_persona_only：只搜无人格图，搜不到直接返回空；fallback_other：优先搜无人格图，搜不到再搜其他人格的图",
+    "description": "参考图人格搜索策略",
+    "hint": "AiImg获取参考图时的人格过滤策略。no_persona_only：只搜无人格图，搜不到直接返回空；fallback_other：优先搜无人格图，搜不到再搜其他人格的图。Bot自己取图时不受此配置影响，始终优先搜当前人格的图。",
     "type": "string",
     "default": "no_persona_only",
     "options": [
