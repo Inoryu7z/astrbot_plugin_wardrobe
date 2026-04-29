@@ -49,6 +49,7 @@
     {key:'user_tags',label:'用户标签',type:'text'},
     {key:'persona',label:'人格',type:'text'},
     {key:'favorite',label:'收藏',type:'select',options:['none','favorite','like']},
+    {key:'use_count',label:'热度',type:'number',min:0},
   ];
 
   let state={
@@ -477,6 +478,14 @@
           ta.className='field-textarea';
           ta.value=val||'';
           inputWrap.appendChild(ta);
+        }else if(def.type==='number'){
+          const inp=document.createElement('input');
+          inp.type='number';
+          inp.className='field-text-input';
+          inp.value=val!=null?val:0;
+          if(def.min!=null)inp.min=def.min;
+          if(def.max!=null)inp.max=def.max;
+          inputWrap.appendChild(inp);
         }else{
           const inp=document.createElement('input');
           inp.type='text';
@@ -511,6 +520,12 @@
           tag.textContent=val;
           valWrap.appendChild(tag);
           colorIdx++;
+        }else if(def.type==='number' && def.key==='use_count'){
+          const fav=img.favorite||'none';
+          let hint='';
+          if(fav==='favorite')hint=' (收藏-3 → 有效热度 '+(val-3)+')';
+          else if(fav==='like')hint=' (喜欢-1 → 有效热度 '+(val-1)+')';
+          valWrap.innerHTML=`<span class="field-value-text">🔥${val!=null?val:0}${hint}</span>`;
         }else{
           valWrap.innerHTML=val?`<span class="field-value-text">${esc(String(val))}</span>`:'<span class="field-empty">-</span>';
         }
@@ -562,6 +577,9 @@
       }else if(def.type==='textarea'){
         const ta=row.querySelector('.field-textarea');
         data[def.key]=ta?ta.value:'';
+      }else if(def.type==='number'){
+        const inp=row.querySelector('.field-text-input');
+        data[def.key]=inp?parseInt(inp.value,10)||0:0;
       }else{
         const inp=row.querySelector('.field-text-input');
         data[def.key]=inp?inp.value:'';

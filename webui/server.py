@@ -339,6 +339,11 @@ class WardrobeWebServer:
                              "expression", "color_tone", "composition", "background",
                              "description", "user_tags", "persona", "favorite", "ref_strength"):
                     update_data[key] = str(val) if val is not None else ""
+                elif key == "use_count":
+                    try:
+                        update_data[key] = max(0, int(val))
+                    except (ValueError, TypeError):
+                        pass
 
             if not update_data:
                 return jsonify({"error": "无有效更新字段"}), 400

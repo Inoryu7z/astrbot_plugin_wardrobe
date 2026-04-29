@@ -249,7 +249,15 @@ class ImageSearcher:
             return [], meta
 
         if prioritize_unused:
-            candidates.sort(key=lambda r: r.get("use_count", 0) or 0)
+            def _effective_use_count(r):
+                base = r.get("use_count", 0) or 0
+                fav = r.get("favorite", "none")
+                if fav == "favorite":
+                    base -= 3
+                elif fav == "like":
+                    base -= 1
+                return base
+            candidates.sort(key=_effective_use_count)
 
         if len(candidates) <= max_select:
             selected = candidates
