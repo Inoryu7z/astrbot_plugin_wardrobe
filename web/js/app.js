@@ -68,9 +68,55 @@
     batchOps:[],
     gridImageIds:[],
     preloadedPage2:null,
-    originalLoadQueue:[],
     loadedOriginals:new Set(),
+    detailCache:new Map(),
+    detailAbortController:null,
   };
+
+  let _originalObserver=null;
+  const _originalQueue=[];
+  let _originalActive=0;
+  const MAX_ORIGINAL_CONCURRENT=3;
+
+  function _initOriginalObserver(){
+    if(_originalObserver)return;
+    _originalObserver=new IntersectionObserver(entries=>{
+      entries.forEach(entry=>{
+        if(entry.isIntersecting){
+          const card=entry.target;
+          const id=card.dataset.id;
+          _enqueueOriginal(card,id);
+          _originalObserver.unobserve(card);
+        }
+      });
+    },{rootMargin:'300px'});
+  }
+
+  function _enqueueOriginal(card,id){
+    if(state.loadedOriginals.has(id))return;
+    _originalQueue.push({card,id});
+    _processOriginalQueue();
+  }
+
+  function _processOriginalQueue(){
+    while(_originalActive<MAX_ORIGINAL_CONCURRENT&&_originalQueue.length>0){
+      const{card,id}=_originalQueue.shift();
+      if(state.loadedOriginals.has(id)){continue;}
+      const img=card.querySelector('img[data-original]');
+      if(!img){continue;}
+      _originalActive++;
+      const origSrc=img.dataset.original;
+      const preloader=new Image();
+      preloader.onload=()=>{
+        img.src=origSrc;
+        state.loadedOriginals.add(id);
+        _originalActive--;
+        _processOriginalQueue();
+      };
+      preloader.onerror=()=>{_originalActive--;_processOriginalQueue();};
+      preloader.src=origSrc;
+    }
+  }
 
   function getToken(){
     return localStorage.getItem('wardrobe_token')||'';
@@ -171,8 +217,11 @@
       state.allLoaded=false;
       state.gridImageIds=[];
       state.preloadedPage2=null;
-      state.originalLoadQueue=[];
       state.loadedOriginals=new Set();
+      state.detailCache.clear();
+      _originalQueue.length=0;
+      _originalActive=0;
+      if(_originalObserver){_originalObserver.disconnect();}
       $('#imageGrid').innerHTML='';
     }
 
@@ -246,6 +295,7 @@
 
   function appendGrid(images){
     const grid=$('#imageGrid');
+    const fragment=document.createDocumentFragment();
     images.forEach(img=>{
       state.gridImageIds.push(img.id);
       const card=document.createElement('div');
@@ -281,8 +331,10 @@
       });
       const cb=card.querySelector('.image-card-checkbox');
       cb.addEventListener('click',e=>{e.stopPropagation();toggleSelect(img.id);});
-      grid.appendChild(card);
+      if(_originalObserver)_originalObserver.observe(card);
+      fragment.appendChild(card);
     });
+    grid.appendChild(fragment);
   }
 
   function toggleSelect(id){
@@ -292,26 +344,17 @@
   }
 
   async function preloadPage2AndOriginals(){
-    let page2Images=null;
     if(!state.allLoaded){
       try{
         const url=`/api/images?page=${state.page}&per_page=${state.perPage}&category=${encodeURIComponent(state.category)}&persona=${encodeURIComponent(state.persona)}&style=${encodeURIComponent(state.style)}&scene=${encodeURIComponent(state.scene)}&shot_size=${encodeURIComponent(state.shot_size)}&atmosphere=${encodeURIComponent(state.atmosphere)}&favorite=${encodeURIComponent(state.favorite)}&ref_strength=${encodeURIComponent(state.ref_strength)}&sort_by=${encodeURIComponent(state.sort_by)}&lightweight=1`;
         const resp=await api(url);
         if(resp&&resp.ok){
           const data=await resp.json();
-          page2Images=data.images||[];
-          state.preloadedPage2=page2Images;
+          state.preloadedPage2=data.images||[];
         }
       }catch(e){
         console.warn('[Wardrobe] 预加载第二页失败:',e);
       }
-    }
-
-    await loadOriginalsForVisibleCards();
-
-    if(page2Images&&page2Images.length){
-      await preloadThumbnails(page2Images);
-      await loadOriginalsForPage2(page2Images);
     }
   }
 
@@ -325,74 +368,10 @@
         const images=data.images||[];
         if(images.length<state.perPage)state.allLoaded=true;
         state.preloadedPage2=images;
-        await preloadThumbnails(images);
-        await loadOriginalsForPage2(images);
       }
     }catch(e){
       console.warn('[Wardrobe] 预加载下一页失败:',e);
     }
-  }
-
-  function loadOriginalsForVisibleCards(){
-    return new Promise(resolve=>{
-      const imgs=$$('#imageGrid .image-card img[data-original]');
-      let pending=0;
-      const check=()=>{if(pending===0)resolve();};
-      if(!imgs.length){resolve();return;}
-      imgs.forEach(img=>{
-        const origSrc=img.dataset.original;
-        if(!origSrc||state.loadedOriginals.has(img.parentElement.dataset.id)){
-          return;
-        }
-        pending++;
-        const preloader=new Image();
-        preloader.onload=()=>{
-          img.src=origSrc;
-          state.loadedOriginals.add(img.parentElement.dataset.id);
-          pending--;
-          check();
-        };
-        preloader.onerror=()=>{pending--;check();};
-        preloader.src=origSrc;
-      });
-      check();
-    });
-  }
-
-  function preloadThumbnails(images){
-    return new Promise(resolve=>{
-      let pending=0;
-      const check=()=>{if(pending===0)resolve();};
-      if(!images.length){resolve();return;}
-      images.forEach(img=>{
-        pending++;
-        const preloader=new Image();
-        preloader.onload=()=>{pending--;check();};
-        preloader.onerror=()=>{pending--;check();};
-        preloader.src=`/api/image-file/${img.id}/thumbnail`;
-      });
-      check();
-    });
-  }
-
-  function loadOriginalsForPage2(images){
-    return new Promise(resolve=>{
-      let pending=0;
-      const check=()=>{if(pending===0)resolve();};
-      if(!images.length){resolve();return;}
-      images.forEach(img=>{
-        pending++;
-        const preloader=new Image();
-        preloader.onload=()=>{
-          state.loadedOriginals.add(img.id);
-          pending--;
-          check();
-        };
-        preloader.onerror=()=>{pending--;check();};
-        preloader.src=`/api/image-file/${img.id}`;
-      });
-      check();
-    });
   }
 
   function updateBatchUI(){
@@ -405,27 +384,74 @@
   async function showDetail(id){
     state.currentImageId=id;
     state.editing=false;
-    const resp=await api(`/api/images/${id}`);
-    if(!resp)return;
-    const img=await resp.json();
-    state.currentImageData=img;
-    const card=document.querySelector(`.image-card[data-id="${id}"] img`);
-    if(card&&state.loadedOriginals.has(id)){
-      $('#modalImage').src=card.src;
-    }else{
-      $('#modalImage').src=`/api/image-file/${id}/thumbnail`;
-      const preloader=new Image();
-      preloader.onload=()=>{$('#modalImage').src=`/api/image-file/${id}`;};
-      preloader.src=`/api/image-file/${id}`;
+
+    if(state.detailAbortController){
+      try{state.detailAbortController.abort();}catch(e){}
     }
-    renderDetailFields(img,false);
-    const metaRO=$('#modalMetaReadonly');
-    metaRO.innerHTML=`<span>ID: ${esc(img.id)}</span><span>创建时间: ${esc(img.created_at||'未知')}</span>`;
-    updateFavoriteBtns(img.favorite||'none');
-    updateRefStrengthBtns(img.ref_strength||'style', img.ref_strength_reason||'');
-    updateEditButtons();
-    updateNavArrows();
-    $('#detailModal').classList.remove('hidden');
+    state.detailAbortController=new AbortController();
+    const signal=state.detailAbortController.signal;
+
+    const cached=state.detailCache.get(id);
+    if(cached){
+      state.currentImageData=cached;
+      const card=document.querySelector(`.image-card[data-id="${id}"] img`);
+      if(card&&state.loadedOriginals.has(id)){
+        $('#modalImage').src=card.src;
+      }else{
+        $('#modalImage').src=`/api/image-file/${id}/thumbnail`;
+        const preloader=new Image();
+        preloader.onload=()=>{$('#modalImage').src=`/api/image-file/${id}`;};
+        preloader.src=`/api/image-file/${id}`;
+      }
+      renderDetailFields(cached,false);
+      const metaRO=$('#modalMetaReadonly');
+      metaRO.innerHTML=`<span>ID: ${esc(cached.id)}</span><span>创建时间: ${esc(cached.created_at||'未知')}</span>`;
+      updateFavoriteBtns(cached.favorite||'none');
+      updateRefStrengthBtns(cached.ref_strength||'style', cached.ref_strength_reason||'');
+      updateEditButtons();
+      updateNavArrows();
+      $('#detailModal').classList.remove('hidden');
+    }
+
+    try{
+      const headers={'X-Wardrobe-Token':getToken()};
+      const resp=await fetch(`/api/images/${id}`,{headers,signal});
+      if(signal.aborted)return;
+      if(resp.status===401){localStorage.removeItem('wardrobe_token');window.location.href='/login';return;}
+      if(!resp.ok)return;
+      const img=await resp.json();
+      if(signal.aborted)return;
+      state.detailCache.set(id,img);
+      state.currentImageData=img;
+
+      if(!cached){
+        const card=document.querySelector(`.image-card[data-id="${id}"] img`);
+        if(card&&state.loadedOriginals.has(id)){
+          $('#modalImage').src=card.src;
+        }else{
+          $('#modalImage').src=`/api/image-file/${id}/thumbnail`;
+          const preloader=new Image();
+          preloader.onload=()=>{$('#modalImage').src=`/api/image-file/${id}`;};
+          preloader.src=`/api/image-file/${id}`;
+        }
+        renderDetailFields(img,false);
+        const metaRO=$('#modalMetaReadonly');
+        metaRO.innerHTML=`<span>ID: ${esc(img.id)}</span><span>创建时间: ${esc(img.created_at||'未知')}</span>`;
+        updateFavoriteBtns(img.favorite||'none');
+        updateRefStrengthBtns(img.ref_strength||'style', img.ref_strength_reason||'');
+        updateEditButtons();
+        updateNavArrows();
+        $('#detailModal').classList.remove('hidden');
+      }else{
+        const metaRO=$('#modalMetaReadonly');
+        metaRO.innerHTML=`<span>ID: ${esc(img.id)}</span><span>创建时间: ${esc(img.created_at||'未知')}</span>`;
+        updateFavoriteBtns(img.favorite||'none');
+        updateRefStrengthBtns(img.ref_strength||'style', img.ref_strength_reason||'');
+      }
+    }catch(e){
+      if(e.name==='AbortError')return;
+      console.error('[Wardrobe] showDetail error:',e);
+    }
   }
 
   function updateNavArrows(){
@@ -466,6 +492,7 @@
     const result=await resp.json();
     if(result.success){
       state.currentImageData.favorite=newFav;
+      state.detailCache.set(state.currentImageId,state.currentImageData);
       updateFavoriteBtns(newFav);
       toast(newFav==='none'?'已取消':newFav==='favorite'?'已收藏':'已标记喜欢','success');
     }else{
@@ -522,6 +549,7 @@
     const result=await resp.json();
     if(result.success){
       state.currentImageData.ref_strength=value;
+      state.detailCache.set(state.currentImageId,state.currentImageData);
       updateRefStrengthBtns(value, state.currentImageData.ref_strength_reason||'');
       updateCardInGrid(state.currentImageId, {ref_strength: value});
       toast(`参考强度: ${RS_OPTIONS.find(o=>o.value===value)?.label||value}`,'success');
@@ -767,6 +795,7 @@
       const freshResp=await api(`/api/images/${state.currentImageId}`);
       if(freshResp){
         state.currentImageData=await freshResp.json();
+        state.detailCache.set(state.currentImageId,state.currentImageData);
         renderDetailFields(state.currentImageData,false);
         updateCardInGrid(state.currentImageId, {
           style: state.currentImageData.style,
@@ -1701,6 +1730,8 @@
   }
 
   function init(){
+    _initOriginalObserver();
+
     $$('input[name="category"]').forEach(inp=>{
       inp.addEventListener('change',()=>{
         state.category=inp.value;state.page=1;state.allLoaded=false;loadImages(true);

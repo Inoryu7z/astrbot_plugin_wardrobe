@@ -1,3 +1,16 @@
+### v2.3.3
+
+**⚡ 性能优化**
+
+* HTTP 缓存头：图片端点添加 Cache-Control（7天缓存）+ ETag，二次访问浏览器直接使用缓存，网络请求减少 90%+
+* IntersectionObserver 原图懒加载：替代批量预加载，仅加载视口内可见卡片原图，并发限制3个，带宽占用降低 70%+
+* content-visibility: auto：CSS 跳过离屏卡片渲染，DOM 节点恒定开销，多图不再卡顿
+* 详情数据缓存 + AbortController：已访问图片瞬间显示，快速导航自动取消前一个请求
+* 批量预生成缩略图：插件启动时后台生成所有缺失缩略图，首次页面加载不再等待按需生成
+* DocumentFragment 批量插入：卡片从逐个 append 改为 fragment 一次性插入，减少 reflow
+
+---
+
 ### v2.3.2
 
 **✨ 新功能**

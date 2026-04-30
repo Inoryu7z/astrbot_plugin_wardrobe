@@ -641,7 +641,10 @@ class WardrobeWebServer:
             image_path = self.plugin.store.get_image_path(image["image_path"])
             if not image_path.exists():
                 return jsonify({"error": "文件不存在"}), 404
-            return await send_from_directory(str(image_path.parent), image_path.name)
+            resp = await send_from_directory(str(image_path.parent), image_path.name)
+            resp.headers['Cache-Control'] = 'public, max-age=604800'
+            resp.headers['ETag'] = f'"{image_id}"'
+            return resp
 
         @app.route("/api/image-file/<image_id>/thumbnail")
         async def api_image_file_thumbnail(image_id):
@@ -652,7 +655,10 @@ class WardrobeWebServer:
             thumb_path = await self.plugin.store.ensure_thumbnail(image["image_path"])
             if not thumb_path.exists():
                 return jsonify({"error": "文件不存在"}), 404
-            return await send_from_directory(str(thumb_path.parent), thumb_path.name)
+            resp = await send_from_directory(str(thumb_path.parent), thumb_path.name)
+            resp.headers['Cache-Control'] = 'public, max-age=604800'
+            resp.headers['ETag'] = f'"thumb-{image_id}"'
+            return resp
 
         @app.route("/api/pools", methods=["GET"])
         async def api_get_pools():
