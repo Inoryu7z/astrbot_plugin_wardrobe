@@ -290,6 +290,12 @@ class WardrobeWebServer:
             }
             return jsonify(result)
 
+        @app.route("/api/images/failed")
+        async def api_images_failed():
+            await self.plugin._ensure_db()
+            ids = await self.plugin.db.get_failed_image_ids()
+            return jsonify({"ids": ids})
+
         @app.route("/api/images/<image_id>")
         async def api_image_detail(image_id):
             await self.plugin._ensure_db()
@@ -636,6 +642,17 @@ class WardrobeWebServer:
             if not image_path.exists():
                 return jsonify({"error": "文件不存在"}), 404
             return await send_from_directory(str(image_path.parent), image_path.name)
+
+        @app.route("/api/image-file/<image_id>/thumbnail")
+        async def api_image_file_thumbnail(image_id):
+            await self.plugin._ensure_db()
+            image = await self.plugin.db.get_image(image_id)
+            if not image:
+                return jsonify({"error": "未找到图片"}), 404
+            thumb_path = await self.plugin.store.ensure_thumbnail(image["image_path"])
+            if not thumb_path.exists():
+                return jsonify({"error": "文件不存在"}), 404
+            return await send_from_directory(str(thumb_path.parent), thumb_path.name)
 
         @app.route("/api/pools", methods=["GET"])
         async def api_get_pools():

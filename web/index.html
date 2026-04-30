@@ -6,7 +6,7 @@
 <title>衣橱图鉴</title>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link href="https://fonts.googleapis.com/css2?family=Fredoka:wght@400;500;600;700&family=Nunito:wght@300;400;500;600;700&display=swap" rel="stylesheet">
-<link rel="stylesheet" href="/static/css/style.css?v=2.3.1">
+<link rel="stylesheet" href="/static/css/style.css?v=2.3.2">
 <script src="https://cdn.jsdelivr.net/npm/echarts@5.5.1/dist/echarts.min.js"></script>
 </head>
 <body>
@@ -131,6 +131,7 @@
       <span class="batch-upload-indicator hidden" id="batchUploadIndicator"></span>
       <span class="batch-reanalyze-indicator hidden" id="batchReanalyzeIndicator"></span>
       <button class="btn btn-accent" id="batchReanalyzeBtn">重新分析</button>
+      <button class="btn btn-secondary" id="batchReanalyzeFailedBtn">重分析失败图</button>
       <button class="btn btn-danger" id="batchDeleteBtn">删除选中</button>
       <button class="btn btn-ghost" id="batchCancelBtn">取消</button>
     </div>
@@ -212,6 +213,8 @@
 </div>
 
 <div class="modal-overlay hidden" id="detailModal">
+  <button class="nav-arrow nav-prev" id="navPrevBtn" title="上一张">&#8249;</button>
+  <button class="nav-arrow nav-next" id="navNextBtn" title="下一张">&#8250;</button>
   <div class="modal-card modal-card-detail">
     <button class="modal-close" id="modalClose">&times;</button>
     <div class="modal-body">
@@ -363,6 +366,6 @@
     <div class="batch-ops-list hidden" id="batchOpsList"></div>
   </div>
 
-<script src="/static/js/app.js?v=2.3.1"></script>
+<script src="/static/js/app.js?v=2.3.2"></script>
 </body>
 </html>
