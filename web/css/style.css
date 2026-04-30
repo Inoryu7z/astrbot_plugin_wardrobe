@@ -271,6 +271,8 @@ html, body {
   cursor:pointer;
   transition:transform .2s, box-shadow .2s;
   border:1px solid var(--border);
+  content-visibility:auto;
+  contain-intrinsic-size:auto 240px;
 }
 
 .image-card:hover {

@@ -41,7 +41,7 @@ _AIIMG_GENERATE_TOOLS = frozenset({"aiimg_generate"})
     "astrbot_plugin_wardrobe",
     "Inoryu7z",
     "图片衣柜管理插件，支持智能分类、语义检索和参考图接口",
-    "2.3.2",
+    "2.3.3",
 )
 class WardrobePlugin(Star):
     def __init__(self, context: Context, config: AstrBotConfig = None):
@@ -493,6 +493,26 @@ class WardrobePlugin(Star):
             except Exception as e:
                 logger.error("[Wardrobe] 自动备份失败: %s", e, exc_info=True)
 
+    async def _ensure_all_thumbnails(self):
+        try:
+            await self._ensure_db()
+            images = await self.db.list_images_lightweight(limit=99999)
+            generated = 0
+            for img in images:
+                try:
+                    thumb_path = self.store.get_thumbnail_path(img["image_path"])
+                    if not thumb_path.exists():
+                        await self.store.ensure_thumbnail(img["image_path"])
+                        generated += 1
+                except Exception:
+                    pass
+            if generated > 0:
+                logger.info("[Wardrobe] 批量缩略图生成完成: 新生成 %d 张", generated)
+        except asyncio.CancelledError:
+            return
+        except Exception as e:
+            logger.warning("[Wardrobe] 批量缩略图生成失败: %s", e)
+
     async def _index_to_vector(self, image_id: str, description: str, user_tags: str,
                                 exposure_features: list | None = None,
                                 key_features: list | None = None,
@@ -573,6 +593,7 @@ class WardrobePlugin(Star):
                 logger.error("[Wardrobe] WebUI 启动失败: %s", e)
 
         self._spawn_bg_task(self._auto_backup_loop())
+        self._spawn_bg_task(self._ensure_all_thumbnails())
 
     @on_llm_tool_respond()
     async def on_aiimg_tool_respond(self, event: AstrMessageEvent, tool, tool_args, tool_result):
