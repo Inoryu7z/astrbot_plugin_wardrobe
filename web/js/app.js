@@ -110,6 +110,8 @@
       preloader.onload=()=>{
         img.src=origSrc;
         state.loadedOriginals.add(id);
+        card.style.contentVisibility='visible';
+        card.style.containIntrinsicSize='';
         _originalActive--;
         _processOriginalQueue();
       };
@@ -313,7 +315,7 @@
         ${favMark}
         ${similarityMark}
         ${rsMark}
-        <img src="/api/image-file/${img.id}/thumbnail" data-original="/api/image-file/${img.id}" loading="lazy" alt="" onerror="this.src='data:image/svg+xml,<svg xmlns=%22http://www.w3.org/2000/svg%22 width=%22180%22 height=%22240%22><rect fill=%22%23F8F0F4%22 width=%22180%22 height=%22240%22/><text x=%2290%22 y=%22125%22 text-anchor=%22middle%22 fill=%22%23C8B8D0%22 font-size=%2214%22>加载失败</text></svg>'">
+        <img src="/api/image-file/${img.id}/thumbnail" data-original="/api/image-file/${img.id}" loading="lazy" decoding="async" alt="" onerror="this.src='data:image/svg+xml,<svg xmlns=%22http://www.w3.org/2000/svg%22 width=%22180%22 height=%22240%22><rect fill=%22%23F8F0F4%22 width=%22180%22 height=%22240%22/><text x=%2290%22 y=%22125%22 text-anchor=%22middle%22 fill=%22%23C8B8D0%22 font-size=%2214%22>加载失败</text></svg>'">
         <div class="image-card-overlay">
           ${useCount}
           ${lastUsed}
