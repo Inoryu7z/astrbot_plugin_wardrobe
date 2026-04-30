@@ -806,6 +806,14 @@ class WardrobeDatabase:
                 rows = await cursor.fetchall()
                 return [self._row_to_dict(row) for row in rows]
 
+    async def get_failed_image_ids(self) -> list[str]:
+        async with aiosqlite.connect(self.db_path) as db:
+            async with db.execute(
+                "SELECT id FROM images WHERE description = '模型分析失败，无描述'"
+            ) as cursor:
+                rows = await cursor.fetchall()
+                return [row[0] for row in rows]
+
     async def import_records(self, records: list[dict[str, Any]], skip_existing: bool = True) -> int:
         existing_ids = set()
         if skip_existing:

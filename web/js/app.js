@@ -66,6 +66,10 @@
     batchUploadProgress:{current:0,total:0,uploaded:0,failed:0},
     batchReanalyzing:false,
     batchOps:[],
+    gridImageIds:[],
+    preloadedPage2:null,
+    originalLoadQueue:[],
+    loadedOriginals:new Set(),
   };
 
   function getToken(){
@@ -165,6 +169,10 @@
     if(resetGrid){
       state.page=1;
       state.allLoaded=false;
+      state.gridImageIds=[];
+      state.preloadedPage2=null;
+      state.originalLoadQueue=[];
+      state.loadedOriginals=new Set();
       $('#imageGrid').innerHTML='';
     }
 
@@ -172,21 +180,40 @@
     $('#loadingIndicator').classList.remove('hidden');
     $('#loadMoreSection').classList.add('hidden');
 
-    let url;
-    if(state.searchQuery){
-      url=`/api/search?q=${encodeURIComponent(state.searchQuery)}&persona=${encodeURIComponent(state.persona)}&category=${encodeURIComponent(state.category)}&favorite=${encodeURIComponent(state.favorite)}&limit=${state.perPage}`;
+    let images=[];
+    let total=0;
+
+    if(!resetGrid && !state.searchQuery && state.preloadedPage2){
+      images=state.preloadedPage2;
+      state.preloadedPage2=null;
+      const statsResp=await api('/api/stats');
+      if(statsResp&&statsResp.ok){
+        const statsData=await statsResp.json();
+        total=statsData.total||0;
+      }else{
+        total=state.total;
+      }
     }else{
-      url=`/api/images?page=${state.page}&per_page=${state.perPage}&category=${encodeURIComponent(state.category)}&persona=${encodeURIComponent(state.persona)}&style=${encodeURIComponent(state.style)}&scene=${encodeURIComponent(state.scene)}&shot_size=${encodeURIComponent(state.shot_size)}&atmosphere=${encodeURIComponent(state.atmosphere)}&favorite=${encodeURIComponent(state.favorite)}&ref_strength=${encodeURIComponent(state.ref_strength)}&sort_by=${encodeURIComponent(state.sort_by)}&lightweight=1`;
+      let url;
+      if(state.searchQuery){
+        url=`/api/search?q=${encodeURIComponent(state.searchQuery)}&persona=${encodeURIComponent(state.persona)}&category=${encodeURIComponent(state.category)}&favorite=${encodeURIComponent(state.favorite)}&limit=${state.perPage}`;
+      }else{
+        url=`/api/images?page=${state.page}&per_page=${state.perPage}&category=${encodeURIComponent(state.category)}&persona=${encodeURIComponent(state.persona)}&style=${encodeURIComponent(state.style)}&scene=${encodeURIComponent(state.scene)}&shot_size=${encodeURIComponent(state.shot_size)}&atmosphere=${encodeURIComponent(state.atmosphere)}&favorite=${encodeURIComponent(state.favorite)}&ref_strength=${encodeURIComponent(state.ref_strength)}&sort_by=${encodeURIComponent(state.sort_by)}&lightweight=1`;
+      }
+
+      const resp=await api(url);
+      state.loading=false;
+      $('#loadingIndicator').classList.add('hidden');
+
+      if(!resp)return;
+      const data=await resp.json();
+      images=data.images||[];
+      total=data.total||images.length;
     }
 
-    const resp=await api(url);
     state.loading=false;
     $('#loadingIndicator').classList.add('hidden');
-
-    if(!resp)return;
-    const data=await resp.json();
-    const images=data.images||[];
-    state.total=data.total||images.length;
+    state.total=total;
 
     if(resetGrid){
       $('#imageGrid').innerHTML='';
@@ -209,11 +236,18 @@
     }
 
     $('#emptyState').classList.toggle('hidden',loadedCount>0);
+
+    if(resetGrid && !state.searchQuery){
+      preloadPage2AndOriginals();
+    }else if(!state.searchQuery){
+      preloadNextPage();
+    }
   }
 
   function appendGrid(images){
     const grid=$('#imageGrid');
     images.forEach(img=>{
+      state.gridImageIds.push(img.id);
       const card=document.createElement('div');
       card.className='image-card';
       card.dataset.id=img.id;
@@ -229,7 +263,7 @@
         ${favMark}
         ${similarityMark}
         ${rsMark}
-        <img src="/api/image-file/${img.id}" loading="lazy" alt="" onerror="this.src='data:image/svg+xml,<svg xmlns=%22http://www.w3.org/2000/svg%22 width=%22180%22 height=%22240%22><rect fill=%22%23F8F0F4%22 width=%22180%22 height=%22240%22/><text x=%2290%22 y=%22125%22 text-anchor=%22middle%22 fill=%22%23C8B8D0%22 font-size=%2214%22>加载失败</text></svg>'">
+        <img src="/api/image-file/${img.id}/thumbnail" data-original="/api/image-file/${img.id}" loading="lazy" alt="" onerror="this.src='data:image/svg+xml,<svg xmlns=%22http://www.w3.org/2000/svg%22 width=%22180%22 height=%22240%22><rect fill=%22%23F8F0F4%22 width=%22180%22 height=%22240%22/><text x=%2290%22 y=%22125%22 text-anchor=%22middle%22 fill=%22%23C8B8D0%22 font-size=%2214%22>加载失败</text></svg>'">
         <div class="image-card-overlay">
           ${useCount}
           ${lastUsed}
@@ -257,6 +291,110 @@
     updateBatchUI();
   }
 
+  async function preloadPage2AndOriginals(){
+    let page2Images=null;
+    if(!state.allLoaded){
+      try{
+        const url=`/api/images?page=${state.page}&per_page=${state.perPage}&category=${encodeURIComponent(state.category)}&persona=${encodeURIComponent(state.persona)}&style=${encodeURIComponent(state.style)}&scene=${encodeURIComponent(state.scene)}&shot_size=${encodeURIComponent(state.shot_size)}&atmosphere=${encodeURIComponent(state.atmosphere)}&favorite=${encodeURIComponent(state.favorite)}&ref_strength=${encodeURIComponent(state.ref_strength)}&sort_by=${encodeURIComponent(state.sort_by)}&lightweight=1`;
+        const resp=await api(url);
+        if(resp&&resp.ok){
+          const data=await resp.json();
+          page2Images=data.images||[];
+          state.preloadedPage2=page2Images;
+        }
+      }catch(e){
+        console.warn('[Wardrobe] 预加载第二页失败:',e);
+      }
+    }
+
+    await loadOriginalsForVisibleCards();
+
+    if(page2Images&&page2Images.length){
+      await preloadThumbnails(page2Images);
+      await loadOriginalsForPage2(page2Images);
+    }
+  }
+
+  async function preloadNextPage(){
+    if(state.allLoaded||state.preloadedPage2)return;
+    try{
+      const url=`/api/images?page=${state.page}&per_page=${state.perPage}&category=${encodeURIComponent(state.category)}&persona=${encodeURIComponent(state.persona)}&style=${encodeURIComponent(state.style)}&scene=${encodeURIComponent(state.scene)}&shot_size=${encodeURIComponent(state.shot_size)}&atmosphere=${encodeURIComponent(state.atmosphere)}&favorite=${encodeURIComponent(state.favorite)}&ref_strength=${encodeURIComponent(state.ref_strength)}&sort_by=${encodeURIComponent(state.sort_by)}&lightweight=1`;
+      const resp=await api(url);
+      if(resp&&resp.ok){
+        const data=await resp.json();
+        const images=data.images||[];
+        if(images.length<state.perPage)state.allLoaded=true;
+        state.preloadedPage2=images;
+        await preloadThumbnails(images);
+        await loadOriginalsForPage2(images);
+      }
+    }catch(e){
+      console.warn('[Wardrobe] 预加载下一页失败:',e);
+    }
+  }
+
+  function loadOriginalsForVisibleCards(){
+    return new Promise(resolve=>{
+      const imgs=$$('#imageGrid .image-card img[data-original]');
+      let pending=0;
+      const check=()=>{if(pending===0)resolve();};
+      if(!imgs.length){resolve();return;}
+      imgs.forEach(img=>{
+        const origSrc=img.dataset.original;
+        if(!origSrc||state.loadedOriginals.has(img.parentElement.dataset.id)){
+          return;
+        }
+        pending++;
+        const preloader=new Image();
+        preloader.onload=()=>{
+          img.src=origSrc;
+          state.loadedOriginals.add(img.parentElement.dataset.id);
+          pending--;
+          check();
+        };
+        preloader.onerror=()=>{pending--;check();};
+        preloader.src=origSrc;
+      });
+      check();
+    });
+  }
+
+  function preloadThumbnails(images){
+    return new Promise(resolve=>{
+      let pending=0;
+      const check=()=>{if(pending===0)resolve();};
+      if(!images.length){resolve();return;}
+      images.forEach(img=>{
+        pending++;
+        const preloader=new Image();
+        preloader.onload=()=>{pending--;check();};
+        preloader.onerror=()=>{pending--;check();};
+        preloader.src=`/api/image-file/${img.id}/thumbnail`;
+      });
+      check();
+    });
+  }
+
+  function loadOriginalsForPage2(images){
+    return new Promise(resolve=>{
+      let pending=0;
+      const check=()=>{if(pending===0)resolve();};
+      if(!images.length){resolve();return;}
+      images.forEach(img=>{
+        pending++;
+        const preloader=new Image();
+        preloader.onload=()=>{
+          state.loadedOriginals.add(img.id);
+          pending--;
+          check();
+        };
+        preloader.onerror=()=>{pending--;check();};
+        preloader.src=`/api/image-file/${img.id}`;
+      });
+      check();
+    });
+  }
+
   function updateBatchUI(){
     $$('.image-card-checkbox').forEach(cb=>{
       cb.classList.toggle('checked',state.selectedIds.has(cb.dataset.id));
@@ -271,14 +409,40 @@
     if(!resp)return;
     const img=await resp.json();
     state.currentImageData=img;
-    $('#modalImage').src=`/api/image-file/${id}`;
+    const card=document.querySelector(`.image-card[data-id="${id}"] img`);
+    if(card&&state.loadedOriginals.has(id)){
+      $('#modalImage').src=card.src;
+    }else{
+      $('#modalImage').src=`/api/image-file/${id}/thumbnail`;
+      const preloader=new Image();
+      preloader.onload=()=>{$('#modalImage').src=`/api/image-file/${id}`;};
+      preloader.src=`/api/image-file/${id}`;
+    }
     renderDetailFields(img,false);
     const metaRO=$('#modalMetaReadonly');
     metaRO.innerHTML=`<span>ID: ${esc(img.id)}</span><span>创建时间: ${esc(img.created_at||'未知')}</span>`;
     updateFavoriteBtns(img.favorite||'none');
     updateRefStrengthBtns(img.ref_strength||'style', img.ref_strength_reason||'');
     updateEditButtons();
+    updateNavArrows();
     $('#detailModal').classList.remove('hidden');
+  }
+
+  function updateNavArrows(){
+    const prevBtn=$('#navPrevBtn');
+    const nextBtn=$('#navNextBtn');
+    if(!prevBtn||!nextBtn)return;
+    const idx=state.gridImageIds.indexOf(state.currentImageId);
+    prevBtn.style.visibility=idx>0?'visible':'hidden';
+    nextBtn.style.visibility=idx<state.gridImageIds.length-1?'visible':'hidden';
+  }
+
+  async function navigateDetail(direction){
+    const idx=state.gridImageIds.indexOf(state.currentImageId);
+    const newIdx=idx+direction;
+    if(newIdx<0||newIdx>=state.gridImageIds.length)return;
+    const newId=state.gridImageIds[newIdx];
+    await showDetail(newId);
   }
 
   function updateFavoriteBtns(fav){
@@ -661,6 +825,20 @@
     await runBatchOps();
   }
 
+  async function batchReanalyzeFailed(){
+    const resp=await api('/api/images/failed');
+    if(!resp){toast('获取失败图列表失败','error');return;}
+    const data=await resp.json();
+    const ids=data.ids||[];
+    if(!ids.length){toast('没有分析失败的图片','info');return;}
+    state.batchOps=ids.map(id=>({id,type:'reanalyze',status:'pending'}));
+    state.batchReanalyzing=true;
+    updateBatchOpsPanel();
+    updateBatchReanalyzeIndicator();
+    toast(`开始重新分析 ${ids.length} 张失败图片`,'info');
+    await runBatchOps();
+  }
+
   async function runBatchOps(){
     const pending=state.batchOps.filter(o=>o.status==='pending'||o.status==='failed');
     if(!pending.length)return;
@@ -945,7 +1123,7 @@
           uploadPromises.push(p);
 
           if(i<files.length-1){
-            await new Promise(r=>setTimeout(r,5000));
+            await new Promise(r=>setTimeout(r,20000));
           }
         }
 
@@ -1593,6 +1771,7 @@
 
     $('#batchDeleteBtn').addEventListener('click',batchDelete);
     $('#batchReanalyzeBtn').addEventListener('click',batchReanalyze);
+    $('#batchReanalyzeFailedBtn').addEventListener('click',batchReanalyzeFailed);
     $('#batchCancelBtn').addEventListener('click',()=>{
       state.batchMode=false;state.selectedIds.clear();
       document.body.classList.remove('batch-mode');
@@ -1604,6 +1783,14 @@
 
     $('#modalClose').addEventListener('click',closeDetail);
     $('#detailModal').addEventListener('click',e=>{if(e.target===e.currentTarget)closeDetail();});
+    $('#navPrevBtn').addEventListener('click',e=>{e.stopPropagation();navigateDetail(-1);});
+    $('#navNextBtn').addEventListener('click',e=>{e.stopPropagation();navigateDetail(1);});
+    document.addEventListener('keydown',e=>{
+      if($('#detailModal').classList.contains('hidden'))return;
+      if(e.key==='ArrowLeft')navigateDetail(-1);
+      else if(e.key==='ArrowRight')navigateDetail(1);
+      else if(e.key==='Escape')closeDetail();
+    });
     $('#modalImage').addEventListener('click',e=>{
       e.stopPropagation();
       const src=$('#modalImage').src;
