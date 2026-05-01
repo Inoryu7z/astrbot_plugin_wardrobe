@@ -325,7 +325,7 @@ class WardrobePlugin(Star):
                     logger.info("[Wardrobe] 旧图重分析进度: %d/%d (成功%d 失败%d)", i + 1, len(need_reanalyze), success, failed)
 
                     if i < len(need_reanalyze) - 1:
-                        await asyncio.sleep(2)
+                        await asyncio.sleep(30)
 
                 except Exception as e:
                     failed += 1
@@ -374,7 +374,7 @@ class WardrobePlugin(Star):
                             rs_failed += 1
 
                         if i < len(need_ref_strength_backfill) - 1:
-                            await asyncio.sleep(2)
+                            await asyncio.sleep(30)
 
                     except Exception as e:
                         rs_failed += 1
