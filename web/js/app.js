@@ -231,7 +231,7 @@
 
     state.loading=true;
     $('#loadingIndicator').classList.remove('hidden');
-    $('#loadMoreSection').classList.add('hidden');
+    $('#scrollSentinel').classList.add('hidden');
 
     let images=[];
     let total=0;
@@ -281,10 +281,9 @@
 
     const loadedCount=$('#imageGrid').children.length;
     if(!state.searchQuery && loadedCount<state.total){
-      $('#loadMoreSection').classList.remove('hidden');
-      $('#loadMoreInfo').textContent=`已加载 ${loadedCount} / ${state.total}`;
+      $('#scrollSentinel').classList.remove('hidden');
     }else{
-      $('#loadMoreSection').classList.add('hidden');
+      $('#scrollSentinel').classList.add('hidden');
     }
 
     $('#emptyState').classList.toggle('hidden',loadedCount>0);
@@ -315,22 +314,24 @@
       return new Promise((resolve)=>{
         const preload=new Image();
         preload.onload=()=>{
-          const h=Math.round(cardWidth/(preload.naturalWidth/preload.naturalHeight));
-          resolve({img,height:Math.max(h,60)});
+          const ratio=preload.naturalWidth/preload.naturalHeight;
+          const h=Math.round(cardWidth/ratio);
+          resolve({img,height:Math.max(h,60),aspectRatio:ratio});
         };
         preload.onerror=()=>{
-          resolve({img,height:Math.round(cardWidth/(3/4))});
+          resolve({img,height:Math.round(cardWidth/(3/4)),aspectRatio:3/4});
         };
         preload.src=`/api/image-file/${img.id}/thumbnail`;
       });
     }));
 
     const fragment=document.createDocumentFragment();
-    cardsWithHeights.forEach(({img,height})=>{
+    cardsWithHeights.forEach(({img,height,aspectRatio})=>{
       state.gridImageIds.push(img.id);
       const card=document.createElement('div');
       card.className='image-card';
       card.dataset.id=img.id;
+      card.dataset.aspectRatio=aspectRatio;
       card.style.gridRowEnd='span '+height;
       card.style.containIntrinsicSize='auto '+height+'px';
       const personaText=img.persona?`<div class="image-card-persona">${esc(img.persona)}</div>`:'';
@@ -1737,7 +1738,7 @@
     const statsView=$('#statsView');
     const imageGrid=$('#imageGrid');
     const emptyState=$('#emptyState');
-    const loadMoreSection=$('#loadMoreSection');
+    const loadMoreSection=$('#scrollSentinel');
     const loadingIndicator=$('#loadingIndicator');
     const batchBar=$('#batchBar');
     const sidebar=$('#sidebar');
@@ -1899,6 +1900,25 @@
     if(!grid)return;
     grid.classList.remove('grid-compact','grid-large');
     grid.classList.add('grid-'+state.viewMode);
+    recalculateAllSpans();
+  }
+
+  function recalculateAllSpans(){
+    const grid=$('#imageGrid');
+    if(!grid)return;
+    const cols=getGridColumnCount();
+    const gap=cols===1?0:window.innerWidth<=768?8:16;
+    const gridWidth=grid.clientWidth;
+    const cardWidth=(gridWidth-(cols-1)*gap)/cols;
+    if(cardWidth<=0)return;
+    grid.querySelectorAll('.image-card').forEach(card=>{
+      const ratio=parseFloat(card.dataset.aspectRatio);
+      if(!ratio||ratio<=0)return;
+      const h=Math.round(cardWidth/ratio);
+      const span=Math.max(h,60);
+      card.style.gridRowEnd='span '+span;
+      card.style.containIntrinsicSize='auto '+span+'px';
+    });
   }
 
   function updateViewToggleBtns(){
@@ -2092,7 +2112,15 @@
       window.location.href='/login';
     });
 
-    $('#loadMoreBtn').addEventListener('click',()=>loadImages(false));
+    let _scrollObserver=new IntersectionObserver(entries=>{
+      if(entries[0].isIntersecting && !state.loading && !state.searchQuery){
+        const loadedCount=$('#imageGrid').children.length;
+        if(loadedCount<state.total){
+          loadImages(false);
+        }
+      }
+    },{rootMargin:'400px'});
+    _scrollObserver.observe($('#scrollSentinel'));
 
     setupUpload();
     setupBackup();

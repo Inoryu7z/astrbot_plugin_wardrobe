@@ -723,15 +723,6 @@ html, body {
 
 .pools-create-input { flex:1; padding:8px 12px; font-size:13px; }
 
-.load-more-section {
-  text-align:center; padding:24px 0;
-  display:flex; flex-direction:column; align-items:center; gap:8px;
-}
-
-.load-more-info {
-  font-size:13px; color:var(--text-light);
-}
-
 .loading-indicator {
   display:flex; align-items:center; justify-content:center;
   gap:10px; padding:32px 0; color:var(--text-muted);
@@ -1297,6 +1288,23 @@ html, body {
 
 .stats-chart-wide {
   height:250px;
+}
+
+.scroll-sentinel {
+  display:flex; align-items:center; justify-content:center;
+  gap:10px; padding:24px 0;
+}
+
+.scroll-sentinel-spinner {
+  width:24px; height:24px;
+  border:3px solid var(--border);
+  border-top-color:var(--pink);
+  border-radius:50%;
+  animation:spin .6s linear infinite;
+}
+
+.scroll-sentinel-text {
+  font-size:13px; color:var(--text-muted);
 }
 
 .context-menu {
