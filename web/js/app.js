@@ -255,8 +255,6 @@
       }
 
       const resp=await api(url);
-      state.loading=false;
-      $('#loadingIndicator').classList.add('hidden');
 
       if(!resp)return;
       const data=await resp.json();
@@ -264,15 +262,16 @@
       total=data.total||images.length;
     }
 
-    state.loading=false;
-    $('#loadingIndicator').classList.add('hidden');
     state.total=total;
 
     if(resetGrid){
       $('#imageGrid').innerHTML='';
     }
 
-    appendGrid(images);
+    await appendGrid(images);
+
+    state.loading=false;
+    $('#loadingIndicator').classList.add('hidden');
 
     if(!state.searchQuery && images.length<state.perPage){
       state.allLoaded=true;
@@ -297,14 +296,42 @@
     }
   }
 
-  function appendGrid(images){
+  function getGridColumnCount(){
+    if(window.innerWidth<=768)return 2;
+    return state.viewMode==='compact'?5:3;
+  }
+
+  async function appendGrid(images){
     const grid=$('#imageGrid');
+    if(!grid||!images.length)return;
+    const cols=getGridColumnCount();
+    const gap=16;
+    const gridWidth=grid.clientWidth;
+    const cardWidth=(gridWidth-(cols-1)*gap)/cols;
+    if(cardWidth<=0)return;
+
+    const cardsWithHeights=await Promise.all(images.map(img=>{
+      return new Promise((resolve)=>{
+        const preload=new Image();
+        preload.onload=()=>{
+          const h=Math.round(cardWidth/(preload.naturalWidth/preload.naturalHeight));
+          resolve({img,height:Math.max(h,60)});
+        };
+        preload.onerror=()=>{
+          resolve({img,height:Math.round(cardWidth/(3/4))});
+        };
+        preload.src=`/api/image-file/${img.id}/thumbnail`;
+      });
+    }));
+
     const fragment=document.createDocumentFragment();
-    images.forEach(img=>{
+    cardsWithHeights.forEach(({img,height})=>{
       state.gridImageIds.push(img.id);
       const card=document.createElement('div');
       card.className='image-card';
       card.dataset.id=img.id;
+      card.style.gridRowEnd='span '+height;
+      card.style.containIntrinsicSize='auto '+height+'px';
       const personaText=img.persona?`<div class="image-card-persona">${esc(img.persona)}</div>`:'';
       const favIcon=img.favorite==='favorite'?'❤️':img.favorite==='like'?'👍':'';
       const favMark=favIcon?`<div class="image-card-fav">${favIcon}</div>`:'';
