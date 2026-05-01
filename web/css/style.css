@@ -257,8 +257,10 @@ html, body {
 }
 
 .image-grid {
-  column-gap: 16px;
-  column-count: 5;
+  display: grid;
+  grid-template-columns: repeat(5, 1fr);
+  gap: 16px;
+  grid-auto-rows: 1px;
 }
 
 .image-card {
@@ -272,8 +274,6 @@ html, body {
   border:1px solid var(--border);
   content-visibility:auto;
   contain-intrinsic-size:auto 240px;
-  break-inside:avoid;
-  margin-bottom:16px;
 }
 
 .image-card:hover {
@@ -791,9 +791,9 @@ html, body {
   .topbar-title { display:none; }
   .modal-body { flex-direction:column; }
   .modal-image-wrap { width:100%; }
-  .image-grid { column-count:2; column-gap:10px; }
+  .image-grid { grid-template-columns:repeat(2, 1fr); gap:10px; }
   .image-grid.grid-compact,
-  .image-grid.grid-large { column-count:2; }
+  .image-grid.grid-large { grid-template-columns:repeat(2, 1fr); }
 }
 
 .modal-edit-header {
@@ -1379,9 +1379,9 @@ html, body {
 }
 
 .image-grid.grid-compact {
-  column-count: 5;
+  grid-template-columns: repeat(5, 1fr);
 }
 
 .image-grid.grid-large {
-  column-count: 3;
+  grid-template-columns: repeat(3, 1fr);
 }
