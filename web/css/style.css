@@ -259,7 +259,8 @@ html, body {
 .image-grid {
   display: grid;
   grid-template-columns: repeat(5, 1fr);
-  gap: 16px;
+  column-gap: 16px;
+  row-gap: 0;
   grid-auto-rows: 1px;
 }
 
@@ -791,7 +792,7 @@ html, body {
   .topbar-title { display:none; }
   .modal-body { flex-direction:column; }
   .modal-image-wrap { width:100%; }
-  .image-grid { grid-template-columns:repeat(2, 1fr); gap:10px; }
+  .image-grid { grid-template-columns:repeat(2, 1fr); column-gap:10px; row-gap:0; }
   .image-grid.grid-compact,
   .image-grid.grid-large { grid-template-columns:repeat(2, 1fr); }
 }
