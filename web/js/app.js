@@ -297,6 +297,7 @@
   }
 
   function getGridColumnCount(){
+    if(window.innerWidth<=480)return 1;
     if(window.innerWidth<=768)return 2;
     return state.viewMode==='compact'?5:3;
   }

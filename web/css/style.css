@@ -785,14 +785,23 @@ html, body {
   margin-top:8px; font-size:13px; color:var(--text-muted);
 }
 
-@media (max-width:768px) {
+@media (max-width:480px) {
+  .image-grid { grid-template-columns:repeat(1, 1fr); column-gap:0; }
+  .image-grid.grid-compact,
+  .image-grid.grid-large { grid-template-columns:repeat(1, 1fr); }
+  .nav-arrow { width:36px; height:36px; font-size:22px; }
+  .nav-prev { left:4px; }
+  .nav-next { right:4px; }
+}
+
+@media (min-width:481px) and (max-width:768px) {
   .sidebar { display:none; }
   .content { margin-left:0; }
   .topbar-left { min-width:auto; }
   .topbar-title { display:none; }
   .modal-body { flex-direction:column; }
   .modal-image-wrap { width:100%; }
-  .image-grid { grid-template-columns:repeat(2, 1fr); column-gap:10px; row-gap:0; }
+  .image-grid { grid-template-columns:repeat(2, 1fr); column-gap:8px; row-gap:0; }
   .image-grid.grid-compact,
   .image-grid.grid-large { grid-template-columns:repeat(2, 1fr); }
 }
