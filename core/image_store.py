@@ -24,6 +24,7 @@ class ImageStore:
         async with aiofiles.open(filepath, "wb") as f:
             await f.write(image_bytes)
         logger.info("[Wardrobe] 图片已保存: %s (format=%s)", filename, ext)
+        await self.ensure_thumbnail(filename)
         return filename
 
     async def save_image_from_path(self, source_path: str) -> str:
@@ -33,6 +34,7 @@ class ImageStore:
         filepath = self.images_dir / filename
         await asyncio.to_thread(self._copy_file, str(source), str(filepath))
         logger.info("[Wardrobe] 图片已从路径保存: %s -> %s", source_path, filename)
+        await self.ensure_thumbnail(filename)
         return filename
 
     def get_image_path(self, filename: str) -> Path:

@@ -71,6 +71,8 @@
     loadedOriginals:new Set(),
     detailCache:new Map(),
     detailAbortController:null,
+    contextMenuTargetId:null,
+    viewMode:'compact',
   };
 
   let _originalObserver=null;
@@ -330,6 +332,11 @@
           return;
         }
         showDetail(img.id);
+      });
+      card.addEventListener('contextmenu',e=>{
+        e.preventDefault();
+        if(state.batchMode)return;
+        showContextMenu(e,img.id);
       });
       const cb=card.querySelector('.image-card-checkbox');
       cb.addEventListener('click',e=>{e.stopPropagation();toggleSelect(img.id);});
@@ -1731,8 +1738,158 @@
     }
   }
 
+  function showContextMenu(e,id){
+    hideContextMenu();
+    state.contextMenuTargetId=id;
+
+    const menu=document.createElement('div');
+    menu.className='context-menu';
+    menu.id='contextMenu';
+    menu.style.left=e.clientX+'px';
+    menu.style.top=e.clientY+'px';
+
+    const items=[
+      {icon:'❤️',label:'收藏',action:()=>quickFavorite(id,'favorite')},
+      {icon:'👍',label:'喜欢',action:()=>quickFavorite(id,'like')},
+      {icon:'🎨',label:'切换参考强度',action:()=>quickRefStrength(id)},
+      {type:'divider'},
+      {icon:'🔄',label:'重新分析',action:()=>quickReanalyze(id)},
+      {type:'divider'},
+      {icon:'🗑️',label:'删除',action:()=>quickDelete(id),danger:true},
+    ];
+
+    items.forEach(item=>{
+      if(item.type==='divider'){
+        const div=document.createElement('div');
+        div.className='context-menu-divider';
+        menu.appendChild(div);
+        return;
+      }
+      const btn=document.createElement('button');
+      btn.className='context-menu-item'+(item.danger?' danger':'');
+      btn.innerHTML=`<span class="context-menu-icon">${item.icon}</span><span>${item.label}</span>`;
+      btn.addEventListener('click',()=>{
+        hideContextMenu();
+        item.action();
+      });
+      menu.appendChild(btn);
+    });
+
+    document.body.appendChild(menu);
+
+    const rect=menu.getBoundingClientRect();
+    if(rect.right>window.innerWidth)menu.style.left=(e.clientX-rect.width)+'px';
+    if(rect.bottom>window.innerHeight)menu.style.top=(e.clientY-rect.height)+'px';
+  }
+
+  function hideContextMenu(){
+    const existing=document.getElementById('contextMenu');
+    if(existing)existing.remove();
+    state.contextMenuTargetId=null;
+  }
+
+  async function quickFavorite(id,value){
+    const resp=await api(`/api/images/${id}/favorite`,{method:'PATCH',json:{favorite:value}});
+    if(!resp){toast('操作失败','error');return;}
+    const result=await resp.json();
+    if(result.success){
+      const newFav=result.favorite||value;
+      toast(newFav===value?'已'+ (value==='favorite'?'收藏':'标记喜欢'):'已取消','success');
+      if(state.currentImageId===id){
+        state.currentImageData.favorite=newFav;
+        state.detailCache.set(id,state.currentImageData);
+        updateFavoriteBtns(newFav);
+      }
+      updateCardFavInGrid(id,newFav);
+    }else{
+      toast(result.error||'操作失败','error');
+    }
+  }
+
+  function updateCardFavInGrid(id,fav){
+    const card=document.querySelector(`.image-card[data-id="${id}"]`);
+    if(!card)return;
+    let favMark=card.querySelector('.image-card-fav');
+    if(!favMark){
+      favMark=document.createElement('div');
+      favMark.className='image-card-fav';
+      card.appendChild(favMark);
+    }
+    favMark.textContent=fav==='favorite'?'❤️':fav==='like'?'👍':'';
+  }
+
+  async function quickDelete(id){
+    if(!confirm('确定删除此图片？'))return;
+    const resp=await api(`/api/images/${id}`,{method:'DELETE'});
+    if(!resp)return;
+    const data=await resp.json();
+    if(data.success){
+      toast('已删除','success');
+      const card=document.querySelector(`.image-card[data-id="${id}"]`);
+      if(card)card.remove();
+      if(state.currentImageId===id)closeDetail();
+      loadStats();
+    }else toast('删除失败','error');
+  }
+
+  function quickReanalyze(id){
+    showDetail(id);
+    setTimeout(()=>{
+      const btn=$('#modalReanalyzeBtn');
+      if(btn)btn.click();
+    },300);
+  }
+
+  function quickRefStrength(id){
+    showDetail(id);
+    setTimeout(()=>{
+      const btn=$('#refStrengthBtn');
+      if(btn)btn.click();
+    },300);
+  }
+
+  function setupViewToggle(){
+    const saved=localStorage.getItem('wardrobe_view_mode')||'compact';
+    state.viewMode=saved;
+    applyViewMode();
+
+    $$('#viewToggleGroup .view-toggle-btn').forEach(btn=>{
+      btn.addEventListener('click',()=>{
+        state.viewMode=btn.dataset.mode;
+        localStorage.setItem('wardrobe_view_mode',state.viewMode);
+        applyViewMode();
+        updateViewToggleBtns();
+      });
+    });
+    updateViewToggleBtns();
+
+    window.addEventListener('resize',()=>applyViewMode());
+  }
+
+  function applyViewMode(){
+    const grid=$('#imageGrid');
+    if(!grid)return;
+    grid.classList.remove('grid-compact','grid-large');
+    grid.classList.add('grid-'+state.viewMode);
+  }
+
+  function updateViewToggleBtns(){
+    $$('#viewToggleGroup .view-toggle-btn').forEach(btn=>{
+      btn.classList.toggle('active',btn.dataset.mode===state.viewMode);
+    });
+  }
+
   function init(){
     _initOriginalObserver();
+
+    setupViewToggle();
+
+    document.addEventListener('click',e=>{
+      if(!e.target.closest('.context-menu'))hideContextMenu();
+    });
+    document.addEventListener('keydown',e=>{
+      if(e.key==='Escape')hideContextMenu();
+    });
 
     $$('input[name="category"]').forEach(inp=>{
       inp.addEventListener('change',()=>{
