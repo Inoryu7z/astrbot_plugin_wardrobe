@@ -2087,7 +2087,8 @@
       }
     });
     $('#lightbox').addEventListener('click',e=>{
-      if(e.target.closest('.lightbox-arrow'))return;
+      const el=e.target instanceof Element?e.target:e.target.parentElement;
+      if(el?.closest('.lightbox-arrow'))return;
       state.lightboxId=null;
       $('#lightbox').classList.add('hidden');
     });
