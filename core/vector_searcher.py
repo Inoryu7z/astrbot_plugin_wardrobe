@@ -328,6 +328,14 @@ class WardrobeVectorSearcher:
             tags = rec.get("user_tags", "")
             if tags:
                 text_parts.append(f"标签: {tags}")
+            style_val = rec.get("style", "")
+            if isinstance(style_val, list):
+                style_val = " ".join(str(v) for v in style_val if v)
+            if style_val:
+                text_parts.append(f"风格: {style_val}")
+            clothing = rec.get("clothing_type", "")
+            if clothing:
+                text_parts.append(f"服装: {clothing}")
             for field, label in [
                 ("exposure_features", "暴露特征"),
                 ("key_features", "关键特征"),
@@ -366,6 +374,15 @@ class WardrobeVectorSearcher:
                 tags = rec.get("user_tags", "")
                 if tags:
                     text_parts.append(f"标签: {tags}")
+                style_val = rec.get("style", "")
+                if style_val:
+                    if isinstance(style_val, list):
+                        style_val = " ".join(str(v) for v in style_val if v)
+                    if style_val:
+                        text_parts.append(f"风格: {style_val}")
+                clothing = rec.get("clothing_type", "")
+                if clothing:
+                    text_parts.append(f"服装: {clothing}")
                 exp_feat = rec.get("exposure_features", "")
                 if exp_feat:
                     if isinstance(exp_feat, list):
