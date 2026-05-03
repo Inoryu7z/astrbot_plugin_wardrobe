@@ -41,7 +41,7 @@ _AIIMG_GENERATE_TOOLS = frozenset({"aiimg_generate"})
     "astrbot_plugin_wardrobe",
     "Inoryu7z",
     "图片衣柜管理插件，支持智能分类、语义检索和参考图接口",
-    "2.3.8",
+    "2.4.0",
 )
 class WardrobePlugin(Star):
     def __init__(self, context: Context, config: AstrBotConfig = None):
@@ -317,6 +317,8 @@ class WardrobePlugin(Star):
                             prop_objects=ensure_list(attrs.get("prop_objects")),
                             allure_features=ensure_list(attrs.get("allure_features")),
                             body_focus=ensure_list(attrs.get("body_focus")),
+                            style=ensure_list(attrs.get("style")),
+                            clothing_type=ensure_str(attrs.get("clothing_type")),
                             category=str(attrs.get("category", rec.get("category", ""))),
                             persona=rec.get("persona", ""),
                         )
@@ -519,6 +521,8 @@ class WardrobePlugin(Star):
                                 prop_objects: list | None = None,
                                 allure_features: list | None = None,
                                 body_focus: list | None = None,
+                                style: list | None = None,
+                                clothing_type: str = "",
                                 category: str = "", persona: str = ""):
         if not self.vector_searcher or not self.vector_searcher.available:
             return
@@ -527,6 +531,10 @@ class WardrobePlugin(Star):
             text_parts.append(description)
         if user_tags:
             text_parts.append(f"标签: {user_tags}")
+        if style:
+            text_parts.append(f"风格: {' '.join(str(v) for v in style if v)}")
+        if clothing_type:
+            text_parts.append(f"服装: {clothing_type}")
         if exposure_features:
             text_parts.append(f"暴露特征: {' '.join(str(v) for v in exposure_features if v)}")
         if key_features:
@@ -774,7 +782,8 @@ class WardrobePlugin(Star):
                 ref_strength_reason="",
             )
             await self._index_to_vector(image_id, user_description or "模型分析失败，无描述", user_description,
-                                         category="人物", persona=persona)
+                                         category="人物", persona=persona,
+                                         style=[], clothing_type="")
             return image_id, None, None
 
         category = attrs.get("category", "人物")
@@ -823,6 +832,8 @@ class WardrobePlugin(Star):
             prop_objects=ensure_list(attrs.get("prop_objects")),
             allure_features=ensure_list(attrs.get("allure_features")),
             body_focus=ensure_list(attrs.get("body_focus")),
+            style=ensure_list(attrs.get("style")),
+            clothing_type=ensure_str(attrs.get("clothing_type")),
             category=category, persona=persona,
         )
 

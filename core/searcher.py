@@ -179,70 +179,54 @@ class ImageSearcher:
                         meta["persona_mismatch"] = True
                     else:
                         return [], meta
-        else:
-            query_conditions = await self._parse_query(
-                user_query,
-                primary_provider_id=primary_provider_id,
-                secondary_provider_id=secondary_provider_id,
-                timeout_seconds=timeout_seconds,
-                current_persona=current_persona,
-                persona_names=persona_names,
+        elif self.vector_searcher and self.vector_searcher.available:
+            # ================================================================
+            # 主路径：向量检索可用 → 跳过意图解析模型，直接语义搜索
+            #
+            # 使用场景：用户通过对话调用 search_wardrobe_image 工具时
+            # （即 _do_search_image 入口，exclude_current_persona=False）
+            #
+            # 设计理由：对话模型在调用工具时已经把用户需求组织为自然语言 query，
+            # 无需再额外调一次 LLM 做意图解析。直接用 query 文本进向量库做语义匹配。
+            #
+            # persona 参数由上层 _do_search_image 在调用前已解析完成，
+            # 直接传给 _vector_search 即可按人格池过滤。
+            # ================================================================
+            candidates = await self._vector_search(user_query, k=candidate_limit, persona=persona)
+            logger.info(
+                "[Wardrobe] 向量检索（用户搜图-跳过意图解析）: %d张 persona=%s",
+                len(candidates), "无人格" if persona == "" else (persona or "全局"),
             )
-            if not query_conditions:
-                query_conditions = {"keywords": [user_query]}
-
-            existing_keywords = query_conditions.get("keywords") or []
-            if user_query not in existing_keywords:
-                query_conditions["keywords"] = [user_query] + existing_keywords
-
-            persona_scope = query_conditions.pop("persona_scope", "global")
-            named_persona = query_conditions.pop("persona", "")
-            meta["persona_scope"] = persona_scope
-
-            if exclude_current_persona and current_persona:
-                if persona_mode == "no_persona_only":
-                    candidates = await self._query_candidates(
-                        query_conditions, limit=candidate_limit, persona="", user_query=user_query,
-                    )
-                    logger.info(
-                        "[Wardrobe] 无人格池搜索结果: %d张 (no_persona_only)",
-                        len(candidates),
-                    )
-                    if candidates:
-                        meta["searched_persona"] = ""
-                    else:
-                        logger.info("[Wardrobe] 无人格池无结果，no_persona_only模式不回退其他人格")
-                        return [], meta
-                else:
-                    candidates = await self._query_candidates(
-                        query_conditions, limit=candidate_limit, persona="", user_query=user_query,
-                    )
-                    logger.info(
-                        "[Wardrobe] 无人格池搜索结果: %d张 (fallback_other)",
-                        len(candidates),
-                    )
-                    if candidates:
-                        meta["searched_persona"] = ""
-                    else:
-                        candidates = await self._query_candidates_excluding_persona(
-                            query_conditions, exclude_persona=current_persona, limit=candidate_limit,
-                            user_query=user_query,
-                        )
-                        logger.info(
-                            "[Wardrobe] 排除人格搜索结果: %d张 exclude=%s (fallback_other回退)",
-                            len(candidates), current_persona,
-                        )
-                        if candidates:
-                            meta["searched_persona"] = f"非{current_persona}"
-                            meta["persona_mismatch"] = True
-                        else:
-                            return [], meta
+            if candidates:
+                candidates = self._sort_by_favorite(candidates)
+                meta["searched_persona"] = persona or "全局"
+                meta["persona_scope"] = "vector"
             else:
-                candidates = await self._search_by_scope(
-                    query_conditions, persona_scope=persona_scope,
-                    named_persona=named_persona, current_persona=current_persona,
-                    limit=candidate_limit, meta=meta, user_query=user_query,
+                logger.info("[Wardrobe] 向量检索无结果，回退 LEGACY 意图解析+LIKE")
+                candidates = await self._legacy_parse_and_search(
+                    user_query, primary_provider_id, secondary_provider_id,
+                    timeout_seconds, candidate_limit, current_persona, persona_names,
+                    persona_mode, meta,
                 )
+        else:
+            # ================================================================
+            # LEGACY 路径：向量检索不可用 → 意图解析模型 + LIKE 模糊匹配
+            #
+            # 触发条件：未配置 Embedding Provider 或向量库初始化失败
+            #
+            # 此路径会：
+            #   1. 额外调用一次 LLM（_parse_query）将自然语言转为结构化条件
+            #   2. 优先用结构化条件做 SQL LIKE 匹配
+            #   3. 如果 LIKE 也没结果，再用 _search_by_description 做关键词搜索
+            #
+            # 如果日后所有部署环境都配置了 Embedding Provider，
+            # 此路径及其依赖的 _parse_query / _search_by_scope 可整体废弃。
+            # ================================================================
+            candidates = await self._legacy_parse_and_search(
+                user_query, primary_provider_id, secondary_provider_id,
+                timeout_seconds, candidate_limit, current_persona, persona_names,
+                persona_mode, meta,
+            )
 
         if not candidates:
             logger.info("[Wardrobe] 未找到候选图片")
@@ -320,6 +304,56 @@ class ImageSearcher:
 
         logger.info("[Wardrobe] 全局搜索")
         return await self._query_candidates(conditions, limit=limit, persona=None, user_query=user_query)
+
+    async def _legacy_parse_and_search(
+        self,
+        user_query: str,
+        primary_provider_id: str,
+        secondary_provider_id: str,
+        timeout_seconds: float,
+        candidate_limit: int,
+        current_persona: str,
+        persona_names: str,
+        persona_mode: str,
+        meta: dict[str, Any],
+    ) -> list[dict[str, Any]]:
+        # ================================================================
+        # LEGACY：意图解析模型 + LIKE 模糊匹配
+        #
+        # 调用方：
+        #   1. 向量检索完全不可用时（未配置 Embedding Provider）
+        #   2. 向量检索可用但返回空结果时的回退
+        #
+        # 流程：
+        #   ① _parse_query() 调 LLM 把自然语言映射到 pool 标签
+        #   ② _search_by_scope() 根据 persona_scope 决定搜哪个池子
+        #   ③ _query_candidates() 优先向量（可能仍不可用），然后 LIKE 回退
+        # ================================================================
+        query_conditions = await self._parse_query(
+            user_query,
+            primary_provider_id=primary_provider_id,
+            secondary_provider_id=secondary_provider_id,
+            timeout_seconds=timeout_seconds,
+            current_persona=current_persona,
+            persona_names=persona_names,
+        )
+        if not query_conditions:
+            query_conditions = {"keywords": [user_query]}
+
+        existing_keywords = query_conditions.get("keywords") or []
+        if user_query not in existing_keywords:
+            query_conditions["keywords"] = [user_query] + existing_keywords
+
+        persona_scope = query_conditions.pop("persona_scope", "global")
+        named_persona = query_conditions.pop("persona", "")
+        meta["persona_scope"] = persona_scope
+
+        candidates = await self._search_by_scope(
+            query_conditions, persona_scope=persona_scope,
+            named_persona=named_persona, current_persona=current_persona,
+            limit=candidate_limit, meta=meta, user_query=user_query,
+        )
+        return candidates
 
     async def _vector_search(self, user_query: str, k: int, persona: Optional[str] = None, exclude_persona: str = "") -> list[dict[str, Any]]:
         if not self.vector_searcher or not self.vector_searcher.available:
