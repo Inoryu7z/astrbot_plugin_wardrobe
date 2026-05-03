@@ -41,7 +41,7 @@ _AIIMG_GENERATE_TOOLS = frozenset({"aiimg_generate"})
     "astrbot_plugin_wardrobe",
     "Inoryu7z",
     "图片衣柜管理插件，支持智能分类、语义检索和参考图接口",
-    "2.4.0",
+    "2.4.1",
 )
 class WardrobePlugin(Star):
     def __init__(self, context: Context, config: AstrBotConfig = None):
@@ -1042,7 +1042,8 @@ class WardrobePlugin(Star):
         return "\n".join(lines)
 
     async def get_reference_image(
-        self, query: str, current_persona: str = ""
+        self, query: str, current_persona: str = "",
+        min_similarity: float | None = None,
     ) -> Optional[dict]:
         await self._ensure_db()
         await self._ensure_vector_searcher()
@@ -1060,8 +1061,8 @@ class WardrobePlugin(Star):
         persona_names = self._get_persona_names_str()
 
         logger.info(
-            "[Wardrobe] 参考图搜索: query=%s exclude_persona=%s",
-            query, resolved_persona or "无",
+            "[Wardrobe] 参考图搜索: query=%s exclude_persona=%s min_similarity=%s",
+            query, resolved_persona or "无", min_similarity,
         )
 
         results, search_meta = await self.searcher.search(
@@ -1077,6 +1078,7 @@ class WardrobePlugin(Star):
             exclude_current_persona=True,
             persona_mode=str(self._cfg("search_persona_mode", "no_persona_only")),
             prioritize_unused=bool(self._cfg("search_prioritize_unused", False)),
+            min_similarity=min_similarity,
         )
 
         if not results:

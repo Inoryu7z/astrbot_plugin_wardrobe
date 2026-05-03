@@ -1,3 +1,14 @@
+### v2.4.1
+
+** 优化：参考图接口新增相似度阈值参数**
+
+* get_reference_image 新增 min_similarity 参数（float|None），透传至向量检索层
+* searcher.search / _vector_search / _query_candidates 全链路支持 min_similarity
+* 不传时行为不变（使用全局 vector_search_min_similarity 配置）；传入时覆盖全局阈值
+* 供 AiImg 补拍等场景按需收紧搜图条件，不影响日常取图
+
+---
+
 ### v2.4.0
 
 **🔧 架构重构：向量检索优先 + 向量索引扩展**
