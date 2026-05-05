@@ -2256,6 +2256,7 @@
     const videoView=$('#videoView');
     const imageGrid=$('#imageGrid');
     const statsView=$('#statsView');
+    const sidebar=$('#sidebar');
     const topbarRight=$('.topbar-right');
     const videoBtn=$('#videoViewBtn');
     if(show){
@@ -2274,6 +2275,7 @@
     }else{
       videoView.classList.add('hidden');
       imageGrid.classList.remove('hidden');
+      if(sidebar)sidebar.classList.remove('hidden');
       if(topbarRight)topbarRight.style.display='';
       $('#scrollSentinel').classList.remove('hidden');
       $('#pagination').classList.remove('hidden');
