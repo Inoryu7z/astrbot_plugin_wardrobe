@@ -1866,6 +1866,11 @@ html, body {
   min-height: calc(100vh - var(--topbar-h));
 }
 
+.video-view > .content {
+  margin-left: 0;
+  padding: 24px 28px;
+}
+
 @media (max-width: 768px) {
   .video-grid { grid-template-columns: repeat(2, 1fr); }
   .video-list-grid { grid-template-columns: repeat(2, 1fr); }
