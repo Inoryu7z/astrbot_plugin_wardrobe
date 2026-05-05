@@ -869,7 +869,7 @@ class WardrobeWebServer:
                 return jsonify({"error": "未找到视频"}), 404
             sid = str(video.get("source_image_id", ""))
             video["source_thumbnail"] = f"/api/image-file/{sid}/thumbnail" if sid else None
-            return jsonify(video)
+            return jsonify({"video": video})
 
         @app.route("/api/videos/<video_id>", methods=["DELETE"])
         async def api_video_delete(video_id):
