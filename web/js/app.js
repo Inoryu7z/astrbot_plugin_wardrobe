@@ -2515,13 +2515,6 @@
       if(!data||!data.video)return;
       const v=data.video;
       $('#videoPlayerTitle').textContent=(v.tier?_tierLabel(v.tier)+' · ':'')+'视频 #'+v.id;
-      $('#videoPlayerElement').innerHTML='';
-      const source=document.createElement('source');
-      source.src='/api/videos/'+v.id+'/file';
-      source.type='video/mp4';
-      $('#videoPlayerElement').appendChild(source);
-      $('#videoPlayerElement').load();
-      $('#videoPlayerElement').play().catch(()=>{});
       $('#videoPlayerInfo').classList.remove('hidden');
       $('#vpMetaTier').textContent=_tierLabel(v.tier);
       $('#vpMetaStatus').textContent=_statusLabel(v.status);
@@ -2531,7 +2524,15 @@
       if(v.user_thoughts){$('#vpThoughtsBlock').classList.remove('hidden');$('#vpThoughtsText').textContent=v.user_thoughts;}
       else{$('#vpThoughtsBlock').classList.add('hidden');}
       $('#videoPlayerModal').classList.remove('hidden');
-    });
+      const vidEl=$('#videoPlayerElement');
+      vidEl.innerHTML='';
+      const source=document.createElement('source');
+      source.src='/api/videos/'+v.id+'/file';
+      source.type='video/mp4';
+      vidEl.appendChild(source);
+      vidEl.load();
+      vidEl.play().catch(e=>{console.warn('[Wardrobe] video play failed:',e.message);});
+    }).catch(e=>{console.error('[Wardrobe] openVideoPlayer error:',e);});
   }
 
   function closeVideoPlayer(){

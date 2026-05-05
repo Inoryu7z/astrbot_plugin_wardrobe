@@ -903,8 +903,7 @@ class WardrobeWebServer:
             if not video_file.exists():
                 return jsonify({"error": "视频文件不存在"}), 404
 
-            resp = await send_from_directory(str(video_file.parent), video_file.name)
-            resp.headers['Content-Type'] = 'video/mp4'
+            resp = await send_file(str(video_file), conditional=True)
             resp.headers['Accept-Ranges'] = 'bytes'
             return resp
 
