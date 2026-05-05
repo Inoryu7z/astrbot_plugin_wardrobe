@@ -19,6 +19,7 @@ from .core.database import WardrobeDatabase
 from .core.image_store import ImageStore
 from .core.searcher import ImageSearcher
 from .core.utils import detect_image_mime, ensure_list, ensure_str, mime_to_ext
+from .core.video_service import VideoService
 from .webui import WardrobeWebServer
 
 try:
@@ -41,7 +42,7 @@ _AIIMG_GENERATE_TOOLS = frozenset({"aiimg_generate"})
     "astrbot_plugin_wardrobe",
     "Inoryu7z",
     "图片衣柜管理插件，支持智能分类、语义检索和参考图接口",
-    "2.4.1",
+    "2.5.0",
 )
 class WardrobePlugin(Star):
     def __init__(self, context: Context, config: AstrBotConfig = None):
@@ -59,6 +60,7 @@ class WardrobePlugin(Star):
         if self.vector_searcher and self.rerank_provider:
             self.vector_searcher.rerank_provider = self.rerank_provider
         self.searcher = ImageSearcher(context, self.db, self.store, vector_searcher=self.vector_searcher)
+        self.video_service = VideoService(self)
         self.data_dir = data_dir
         self._db_initialized = False
         self._db_init_event = asyncio.Event()

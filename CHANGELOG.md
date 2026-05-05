@@ -1,3 +1,34 @@
+### v2.5.0
+
+**✨ 新功能：图片转视频（WebUI）**
+
+* 新增图片转视频独立板块，可在 WebUI 中为衣橱中任意图片生成视频
+* 支持三档视频风格：正常、轻荤、重荤，每档可独立绑定不同的视频后端（复用 AiImg Provider Registry）
+* 视频提示词自动生成：调用 Vision 模型根据图片内容和档位生成动态提示词
+* 系统提示词可自定义：通过 WebUI 设置页面实时编辑，持久化到 video_system_prompt.txt
+* 视频后台异步生成，不阻塞前端操作，状态实时更新（generating → done/failed）
+* 视频列表按人格/档位/状态/源图片筛选，支持删除和管理
+* 视频文件支持流式播放（支持 Accept-Ranges 分段请求）
+* 新增 videos 数据库表，记录完整的生成历史（源图、提示词、后端、状态等）
+
+**🔧 新增配置项**
+
+* video_enabled：启用图片转视频功能（默认关闭）
+* video_prompt_provider_id：视频提示词生成模型（需支持视觉能力）
+* video_normal_default_backend：正常档默认视频后端（复用 AiImg Provider ID）
+* video_light_spicy_default_backend：轻荤档默认视频后端
+* video_heavy_spicy_default_backend：重荤档默认视频后端
+
+**📦 新增文件**
+
+* core/video_service.py：视频生成服务，负责提示词生成、后端调用、视频下载全流程
+
+**🔗 依赖关系**
+
+* 视频后端通过 AiImg 插件的 ProviderRegistry 调用，需确保 AiImg 已激活并配置了视频后端
+
+---
+
 ### v2.4.1
 
 ** 优化：参考图接口新增相似度阈值参数**
