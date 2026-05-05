@@ -82,7 +82,8 @@
     videoFilterPersona:'',
     videoPollIntervals:{},
     videoViewActive:false,
-    videoCurrentPlayerId:null
+    videoCurrentPlayerId:null,
+    videoGridIds:[]
   };
 
   let _originalObserver=null;
@@ -2080,6 +2081,12 @@
         else if(e.key==='Escape'){$('#lightbox').classList.add('hidden');state.lightboxId=null;}
         return;
       }
+      if(!$('#videoPlayerModal').classList.contains('hidden')){
+        if(e.key==='ArrowLeft'){_navigateVideoPlayer(-1);e.preventDefault();}
+        else if(e.key==='ArrowRight'){_navigateVideoPlayer(1);e.preventDefault();}
+        else if(e.key==='Escape')closeVideoPlayer();
+        return;
+      }
       if($('#detailModal').classList.contains('hidden'))return;
       if(e.key==='ArrowLeft')navigateDetail(-1);
       else if(e.key==='ArrowRight')navigateDetail(1);
@@ -2210,13 +2217,15 @@
       generateVideo(tier);
     });
 
-    $('#videoSettingsBtn').addEventListener('click',openVideoSettings);
+    $('#videoSettingsTopBtn').addEventListener('click',openVideoSettings);
     $('#videoSettingsCloseBtn').addEventListener('click',closeVideoSettings);
     $('#videoSettingsModal').addEventListener('click',e=>{if(e.target===e.currentTarget)closeVideoSettings();});
     $('#videoPromptSaveBtn').addEventListener('click',saveVideoSettings);
 
     $('#videoPlayerCloseBtn').addEventListener('click',closeVideoPlayer);
     $('#videoPlayerModal').addEventListener('click',e=>{if(e.target===e.currentTarget)closeVideoPlayer();});
+    $('#videoPlayerPrevBtn').addEventListener('click',e=>{e.stopPropagation();_navigateVideoPlayer(-1);});
+    $('#videoPlayerNextBtn').addEventListener('click',e=>{e.stopPropagation();_navigateVideoPlayer(1);});
     $('#vpDeleteBtn').addEventListener('click',()=>{
       if(state.videoCurrentPlayerId)deleteVideo(state.videoCurrentPlayerId,true);
     });
@@ -2273,25 +2282,21 @@
     const imageGrid=$('#imageGrid');
     const statsView=$('#statsView');
     const sidebar=$('#sidebar');
-    const topbarRight=$('.topbar-right');
     const videoBtn=$('#videoViewBtn');
-    const content=$('.content');
+    const videoSettingsBtn=$('#videoSettingsTopBtn');
     if(show){
       videoView.classList.remove('hidden');
       imageGrid.classList.add('hidden');
       if(statsView)statsView.classList.add('hidden');
       if(sidebar)sidebar.classList.add('hidden');
-      if(content)content.classList.add('content-video-active');
       const emptyState=$('#emptyState');
       if(emptyState)emptyState.classList.add('hidden');
       const scrollSentinel=$('#scrollSentinel');
       if(scrollSentinel)scrollSentinel.classList.add('hidden');
-      const pagination=$('#pagination');
-      if(pagination)pagination.classList.add('hidden');
-      if(topbarRight)topbarRight.style.display='none';
       const batchBar=$('#batchBar');
       if(batchBar)batchBar.classList.add('hidden');
       if(videoBtn){videoBtn.classList.add('btn-accent');videoBtn.classList.remove('btn-secondary');}
+      if(videoSettingsBtn)videoSettingsBtn.classList.remove('hidden');
       if(!state._videoFiltersLoaded)loadVideoPersonaFilter();
       state.videoPage=1;state.videoHasMore=true;
       loadVideos(true);
@@ -2299,13 +2304,10 @@
       videoView.classList.add('hidden');
       imageGrid.classList.remove('hidden');
       if(sidebar)sidebar.classList.remove('hidden');
-      if(content)content.classList.remove('content-video-active');
-      if(topbarRight)topbarRight.style.display='';
       const scrollSentinel=$('#scrollSentinel');
       if(scrollSentinel)scrollSentinel.classList.remove('hidden');
-      const pagination=$('#pagination');
-      if(pagination)pagination.classList.remove('hidden');
       if(videoBtn){videoBtn.classList.remove('btn-accent');videoBtn.classList.add('btn-secondary');}
+      if(videoSettingsBtn)videoSettingsBtn.classList.add('hidden');
       Object.keys(state.videoPollIntervals).forEach(id=>stopVideoPoll(parseInt(id)));
       loadImages(false);
     }
@@ -2394,8 +2396,14 @@
 
   function renderVideoGrid(videos,append){
     const grid=$('#videoGrid');
-    if(!append)grid.innerHTML='';
-    videos.forEach(v=>grid.appendChild(createVideoCard(v)));
+    if(!append){
+      grid.innerHTML='';
+      state.videoGridIds=[];
+    }
+    videos.forEach(v=>{
+      grid.appendChild(createVideoCard(v));
+      state.videoGridIds.push(v.id);
+    });
     updateVideoPagination();
   }
 
@@ -2487,12 +2495,21 @@
         method:'POST',
         json:{image_id:state.currentImageId,tier:tier,user_thoughts:thoughts||null,backend_override:backend||null}
       });
-      if(!resp||!resp.ok){statusEl.textContent=(resp&&resp.error)||'请求失败';statusEl.style.color='var(--danger)';state.videoGenerating=false;submitBtn.disabled=false;submitBtn.textContent='开始生成';return;}
+      if(!resp||!resp.ok){
+        statusEl.textContent=(resp&&resp.error)||'请求失败';
+        statusEl.style.color='var(--danger)';
+        state.videoGenerating=false;
+        submitBtn.disabled=false;
+        submitBtn.textContent='开始生成';
+        return;
+      }
       const data=await resp.json();
       if(!data.success){
         statusEl.textContent=data.error||'生成失败';
         statusEl.style.color='var(--danger)';
-        state.videoGenerating=false;submitBtn.disabled=false;submitBtn.textContent='开始生成';
+        state.videoGenerating=false;
+        submitBtn.disabled=false;
+        submitBtn.textContent='开始生成';
         return;
       }
       statusEl.textContent='任务已提交，后台生成中...';
@@ -2501,11 +2518,35 @@
       loadImageVideos(state.currentImageId);
       if(state.videoViewActive){state.videoPage=1;state.videoHasMore=true;loadVideos(true);}
       submitBtn.textContent='已提交';
+      setTimeout(()=>{
+        state.videoGenerating=false;
+        if(submitBtn)submitBtn.disabled=false;
+      },3000);
     }catch(e){
       statusEl.textContent='网络错误: '+e.message;
       statusEl.style.color='var(--danger)';
-      state.videoGenerating=false;submitBtn.disabled=false;submitBtn.textContent='开始生成';
+      state.videoGenerating=false;
+      submitBtn.disabled=false;
+      submitBtn.textContent='开始生成';
     }
+  }
+
+  function _updateVideoPlayerNavArrows(){
+    const prevBtn=$('#videoPlayerPrevBtn');
+    const nextBtn=$('#videoPlayerNextBtn');
+    if(!prevBtn||!nextBtn)return;
+    const ids=state.videoGridIds||[];
+    const idx=ids.indexOf(state.videoCurrentPlayerId);
+    prevBtn.style.visibility=idx>0?'visible':'hidden';
+    nextBtn.style.visibility=idx>=0&&idx<ids.length-1?'visible':'hidden';
+  }
+
+  function _navigateVideoPlayer(direction){
+    const ids=state.videoGridIds||[];
+    const idx=ids.indexOf(state.videoCurrentPlayerId);
+    const newIdx=idx+direction;
+    if(newIdx<0||newIdx>=ids.length)return;
+    openVideoPlayer(ids[newIdx]);
   }
 
   function openVideoPlayer(videoId){
@@ -2533,7 +2574,27 @@
       source.type='video/mp4';
       vidEl.appendChild(source);
       vidEl.load();
+      _updateVideoPlayerNavArrows();
+      _preloadAdjacentVideos(videoId);
     }).catch(e=>{console.error('[Wardrobe] openVideoPlayer error:',e);});
+  }
+
+  function _preloadAdjacentVideos(currentId){
+    const ids=state.videoGridIds||[];
+    const idx=ids.indexOf(currentId);
+    if(idx<0)return;
+    const preloadIds=[];
+    if(idx>0)preloadIds.push(ids[idx-1]);
+    if(idx<ids.length-1)preloadIds.push(ids[idx+1]);
+    preloadIds.forEach(id=>{
+      const link=document.createElement('link');
+      link.rel='prefetch';
+      link.href='/api/videos/'+id+'/file';
+      link.as='video';
+      link.type='video/mp4';
+      document.head.appendChild(link);
+      setTimeout(()=>{if(link.parentNode)link.parentNode.removeChild(link);},60000);
+    });
   }
 
   function closeVideoPlayer(){

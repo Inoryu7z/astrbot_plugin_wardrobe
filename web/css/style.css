@@ -1429,33 +1429,11 @@ html, body {
   grid-template-columns: repeat(5, 1fr);
 }
 
-.video-toolbar {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  padding: 12px 20px;
-  margin-bottom: 8px;
-  gap: 12px;
-  flex-wrap: wrap;
-}
-
-.video-filter-group {
-  display: flex;
-  gap: 8px;
-  align-items: center;
-}
-
-.video-toolbar-right {
-  display: flex;
-  gap: 8px;
-  align-items: center;
-}
-
 .video-grid {
   display: grid;
   grid-template-columns: repeat(4, 1fr);
   gap: 16px;
-  padding: 8px 20px 20px;
+  padding: 8px 0 20px;
 }
 
 .video-card {
@@ -1883,40 +1861,14 @@ html, body {
   gap: 12px;
 }
 
-.content.content-video-active {
-  margin-left: 0;
-  padding: 0;
-}
-
 .video-view {
   display: flex;
-  min-height: calc(100vh - 64px);
-}
-
-.video-sidebar {
-  width: var(--sidebar-w);
-  flex-shrink: 0;
-  background: rgba(255,255,255,0.7);
-  backdrop-filter: blur(20px) saturate(1.2);
-  -webkit-backdrop-filter: blur(20px) saturate(1.2);
-  border-right: 1px solid var(--border);
-  padding: 20px 16px;
-  overflow-y: auto;
-}
-
-.video-main {
-  flex: 1;
-  min-width: 0;
-  padding: 0 20px;
+  min-height: calc(100vh - var(--topbar-h));
 }
 
 @media (max-width: 768px) {
-  .video-sidebar { display: none; }
-  .video-main { padding: 0 12px; }
   .video-grid { grid-template-columns: repeat(2, 1fr); }
   .video-list-grid { grid-template-columns: repeat(2, 1fr); }
-  .video-toolbar { padding: 10px 12px; }
-  .video-filter-group { flex-direction: column; align-items: stretch; }
 }
 
 .image-grid.grid-large {
