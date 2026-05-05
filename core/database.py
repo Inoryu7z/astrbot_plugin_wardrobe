@@ -58,6 +58,26 @@ CREATE INDEX IF NOT EXISTS idx_favorite ON images(favorite);
 CREATE INDEX IF NOT EXISTS idx_file_hash ON images(file_hash);
 """
 
+_CREATE_VIDEOS_TABLE_SQL = """
+CREATE TABLE IF NOT EXISTS videos (
+    id TEXT PRIMARY KEY,
+    source_image_id TEXT NOT NULL,
+    video_path TEXT NOT NULL,
+    provider_id TEXT DEFAULT '',
+    tier TEXT DEFAULT 'normal',
+    user_thoughts TEXT DEFAULT '',
+    generated_prompt TEXT DEFAULT '',
+    persona TEXT DEFAULT '',
+    status TEXT DEFAULT 'pending',
+    error_message TEXT DEFAULT '',
+    created_at TEXT NOT NULL,
+    FOREIGN KEY (source_image_id) REFERENCES images(id) ON DELETE CASCADE
+);
+CREATE INDEX IF NOT EXISTS idx_videos_source ON videos(source_image_id);
+CREATE INDEX IF NOT EXISTS idx_videos_status ON videos(status);
+CREATE INDEX IF NOT EXISTS idx_videos_persona ON videos(persona);
+"""
+
 _UPDATABLE_FIELDS = frozenset({
     "category", "style", "clothing_type", "exposure_level", "persona",
     "scene", "atmosphere", "pose_type", "body_orientation",
@@ -101,6 +121,7 @@ class WardrobeDatabase:
                     except Exception:
                         pass
                 await db.executescript(_CREATE_INDEX_SQL)
+                await db.executescript(_CREATE_VIDEOS_TABLE_SQL)
                 await db.commit()
         logger.info("[Wardrobe] 数据库初始化完成")
 
@@ -892,3 +913,118 @@ class WardrobeDatabase:
                 except (json.JSONDecodeError, TypeError):
                     d[key] = []
         return d
+
+    async def add_video(
+        self,
+        *,
+        source_image_id: str,
+        video_path: str,
+        provider_id: str = "",
+        tier: str = "normal",
+        user_thoughts: str = "",
+        generated_prompt: str = "",
+        persona: str = "",
+        status: str = "pending",
+    ) -> str:
+        now = datetime.now(timezone.utc).isoformat()
+        video_id = str(uuid.uuid4())
+        async with self._lock:
+            async with aiosqlite.connect(self.db_path) as db:
+                await db.execute(
+                    """INSERT INTO videos (
+                        id, source_image_id, video_path, provider_id, tier,
+                        user_thoughts, generated_prompt, persona, status, created_at
+                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+                    (video_id, source_image_id, video_path, provider_id, tier,
+                     user_thoughts, generated_prompt, persona, status, now),
+                )
+                await db.commit()
+        return video_id
+
+    async def get_video(self, video_id: str) -> Optional[dict[str, Any]]:
+        async with aiosqlite.connect(self.db_path) as db:
+            db.row_factory = aiosqlite.Row
+            async with db.execute("SELECT * FROM videos WHERE id = ?", (video_id,)) as cursor:
+                row = await cursor.fetchone()
+                if row is None:
+                    return None
+                return dict(row)
+
+    async def list_videos(
+        self,
+        *,
+        persona: Optional[str] = None,
+        tier: Optional[str] = None,
+        status: Optional[str] = None,
+        source_image_id: Optional[str] = None,
+        limit: int = 50,
+        offset: int = 0,
+    ) -> list[dict[str, Any]]:
+        conditions = []
+        params: list[Any] = []
+        if persona is not None:
+            if persona == "":
+                conditions.append("(persona = '' OR persona IS NULL)")
+            else:
+                conditions.append("persona = ?")
+                params.append(persona)
+        if tier:
+            conditions.append("tier = ?")
+            params.append(tier)
+        if status:
+            conditions.append("status = ?")
+            params.append(status)
+        if source_image_id is not None:
+            conditions.append("source_image_id = ?")
+            params.append(source_image_id)
+        where_clause = ""
+        if conditions:
+            where_clause = "WHERE " + " AND ".join(conditions)
+        params.extend([limit, offset])
+        async with aiosqlite.connect(self.db_path) as db:
+            db.row_factory = aiosqlite.Row
+            sql = f"SELECT * FROM videos {where_clause} ORDER BY created_at DESC LIMIT ? OFFSET ?"
+            async with db.execute(sql, params) as cursor:
+                rows = await cursor.fetchall()
+                return [dict(row) for row in rows]
+
+    async def get_videos_by_image_id(self, image_id: str) -> list[dict[str, Any]]:
+        async with aiosqlite.connect(self.db_path) as db:
+            db.row_factory = aiosqlite.Row
+            async with db.execute(
+                "SELECT * FROM videos WHERE source_image_id = ? ORDER BY created_at DESC",
+                (image_id,),
+            ) as cursor:
+                rows = await cursor.fetchall()
+                return [dict(row) for row in rows]
+
+    async def delete_video(self, video_id: str) -> bool:
+        async with self._lock:
+            async with aiosqlite.connect(self.db_path) as db:
+                cursor = await db.execute("DELETE FROM videos WHERE id = ?", (video_id,))
+                await db.commit()
+                return cursor.rowcount > 0
+
+    async def delete_videos_by_image_id(self, image_id: str) -> int:
+        async with self._lock:
+            async with aiosqlite.connect(self.db_path) as db:
+                cursor = await db.execute("DELETE FROM videos WHERE source_image_id = ?", (image_id,))
+                await db.commit()
+                return cursor.rowcount
+
+    async def update_video(self, video_id: str, **kwargs) -> bool:
+        if not kwargs:
+            return False
+        sets = []
+        values: list[Any] = []
+        for key, val in kwargs.items():
+            sets.append(f"{key} = ?")
+            values.append(val)
+        values.append(video_id)
+        async with self._lock:
+            async with aiosqlite.connect(self.db_path) as db:
+                await db.execute(
+                    f"UPDATE videos SET {', '.join(sets)} WHERE id = ?", values
+                )
+                await db.commit()
+        return True

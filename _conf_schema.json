@@ -169,5 +169,36 @@
     "hint": "登录 WebUI 的密码，默认 wardrobe，请及时修改",
     "type": "string",
     "default": "wardrobe"
+  },
+  "video_enabled": {
+    "description": "启用图片转视频",
+    "hint": "开启后在 WebUI 中可以为衣橱图片生成视频（独立板块）。仅在 WebUI 中可用。",
+    "type": "bool",
+    "default": false
+  },
+  "video_prompt_provider_id": {
+    "description": "视频提示词生成模型",
+    "hint": "用于根据图片和用户输入生成视频提示词的模型（需支持视觉能力）",
+    "type": "string",
+    "default": "",
+    "_special": "select_provider"
+  },
+  "video_normal_default_backend": {
+    "description": "正常档默认视频后端",
+    "hint": "aiimg 中已配置的视频后端 provider ID，用户在 WebUI 未手动选择时使用",
+    "type": "string",
+    "default": ""
+  },
+  "video_light_spicy_default_backend": {
+    "description": "轻荤档默认视频后端",
+    "hint": "aiimg 中已配置的视频后端 provider ID",
+    "type": "string",
+    "default": ""
+  },
+  "video_heavy_spicy_default_backend": {
+    "description": "重荤档默认视频后端",
+    "hint": "aiimg 中已配置的视频后端 provider ID",
+    "type": "string",
+    "default": ""
   }
 }

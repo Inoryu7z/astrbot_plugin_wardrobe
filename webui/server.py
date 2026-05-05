@@ -801,6 +801,132 @@ class WardrobeWebServer:
                 if tmp_dir:
                     await asyncio.to_thread(shutil.rmtree, tmp_dir, ignore_errors=True)
 
+        @app.route("/api/videos")
+        async def api_videos():
+            await self.plugin._ensure_db()
+            page = max(1, int(request.args.get("page", 1)))
+            per_page = min(100, max(1, int(request.args.get("per_page", 50))))
+            persona = request.args.get("persona", "")
+            tier = request.args.get("tier", "")
+            status = request.args.get("status", "")
+            source_image_id = request.args.get("source_image_id", "")
+            offset = (page - 1) * per_page
+
+            videos = await self.plugin.db.list_videos(
+                persona=persona or None,
+                tier=tier or None,
+                status=status or None,
+                source_image_id=source_image_id or None,
+                limit=per_page,
+                offset=offset,
+            )
+            for v in videos:
+                sid = str(v.get("source_image_id", ""))
+                if sid:
+                    v["source_thumbnail"] = f"/api/image-file/{sid}/thumbnail"
+                else:
+                    v["source_thumbnail"] = None
+            return jsonify({"videos": videos, "page": page, "per_page": per_page})
+
+        @app.route("/api/videos/generate", methods=["POST"])
+        async def api_video_generate():
+            await self.plugin._ensure_db()
+            data = await request.get_json(silent=True) or {}
+            image_id = data.get("image_id", "").strip()
+            tier = data.get("tier", "normal").strip()
+            user_thoughts = data.get("user_thoughts", "").strip()
+            backend_override = data.get("backend_override", "").strip()
+
+            if not image_id:
+                return jsonify({"error": "未指定图片"}), 400
+            if tier not in ("normal", "light_spicy", "heavy_spicy"):
+                return jsonify({"error": "无效的档位"}), 400
+
+            video_enabled = bool(self.plugin._cfg("video_enabled", False))
+            if not video_enabled:
+                return jsonify({"error": "图片转视频功能未启用"}), 400
+
+            try:
+                video_id = await self.plugin.video_service.generate_video(
+                    image_id=image_id,
+                    tier=tier,
+                    user_thoughts=user_thoughts,
+                    backend_override=backend_override,
+                )
+                logger.info("[Wardrobe] WebUI 触发视频生成: image_id=%s tier=%s video_id=%s", image_id, tier, video_id)
+                return jsonify({"success": True, "video_id": video_id, "status": "generating"})
+            except ValueError as e:
+                return jsonify({"error": str(e)}), 400
+            except Exception as e:
+                logger.error("[Wardrobe] 视频生成触发失败: %s", e, exc_info=True)
+                return jsonify({"error": f"生成失败: {e}"}), 500
+
+        @app.route("/api/videos/<video_id>")
+        async def api_video_detail(video_id):
+            await self.plugin._ensure_db()
+            video = await self.plugin.db.get_video(video_id)
+            if not video:
+                return jsonify({"error": "未找到视频"}), 404
+            sid = str(video.get("source_image_id", ""))
+            video["source_thumbnail"] = f"/api/image-file/{sid}/thumbnail" if sid else None
+            return jsonify(video)
+
+        @app.route("/api/videos/<video_id>", methods=["DELETE"])
+        async def api_video_delete(video_id):
+            await self.plugin._ensure_db()
+            video = await self.plugin.db.get_video(video_id)
+            if not video:
+                return jsonify({"error": "未找到视频"}), 404
+
+            deleted = await self.plugin.db.delete_video(video_id)
+            if deleted and video.get("video_path"):
+                video_file = self.plugin.video_service.videos_dir / video["video_path"]
+                try:
+                    if video_file.exists():
+                        video_file.unlink()
+                except Exception:
+                    pass
+            return jsonify({"success": bool(deleted)})
+
+        @app.route("/api/videos/<video_id>/file")
+        async def api_video_file(video_id):
+            await self.plugin._ensure_db()
+            video = await self.plugin.db.get_video(video_id)
+            if not video:
+                return jsonify({"error": "未找到视频"}), 404
+
+            video_path_str = video.get("video_path", "")
+            if not video_path_str:
+                return jsonify({"error": "视频文件路径为空"}), 404
+
+            video_file = self.plugin.video_service.videos_dir / video_path_str
+            if not video_file.exists():
+                return jsonify({"error": "视频文件不存在"}), 404
+
+            resp = await send_from_directory(str(video_file.parent), video_file.name)
+            resp.headers['Content-Type'] = 'video/mp4'
+            resp.headers['Accept-Ranges'] = 'bytes'
+            return resp
+
+        @app.route("/api/video-settings/prompt")
+        async def api_video_prompt_get():
+            try:
+                text = await self.plugin.video_service.load_system_prompt()
+                return jsonify({"prompt": text})
+            except Exception as e:
+                return jsonify({"error": str(e)}), 500
+
+        @app.route("/api/video-settings/prompt", methods=["POST"])
+        async def api_video_prompt_save():
+            data = await request.get_json(silent=True) or {}
+            text = data.get("prompt", "")
+            try:
+                await self.plugin.video_service.save_system_prompt(text)
+                logger.info("[Wardrobe] 视频系统提示词已保存 len=%d", len(text))
+                return jsonify({"success": True})
+            except Exception as e:
+                return jsonify({"error": str(e)}), 500
+
         return app
 
     async def start(self):
