@@ -2,6 +2,8 @@
   --pink: #FF8FA3;
   --pink-dark: #E8607A;
   --pink-light: #FFD6DE;
+  --accent: #FF8FA3;
+  --accent-dark: #E8607A;
   --lavender: #C4A8E0;
   --lavender-dark: #9B72CF;
   --mint: #6ECFAD;
@@ -1427,11 +1429,6 @@ html, body {
   grid-template-columns: repeat(5, 1fr);
 }
 
-.video-view {
-  width: 100%;
-  max-width: 100%;
-}
-
 .video-toolbar {
   display: flex;
   align-items: center;
@@ -1884,6 +1881,11 @@ html, body {
   display: grid;
   grid-template-columns: repeat(3, 1fr);
   gap: 12px;
+}
+
+.content.content-video-active {
+  margin-left: 0;
+  padding: 0;
 }
 
 .video-view {
