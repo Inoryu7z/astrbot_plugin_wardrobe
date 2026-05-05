@@ -31,7 +31,14 @@ _DEFAULT_SYSTEM_PROMPT = """# 图片转视频提示词生成器
 [如果要使用，请联系作者]
 
 ## 输出
-以「参考图中身材傲人的少女，她」开头，输出一段连贯中文提示词。不输出其他内容。"""
+以「参考图中身材傲人的少女，她」开头，输出一段连贯中文提示词。不输出其他内容。
+
+## 绝对禁止
+- 禁止输出任何分析、思考、推理过程
+- 禁止输出"用户意图""图片分析""档位判定""检查"等元信息
+- 禁止输出"我来分析""再想想""重新选""确认"等自我对话
+- 禁止输出任何带有**粗体**或编号列表的中间思考内容
+- 只输出最终提示词，其他什么都不说"""
 
 _VIDEO_TIMEOUT = 600
 _DOWNLOAD_TIMEOUT = 300
@@ -105,9 +112,12 @@ class VideoService:
             status="generating",
         )
 
+        # 提取图片描述信息传给提示词生成模型
+        image_description = self._build_image_description(image)
+
         asyncio.create_task(self._process_video(
             video_id, image_id, image_path, tier, tier_label,
-            user_thoughts, backend_override, persona,
+            user_thoughts, backend_override, persona, image_description,
         ))
 
         return video_id
@@ -122,6 +132,7 @@ class VideoService:
         user_thoughts: str,
         backend_override: str,
         persona: str,
+        image_description: str = "",
     ):
         try:
             async with aiofiles.open(image_path, "rb") as f:
@@ -138,7 +149,7 @@ class VideoService:
             logger.info("[VideoService] 开始生成视频提示词 video_id=%s tier=%s", video_id, tier_label)
 
             generated_prompt = await self._generate_prompt(
-                prompt_provider_id, image_bytes, tier, tier_label, user_thoughts
+                prompt_provider_id, image_bytes, tier, tier_label, user_thoughts, image_description
             )
 
             logger.info("[VideoService] 提示词生成完成 video_id=%s len=%d", video_id, len(generated_prompt))
@@ -181,47 +192,84 @@ class VideoService:
         tier: str,
         tier_label: str,
         user_thoughts: str,
+        image_description: str = "",
     ) -> str:
         system_prompt = await self.load_system_prompt()
 
         user_prompt = f"【必须遵守以下档位】{tier_label}档\n"
         user_prompt += f"请严格使用 system prompt 中\"### {tier_label}档\"段落的规则生成视频提示词。提示词必须符合该档位标准。\n"
+        if image_description.strip():
+            user_prompt += f"\n【图片已分析出的信息】\n{image_description.strip()}\n"
+            user_prompt += "请基于以上图片信息生成视频提示词，不要重复描述图片已有内容，只写动态变化。\n"
         if user_thoughts.strip():
-            user_prompt += f"用户附加看法：{user_thoughts.strip()}\n"
-        user_prompt += "请根据图片生成视频提示词。"
-
-        provider = self.plugin.context.get_provider_by_id(prompt_provider_id)
-        if not provider:
-            raise ValueError(f"未找到提示词生成模型: {prompt_provider_id}")
+            user_prompt += f"\n用户附加想法：{user_thoughts.strip()}\n"
+        user_prompt += "\n请根据图片生成视频提示词。"
 
         mime = "image/jpeg"
+        ext = "jpg"
         try:
-            from ..core.utils import detect_image_mime
+            from ..core.utils import detect_image_mime, mime_to_ext
             mime = detect_image_mime(image_bytes)
+            ext = mime_to_ext(mime)
         except Exception:
             pass
 
-        image_url = f"data:{mime};base64,{_b64(image_bytes)}"
+        logger.info("[VideoService] 调用提示词模型 provider=%s image_size=%d mime=%s",
+                    prompt_provider_id, len(image_bytes), mime)
+
+        # 写临时文件，与 analyzer 保持一致
+        import tempfile
+        import os as _os_module
+        temp_fd, temp_path = tempfile.mkstemp(suffix=f".{ext}")
+        try:
+            _os_module.write(temp_fd, image_bytes)
+        finally:
+            _os_module.close(temp_fd)
+
+        resolved_path = str(Path(temp_path).resolve())
+        logger.info("[VideoService] 临时图片路径: %s", resolved_path)
 
         try:
-            resp = await provider.text_chat(
-                system_prompt=system_prompt,
-                user_prompt=user_prompt,
-                image_urls=[image_url],
-                temperature=0.8,
-            )
-        except TypeError:
-            resp = await provider.text_chat(
-                system_prompt=system_prompt,
-                user_prompt=user_prompt,
-                image_urls=[image_url],
-            )
+            import time as _time
+            t0 = _time.perf_counter()
+            try:
+                llm_resp = await self.plugin.context.llm_generate(
+                    chat_provider_id=prompt_provider_id,
+                    prompt=user_prompt,
+                    system_prompt=system_prompt,
+                    image_urls=[resolved_path],
+                )
+            except (TypeError, AttributeError) as e:
+                logger.warning("[VideoService] image_urls 列表不兼容，回退字符串: %s", e)
+                llm_resp = await self.plugin.context.llm_generate(
+                    chat_provider_id=prompt_provider_id,
+                    prompt=user_prompt,
+                    system_prompt=system_prompt,
+                    image_urls=resolved_path,
+                )
 
-        prompt_text = self._extract_completion(resp)
-        if not prompt_text.strip():
-            raise ValueError("提示词生成模型返回了空结果")
+            elapsed = _time.perf_counter() - t0
+            raw_text = (getattr(llm_resp, "completion_text", "") or "").strip()
+            logger.info("[VideoService] 模型返回完成 耗时=%.2fs len=%d", elapsed, len(raw_text))
+            logger.info("[VideoService] 模型原始返回: %s", raw_text[:500] if raw_text else "(空)")
 
-        return prompt_text.strip()
+            if not raw_text:
+                raise ValueError("提示词生成模型返回了空结果")
+
+            thinking_markers = [
+                "用户意图", "图片分析", "档位判定", "我来分析", "再想想",
+                "重新选", "确认", "检查", "思考一下", "让我想想",
+            ]
+            found_markers = [m for m in thinking_markers if m in raw_text]
+            if found_markers:
+                logger.warning("[VideoService] 提示词包含思维链特征: %s", found_markers)
+
+            return raw_text
+        finally:
+            try:
+                _os_module.remove(temp_path)
+            except Exception:
+                pass
 
     async def _call_video_backend(
         self,
@@ -272,6 +320,42 @@ class VideoService:
                 raise ValueError("下载的文件不是有效的 MP4 格式")
             async with aiofiles.open(dest, "wb") as f:
                 await f.write(content)
+
+    def _build_image_description(self, image: dict) -> str:
+        """从图片数据库记录中提取关键信息，构建图片描述文本"""
+        fields = [
+            ("描述", "description"),
+            ("服装", "clothing_type"),
+            ("风格", "style"),
+            ("场景", "scene"),
+            ("姿势", "pose"),
+            ("表情", "expression"),
+            ("氛围", "atmosphere"),
+            ("关键特征", "key_features"),
+            ("道具", "prop_objects"),
+            ("身体焦点", "body_focus"),
+            ("景别", "shot_size"),
+            ("角度", "camera_angle"),
+            ("动态", "motion"),
+            ("动作风格", "action_style"),
+            ("朝向", "orientation"),
+            ("构图", "composition"),
+            ("背景", "background"),
+            ("色调", "color_tone"),
+            ("魅力特征", "allure_features"),
+            ("暴露特征", "exposure_features"),
+        ]
+        parts = []
+        for label, key in fields:
+            val = image.get(key)
+            if val:
+                if isinstance(val, list):
+                    val = ", ".join(str(v) for v in val if v)
+                else:
+                    val = str(val).strip()
+                if val and val.lower() not in ("none", "null", "", "nan"):
+                    parts.append(f"{label}：{val}")
+        return "\n".join(parts)
 
     def _get_tier_backend(self, tier: str) -> str:
         key_map = {
