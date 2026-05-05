@@ -875,6 +875,7 @@ class WardrobeWebServer:
         @app.route("/api/videos/<video_id>", methods=["DELETE"])
         async def api_video_delete(video_id):
             await self.plugin._ensure_db()
+            self.plugin.video_service._ensure_dirs()
             video = await self.plugin.db.get_video(video_id)
             if not video:
                 return jsonify({"error": "未找到视频"}), 404
@@ -892,6 +893,7 @@ class WardrobeWebServer:
         @app.route("/api/videos/<video_id>/file")
         async def api_video_file(video_id):
             await self.plugin._ensure_db()
+            self.plugin.video_service._ensure_dirs()
             video = await self.plugin.db.get_video(video_id)
             if not video:
                 return jsonify({"error": "未找到视频"}), 404

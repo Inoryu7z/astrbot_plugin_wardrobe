@@ -2533,7 +2533,6 @@
       source.type='video/mp4';
       vidEl.appendChild(source);
       vidEl.load();
-      vidEl.play().catch(e=>{console.warn('[Wardrobe] video play failed:',e.message);});
     }).catch(e=>{console.error('[Wardrobe] openVideoPlayer error:',e);});
   }
 
