@@ -2203,8 +2203,16 @@
       btn.addEventListener('click',()=>{
         const tier=btn.dataset.tier;
         if(!tier)return;
-        generateVideo(tier);
+        $$('#videoGeneratePanel .vgp-tier-btn').forEach(b=>b.classList.remove('active'));
+        btn.classList.add('active');
+        state.selectedVideoTier=tier;
       });
+    });
+
+    $('#vgpSubmitBtn').addEventListener('click',()=>{
+      const tier=state.selectedVideoTier;
+      if(!tier){toast('请先选择档位','error');return;}
+      generateVideo(tier);
     });
 
     $('#videoSettingsBtn').addEventListener('click',openVideoSettings);
