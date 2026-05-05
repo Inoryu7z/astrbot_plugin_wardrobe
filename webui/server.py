@@ -890,6 +890,40 @@ class WardrobeWebServer:
                     pass
             return jsonify({"success": bool(deleted)})
 
+        @app.route("/api/videos/<video_id>/retry", methods=["POST"])
+        async def api_video_retry(video_id):
+            await self.plugin._ensure_db()
+            self.plugin.video_service._ensure_dirs()
+            video = await self.plugin.db.get_video(video_id)
+            if not video:
+                return jsonify({"error": "未找到视频"}), 404
+            if video.get("status") != "failed":
+                return jsonify({"error": "只有失败状态的视频可以重试"}), 400
+            source_image_id = video.get("source_image_id")
+            if not source_image_id:
+                return jsonify({"error": "视频缺少源图片"}), 400
+            image = await self.plugin.db.get_image(source_image_id)
+            if not image:
+                return jsonify({"error": "源图片不存在"}), 404
+            image_path = self.plugin.image_store.get_image_path(image)
+            if not image_path or not image_path.exists():
+                return jsonify({"error": "源图片文件不存在"}), 404
+            tier = video.get("tier", "normal")
+            tier_label = {"normal": "正常", "light_spicy": "轻荤", "heavy_spicy": "重荤"}.get(tier, tier)
+            user_thoughts = video.get("user_thoughts", "")
+            backend_override = video.get("provider_id", "")
+            persona = video.get("persona", "")
+            await self.plugin.db.update_video(video_id, {"status": "generating", "error_message": None})
+            image_description = self.plugin.video_service._build_image_description(image)
+            asyncio.create_task(
+                self.plugin.video_service._process_video(
+                    video_id, source_image_id, image_path, tier, tier_label,
+                    user_thoughts, backend_override, persona, image_description,
+                )
+            )
+            logger.info("[Wardrobe] WebUI 重试视频生成: video_id=%s tier=%s", video_id, tier)
+            return jsonify({"success": True, "video_id": video_id})
+
         @app.route("/api/videos/<video_id>/file")
         async def api_video_file(video_id):
             await self.plugin._ensure_db()

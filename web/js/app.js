@@ -2372,18 +2372,32 @@
     const div=document.createElement('div');
     div.className='video-card';
     div.dataset.videoId=video.id;
+    const isFailed=video.status==='failed';
     div.innerHTML='<div class="video-card-thumb">'+
       (video.source_thumbnail
         ?'<img src="'+_escapeAttr(video.source_thumbnail)+'" alt="" loading="lazy" onerror="this.parentElement.classList.add(\'video-thumb-error\');this.style.display=\'none\'">'
         :'<div class="video-thumb-placeholder"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" width="32" height="32"><polygon points="23 7 16 12 23 17 23 7"/><rect x="1" y="5" width="15" height="14" rx="2" ry="2"/></svg></div>')+
       (video.status==='generating'?'<div class="video-card-generating-overlay"><div class="video-spinner"></div></div>':'')+
+      (isFailed?'<div class="video-card-failed-overlay"><span class="video-failed-icon">✗</span></div>':'')+
       '</div>'+
       '<div class="video-card-info">'+
         '<span class="video-card-tier '+_tierClass(video.tier)+'">'+_tierLabel(video.tier)+'</span>'+
         '<span class="video-card-status '+_statusClass(video.status)+'">'+_statusLabel(video.status)+'</span>'+
       '</div>'+
-      (video.error_message?'<div class="video-card-error" title="'+_escapeAttr(video.error_message)+'">'+_escapeHtml(video.error_message.substring(0,50))+'</div>':'');
-    div.addEventListener('click',()=>{
+      (video.error_message?'<div class="video-card-error" title="'+_escapeAttr(video.error_message)+'">'+_escapeHtml(video.error_message.substring(0,50))+'</div>':'')+
+      (isFailed?'<div class="video-card-actions">'+
+        '<button class="video-action-btn video-retry-btn" data-action="retry">↻ 重试</button>'+
+        '<button class="video-action-btn video-delete-btn" data-action="delete">🗑 删除</button>'+
+      '</div>':'');
+    div.addEventListener('click',(e)=>{
+      const btn=e.target.closest('[data-action]');
+      if(btn){
+        e.stopPropagation();
+        const action=btn.dataset.action;
+        if(action==='delete')deleteVideo(video.id,false);
+        else if(action==='retry')retryVideoGenerate(video.id);
+        return;
+      }
       if(video.status==='done')openVideoPlayer(video.id);
       else if(video.status==='failed')toast('该视频生成失败：'+(video.error_message||'未知错误'),'error');
       else if(video.status==='generating')toast('视频正在生成中，请等待','info');
@@ -2620,6 +2634,31 @@
         }
         if(state.currentImageId)loadImageVideos(state.currentImageId);
       }else{toast(data.error||'删除失败','error');}
+    }catch(e){toast('网络错误: '+e.message,'error');}
+  }
+
+  async function retryVideoGenerate(videoId){
+    if(!confirm('确定重新生成此视频？将使用相同的图片和档位重新生成。'))return;
+    try{
+      const resp=await api('/api/videos/'+videoId+'/retry',{method:'POST'});
+      if(!resp||!resp.ok){toast('重试失败','error');return;}
+      const data=await resp.json();
+      if(data.success){
+        toast('视频重新生成任务已提交','success');
+        const card=$('#videoGrid').querySelector('[data-video-id="'+videoId+'"]');
+        if(card){
+          const statusSpan=card.querySelector('.video-card-status');
+          if(statusSpan){
+            statusSpan.textContent='生成中';
+            statusSpan.className='video-card-status video-status-generating';
+          }
+          const actionsDiv=card.querySelector('.video-card-actions');
+          if(actionsDiv)actionsDiv.remove();
+          const overlay=card.querySelector('.video-card-failed-overlay');
+          if(overlay)overlay.remove();
+        }
+        if(state.currentImageId)loadImageVideos(state.currentImageId);
+      }else{toast(data.error||'重试失败','error');}
     }catch(e){toast('网络错误: '+e.message,'error');}
   }
 
