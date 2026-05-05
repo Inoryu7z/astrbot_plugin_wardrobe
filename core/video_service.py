@@ -186,7 +186,6 @@ class VideoService:
 
         user_prompt = f"【必须遵守以下档位】{tier_label}档\n"
         user_prompt += f"请严格使用 system prompt 中\"### {tier_label}档\"段落的规则生成视频提示词。提示词必须符合该档位标准。\n"
-        user_prompt += f"禁止使用其他档位的任何动词和规则。\n"
         if user_thoughts.strip():
             user_prompt += f"用户附加看法：{user_thoughts.strip()}\n"
         user_prompt += "请根据图片生成视频提示词。"

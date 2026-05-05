@@ -2282,11 +2282,15 @@
       if(statsView)statsView.classList.add('hidden');
       if(sidebar)sidebar.classList.add('hidden');
       if(content)content.classList.add('content-video-active');
-      $('#emptyState').classList.add('hidden');
-      $('#scrollSentinel').classList.add('hidden');
-      $('#pagination').classList.add('hidden');
+      const emptyState=$('#emptyState');
+      if(emptyState)emptyState.classList.add('hidden');
+      const scrollSentinel=$('#scrollSentinel');
+      if(scrollSentinel)scrollSentinel.classList.add('hidden');
+      const pagination=$('#pagination');
+      if(pagination)pagination.classList.add('hidden');
       if(topbarRight)topbarRight.style.display='none';
-      $('#batchBar').classList.add('hidden');
+      const batchBar=$('#batchBar');
+      if(batchBar)batchBar.classList.add('hidden');
       if(videoBtn){videoBtn.classList.add('btn-accent');videoBtn.classList.remove('btn-secondary');}
       if(!state._videoFiltersLoaded)loadVideoPersonaFilter();
       state.videoPage=1;state.videoHasMore=true;
@@ -2297,8 +2301,10 @@
       if(sidebar)sidebar.classList.remove('hidden');
       if(content)content.classList.remove('content-video-active');
       if(topbarRight)topbarRight.style.display='';
-      $('#scrollSentinel').classList.remove('hidden');
-      $('#pagination').classList.remove('hidden');
+      const scrollSentinel=$('#scrollSentinel');
+      if(scrollSentinel)scrollSentinel.classList.remove('hidden');
+      const pagination=$('#pagination');
+      if(pagination)pagination.classList.remove('hidden');
       if(videoBtn){videoBtn.classList.remove('btn-accent');videoBtn.classList.add('btn-secondary');}
       Object.keys(state.videoPollIntervals).forEach(id=>stopVideoPoll(parseInt(id)));
       loadImages(false);
@@ -2308,7 +2314,7 @@
   async function loadVideos(reset){
     if(state.videoLoading)return;
     state.videoLoading=true;
-    if(reset){state.videoPage=1;state.videoHasMore=true;$('#videoGrid').innerHTML='';}
+    if(reset){state.videoPage=1;state.videoHasMore=true;const g=$('#videoGrid');if(g)g.innerHTML='';}
     const params=new URLSearchParams();
     params.set('page',state.videoPage);
     params.set('per_page',state.videoPerPage);
@@ -2596,14 +2602,16 @@
       if(!resp||!resp.ok)return;
       const data=await resp.json();
       const personas=data.persona_names||data.personas||[];
+      console.log('[Wardrobe] personas for video filter:', personas);
       const container=$('#videoPersonaSidebarFilters');
+      if(!container)return;
       let html='<label class="filter-item"><input type="radio" name="video_persona" value="" checked><span class="filter-label">全部</span></label>';
       personas.forEach(p=>{
         html+='<label class="filter-item"><input type="radio" name="video_persona" value="'+_escapeAttr(p)+'"><span class="filter-label">'+_escapeHtml(p)+'</span></label>';
       });
       container.innerHTML=html;
       if(state._bindPersonaRadios)state._bindPersonaRadios();
-    }catch(e){}
+    }catch(e){console.error('loadVideoPersonaFilter error:',e);}
   }
 
   async function loadImageVideos(imageId){

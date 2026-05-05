@@ -921,10 +921,13 @@ class WardrobeWebServer:
                         return Response('', status=416, headers={'Content-Range': f'bytes */{file_size}'})
                     end = min(end, file_size - 1)
                     length = end - start + 1
-                    import aiofiles
-                    async with aiofiles.open(str(video_file), 'rb') as f:
-                        await f.seek(start)
-                        data = await f.read(length)
+
+                    def _read_range():
+                        with open(str(video_file), 'rb') as f:
+                            f.seek(start)
+                            return f.read(length)
+
+                    data = await asyncio.to_thread(_read_range)
                     headers = {
                         'Content-Type': 'video/mp4',
                         'Content-Range': f'bytes {start}-{end}/{file_size}',
@@ -935,9 +938,11 @@ class WardrobeWebServer:
                 except (ValueError, IndexError):
                     pass
 
-            import aiofiles
-            async with aiofiles.open(str(video_file), 'rb') as f:
-                data = await f.read()
+            def _read_all():
+                with open(str(video_file), 'rb') as f:
+                    return f.read()
+
+            data = await asyncio.to_thread(_read_all)
             return Response(data, mimetype='video/mp4', headers={'Accept-Ranges': 'bytes', 'Content-Length': str(file_size)})
 
         @app.route("/api/video-settings/prompt")
