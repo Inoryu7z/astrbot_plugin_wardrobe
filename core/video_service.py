@@ -30,15 +30,21 @@ _DEFAULT_SYSTEM_PROMPT = """# 图片转视频提示词生成器
 ## 重荤档
 [如果要使用，请联系作者]
 
-## 输出
-以「参考图中身材傲人的少女，她」开头，输出一段连贯中文提示词。不输出其他内容。
+## 输出格式
+输出严格的 JSON 对象，包含 reasoning 和 prompt 两个字段：
 
-## 绝对禁止
-- 禁止输出任何分析、思考、推理过程
-- 禁止输出"用户意图""图片分析""档位判定""检查"等元信息
-- 禁止输出"我来分析""再想想""重新选""确认"等自我对话
-- 禁止输出任何带有**粗体**或编号列表的中间思考内容
-- 只输出最终提示词，其他什么都不说"""
+```json
+{
+  "reasoning": "简要分析：图片的场景、人物姿态、服装特点是什么，因此选择了哪些动态变化词，为什么这些动态符合该档位标准",
+  "prompt": "参考图中身材傲人的少女，她..."
+}
+```
+
+规则：
+- reasoning 写清你的分析依据：图中实际看到了什么 → 因此选择了什么动态
+- prompt 以「参考图中身材傲人的少女，她」开头，一段连贯中文
+- 只输出 JSON 对象本体，不要 Markdown 代码块包裹，不要前后解释
+- 不要输出任何 JSON 之外的内容"""
 
 _VIDEO_TIMEOUT = 600
 _DOWNLOAD_TIMEOUT = 300
@@ -206,20 +212,123 @@ class VideoService:
         user_prompt += "\n请根据图片生成视频提示词。"
 
         mime = "image/jpeg"
+        try:
+            from ..core.utils import detect_image_mime
+            mime = detect_image_mime(image_bytes)
+        except Exception:
+            pass
+
+        # 检查直连 API 配置
+        api_base = str(self.plugin._cfg("video_prompt_base_url", "") or "").strip()
+        api_key = str(self.plugin._cfg("video_prompt_api_key", "") or "").strip()
+        api_model = str(self.plugin._cfg("video_prompt_model", "") or "").strip()
+        use_direct_api = api_base and api_key and api_model
+
+        if use_direct_api:
+            logger.info("[VideoService] 使用直连 API 生成提示词 model=%s image_size=%d", api_model, len(image_bytes))
+            raw_text = await self._call_direct_vision_api(
+                api_base, api_key, api_model, system_prompt, user_prompt,
+                image_bytes, mime
+            )
+        else:
+            logger.info("[VideoService] 回退 AstrBot Provider 生成提示词 provider=%s image_size=%d",
+                        prompt_provider_id, len(image_bytes))
+            raw_text = await self._call_astrbot_llm_generate(
+                prompt_provider_id, system_prompt, user_prompt,
+                image_bytes, mime
+            )
+
+        if not raw_text:
+            raise ValueError("提示词生成模型返回了空结果")
+
+        prompt_text, reasoning_text = self._parse_json_prompt(raw_text)
+        if reasoning_text:
+            logger.info("[VideoService] 模型推理依据: %s", reasoning_text[:300])
+
+        if not prompt_text:
+            raise ValueError("提示词生成模型返回了空提示词")
+
+        thinking_markers = [
+            "用户意图", "图片分析", "档位判定", "我来分析", "再想想",
+            "重新选", "确认", "检查", "思考一下", "让我想想",
+        ]
+        found_markers = [m for m in thinking_markers if m in prompt_text]
+        if found_markers:
+            logger.warning("[VideoService] 提示词仍含思维链特征: %s", found_markers)
+
+        return prompt_text
+
+    async def _call_direct_vision_api(
+        self, api_base: str, api_key: str, model: str,
+        system_prompt: str, user_prompt: str,
+        image_bytes: bytes, mime: str,
+    ) -> str:
+        """直接 HTTP 调用 OpenAI 兼容 Vision API，确保图片正确传递。"""
+        import time as _time
+        import httpx as _httpx
+
+        url = api_base.rstrip("/") + "/chat/completions"
+        b64 = _b64(image_bytes)
+        data_url = f"data:{mime};base64,{b64}"
+
+        payload = {
+            "model": model,
+            "messages": [
+                {"role": "system", "content": system_prompt},
+                {
+                    "role": "user",
+                    "content": [
+                        {"type": "text", "text": user_prompt},
+                        {"type": "image_url", "image_url": {"url": data_url}},
+                    ],
+                },
+            ],
+            "temperature": 0.8,
+        }
+
+        t0 = _time.perf_counter()
+        async with _httpx.AsyncClient(timeout=120.0) as client:
+            resp = await client.post(
+                url,
+                json=payload,
+                headers={
+                    "Authorization": f"Bearer {api_key}",
+                    "Content-Type": "application/json",
+                },
+            )
+            elapsed = _time.perf_counter() - t0
+            status = resp.status_code
+            logger.info("[VideoService] 直连 API 完成 耗时=%.2fs status=%d", elapsed, status)
+
+            if status != 200:
+                raise ValueError(f"直连 API 返回 {status}: {resp.text[:500]}")
+
+            body = resp.json()
+            choices = body.get("choices", [])
+            if not choices:
+                raise ValueError("直连 API 无 choices 返回")
+
+            msg = choices[0].get("message", {})
+            text = msg.get("content", "") or ""
+            logger.info("[VideoService] 直连 API 原始返回: %s", text[:500] if text else "(空)")
+            return text.strip()
+
+    async def _call_astrbot_llm_generate(
+        self, provider_id: str, system_prompt: str, user_prompt: str,
+        image_bytes: bytes, mime: str,
+    ) -> str:
+        """回退方案：通过 AstrBot Provider 调用多模态模型。"""
+        import tempfile
+        import os as _os_module
+        import time as _time
+
         ext = "jpg"
         try:
-            from ..core.utils import detect_image_mime, mime_to_ext
-            mime = detect_image_mime(image_bytes)
+            from ..core.utils import mime_to_ext
             ext = mime_to_ext(mime)
         except Exception:
             pass
 
-        logger.info("[VideoService] 调用提示词模型 provider=%s image_size=%d mime=%s",
-                    prompt_provider_id, len(image_bytes), mime)
-
-        # 写临时文件，与 analyzer 保持一致
-        import tempfile
-        import os as _os_module
         temp_fd, temp_path = tempfile.mkstemp(suffix=f".{ext}")
         try:
             _os_module.write(temp_fd, image_bytes)
@@ -230,11 +339,10 @@ class VideoService:
         logger.info("[VideoService] 临时图片路径: %s", resolved_path)
 
         try:
-            import time as _time
             t0 = _time.perf_counter()
             try:
                 llm_resp = await self.plugin.context.llm_generate(
-                    chat_provider_id=prompt_provider_id,
+                    chat_provider_id=provider_id,
                     prompt=user_prompt,
                     system_prompt=system_prompt,
                     image_urls=[resolved_path],
@@ -242,7 +350,7 @@ class VideoService:
             except (TypeError, AttributeError) as e:
                 logger.warning("[VideoService] image_urls 列表不兼容，回退字符串: %s", e)
                 llm_resp = await self.plugin.context.llm_generate(
-                    chat_provider_id=prompt_provider_id,
+                    chat_provider_id=provider_id,
                     prompt=user_prompt,
                     system_prompt=system_prompt,
                     image_urls=resolved_path,
@@ -250,20 +358,8 @@ class VideoService:
 
             elapsed = _time.perf_counter() - t0
             raw_text = (getattr(llm_resp, "completion_text", "") or "").strip()
-            logger.info("[VideoService] 模型返回完成 耗时=%.2fs len=%d", elapsed, len(raw_text))
-            logger.info("[VideoService] 模型原始返回: %s", raw_text[:500] if raw_text else "(空)")
-
-            if not raw_text:
-                raise ValueError("提示词生成模型返回了空结果")
-
-            thinking_markers = [
-                "用户意图", "图片分析", "档位判定", "我来分析", "再想想",
-                "重新选", "确认", "检查", "思考一下", "让我想想",
-            ]
-            found_markers = [m for m in thinking_markers if m in raw_text]
-            if found_markers:
-                logger.warning("[VideoService] 提示词包含思维链特征: %s", found_markers)
-
+            logger.info("[VideoService] AstrBot模型返回 耗时=%.2fs len=%d", elapsed, len(raw_text))
+            logger.info("[VideoService] AstrBot原始返回: %s", raw_text[:500] if raw_text else "(空)")
             return raw_text
         finally:
             try:
@@ -321,6 +417,58 @@ class VideoService:
             async with aiofiles.open(dest, "wb") as f:
                 await f.write(content)
 
+    def _parse_json_prompt(self, raw_text: str):
+        """解析模型返回的 JSON: {"reasoning": "...", "prompt": "..."}
+        
+        返回 (prompt, reasoning)。如果 JSON 解析失败，整个文本作为 prompt。
+        """
+        import json as _json
+        import re as _re
+
+        # 1. 尝试直接解析 JSON
+        try:
+            data = _json.loads(raw_text)
+            if isinstance(data, dict):
+                return data.get("prompt", "").strip(), data.get("reasoning", "").strip()
+        except (_json.JSONDecodeError, ValueError):
+            pass
+
+        # 2. 剥离 Markdown 代码块后重试
+        cleaned = _re.sub(r'^```(?:json)?\s*', '', raw_text.strip())
+        cleaned = _re.sub(r'\s*```$', '', cleaned)
+        try:
+            data = _json.loads(cleaned)
+            if isinstance(data, dict):
+                return data.get("prompt", "").strip(), data.get("reasoning", "").strip()
+        except (_json.JSONDecodeError, ValueError):
+            pass
+
+        # 3. 花括号匹配提取
+        brace_matches = list(_re.finditer(r'\{', raw_text))
+        if brace_matches:
+            start = brace_matches[0].start()
+            depth = 0
+            end = -1
+            for i, ch in enumerate(raw_text[start:], start):
+                if ch == '{':
+                    depth += 1
+                elif ch == '}':
+                    depth -= 1
+                    if depth == 0:
+                        end = i + 1
+                        break
+            if end > start:
+                try:
+                    data = _json.loads(raw_text[start:end])
+                    if isinstance(data, dict):
+                        return data.get("prompt", "").strip(), data.get("reasoning", "").strip()
+                except (_json.JSONDecodeError, ValueError):
+                    pass
+
+        # 4. 兜底：整段文本作为 prompt
+        logger.warning("[VideoService] JSON 解析失败，原始文本作为 prompt")
+        return raw_text.strip(), ""
+
     def _build_image_description(self, image: dict) -> str:
         """从图片数据库记录中提取关键信息，构建图片描述文本"""
         fields = [
@@ -328,7 +476,7 @@ class VideoService:
             ("服装", "clothing_type"),
             ("风格", "style"),
             ("场景", "scene"),
-            ("姿势", "pose"),
+            ("姿势", "pose_type"),
             ("表情", "expression"),
             ("氛围", "atmosphere"),
             ("关键特征", "key_features"),
@@ -336,9 +484,9 @@ class VideoService:
             ("身体焦点", "body_focus"),
             ("景别", "shot_size"),
             ("角度", "camera_angle"),
-            ("动态", "motion"),
+            ("动态", "dynamic_level"),
             ("动作风格", "action_style"),
-            ("朝向", "orientation"),
+            ("朝向", "body_orientation"),
             ("构图", "composition"),
             ("背景", "background"),
             ("色调", "color_tone"),

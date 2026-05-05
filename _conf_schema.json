@@ -178,10 +178,28 @@
   },
   "video_prompt_provider_id": {
     "description": "视频提示词生成模型",
-    "hint": "用于根据图片和用户输入生成视频提示词的模型（需支持视觉能力）",
+    "hint": "用于根据图片和用户输入生成视频提示词的模型（需支持视觉能力）。留空则使用下方的直连 API 方式",
     "type": "string",
     "default": "",
     "_special": "select_provider"
+  },
+  "video_prompt_base_url": {
+    "description": "提示词模型 API 地址",
+    "hint": "直连 OpenAI 兼容 API 的 base_url，用于生成视频提示词。填写后绕过 AstrBot Provider，直接 HTTP 调用，确保图片正确传递。例如：https://api.openai.com/v1",
+    "type": "string",
+    "default": ""
+  },
+  "video_prompt_api_key": {
+    "description": "提示词模型 API Key",
+    "hint": "对应于 base_url 的 API Key",
+    "type": "string",
+    "default": ""
+  },
+  "video_prompt_model": {
+    "description": "提示词模型名",
+    "hint": "模型名称，例如：gpt-4o、grok-2-vision-1212、gemini-2.0-flash",
+    "type": "string",
+    "default": ""
   },
   "video_normal_default_backend": {
     "description": "正常档默认视频后端",
