@@ -10,6 +10,7 @@ from pathlib import Path
 import uvicorn
 from quart import (
     Quart,
+    Response,
     jsonify,
     redirect,
     request,
@@ -716,7 +717,7 @@ class WardrobeWebServer:
                     buf,
                     mimetype="application/zip",
                     as_attachment=True,
-                    attachment_filename=f"wardrobe_backup_{time.strftime('%Y%m%d_%H%M%S')}.zip",
+                    download_name=f"wardrobe_backup_{time.strftime('%Y%m%d_%H%M%S')}.zip",
                 )
             except Exception as e:
                 logger.error("[Wardrobe] 备份导出失败: %s", e, exc_info=True)
@@ -903,9 +904,41 @@ class WardrobeWebServer:
             if not video_file.exists():
                 return jsonify({"error": "视频文件不存在"}), 404
 
-            resp = await send_file(str(video_file), conditional=True)
-            resp.headers['Accept-Ranges'] = 'bytes'
-            return resp
+            file_size = video_file.stat().st_size
+            range_header = request.headers.get('Range', '')
+
+            if range_header.startswith('bytes='):
+                try:
+                    range_val = range_header[6:]
+                    if '-' in range_val:
+                        start_str, end_str = range_val.split('-', 1)
+                        start = int(start_str) if start_str else 0
+                        end = int(end_str) if end_str else file_size - 1
+                    else:
+                        start = int(range_val)
+                        end = file_size - 1
+                    if start >= file_size:
+                        return Response('', status=416, headers={'Content-Range': f'bytes */{file_size}'})
+                    end = min(end, file_size - 1)
+                    length = end - start + 1
+                    import aiofiles
+                    async with aiofiles.open(str(video_file), 'rb') as f:
+                        await f.seek(start)
+                        data = await f.read(length)
+                    headers = {
+                        'Content-Type': 'video/mp4',
+                        'Content-Range': f'bytes {start}-{end}/{file_size}',
+                        'Content-Length': str(length),
+                        'Accept-Ranges': 'bytes',
+                    }
+                    return Response(data, status=206, headers=headers)
+                except (ValueError, IndexError):
+                    pass
+
+            import aiofiles
+            async with aiofiles.open(str(video_file), 'rb') as f:
+                data = await f.read()
+            return Response(data, mimetype='video/mp4', headers={'Accept-Ranges': 'bytes', 'Content-Length': str(file_size)})
 
         @app.route("/api/video-settings/prompt")
         async def api_video_prompt_get():
