@@ -446,32 +446,30 @@
   </div>
 
   <div class="modal-overlay hidden" id="videoSettingsModal">
-    <div class="modal video-settings-modal">
-      <div class="modal-header">
-        <h2>视频生成设置</h2>
-        <button class="modal-close" id="videoSettingsCloseBtn">&times;</button>
+    <div class="modal-card modal-card-md">
+      <button class="modal-close" id="videoSettingsCloseBtn">&times;</button>
+      <div class="modal-edit-header">
+        <span class="modal-edit-title">视频生成设置</span>
       </div>
-      <div class="modal-body">
-        <div class="setting-group">
-          <label class="setting-label">系统提示词</label>
-          <p class="setting-hint">完整的系统提示词模板，档位选择会以用户消息形式注入</p>
-          <textarea class="login-input video-prompt-textarea" id="videoSystemPrompt" rows="20" placeholder="加载中..."></textarea>
-        </div>
-        <div class="setting-actions">
-          <button class="btn btn-accent" id="videoPromptSaveBtn">保存提示词</button>
-          <span class="setting-save-status" id="videoPromptSaveStatus"></span>
-        </div>
+      <div class="setting-group">
+        <label class="setting-label">系统提示词</label>
+        <p class="setting-hint">完整的系统提示词模板，档位选择会以用户消息形式注入</p>
+        <textarea class="login-input video-prompt-textarea" id="videoSystemPrompt" rows="20" placeholder="加载中..."></textarea>
+      </div>
+      <div class="setting-actions">
+        <button class="btn btn-accent" id="videoPromptSaveBtn">保存提示词</button>
+        <span class="setting-save-status" id="videoPromptSaveStatus"></span>
       </div>
     </div>
   </div>
 
   <div class="modal-overlay hidden" id="videoPlayerModal">
-    <div class="modal video-player-modal">
-      <div class="modal-header">
-        <h2 id="videoPlayerTitle">视频播放</h2>
-        <button class="modal-close" id="videoPlayerCloseBtn">&times;</button>
+    <div class="modal-card modal-card-detail">
+      <button class="modal-close" id="videoPlayerCloseBtn">&times;</button>
+      <div class="modal-edit-header">
+        <span class="modal-edit-title" id="videoPlayerTitle">视频播放</span>
       </div>
-      <div class="modal-body video-player-body">
+      <div class="video-player-body">
         <video id="videoPlayerElement" controls autoplay class="video-player-element">
           您的浏览器不支持视频播放
         </video>
