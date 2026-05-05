@@ -2271,6 +2271,7 @@
       videoView.classList.remove('hidden');
       imageGrid.classList.add('hidden');
       if(statsView)statsView.classList.add('hidden');
+      if(sidebar)sidebar.classList.add('hidden');
       $('#emptyState').classList.add('hidden');
       $('#scrollSentinel').classList.add('hidden');
       $('#pagination').classList.add('hidden');
@@ -2289,6 +2290,7 @@
       $('#pagination').classList.remove('hidden');
       if(videoBtn){videoBtn.classList.remove('btn-accent');videoBtn.classList.add('btn-secondary');}
       Object.keys(state.videoPollIntervals).forEach(id=>stopVideoPoll(parseInt(id)));
+      loadImages(false);
     }
   }
 
@@ -2478,6 +2480,7 @@
       statusEl.style.color='#40A060';
       toast('视频生成任务已提交','success');
       loadImageVideos(state.currentImageId);
+      if(state.videoViewActive){state.videoPage=1;state.videoHasMore=true;loadVideos(true);}
       submitBtn.textContent='已提交';
     }catch(e){
       statusEl.textContent='网络错误: '+e.message;
@@ -2601,6 +2604,7 @@
         const card=createVideoCard(v);
         card.dataset.videoId=v.id;
         grid.appendChild(card);
+        if(v.status==='generating')startVideoPoll(v.id);
       });
     }catch(e){}
   }
