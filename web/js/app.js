@@ -502,15 +502,10 @@
         updateFavoriteBtns(img.favorite||'none');
         updateRefStrengthBtns(img.ref_strength||'style', img.ref_strength_reason||'');
         updateEditButtons();
+      }
       updateNavArrows();
       $('#detailModal').classList.remove('hidden');
       loadImageVideos(id);
-    }else{
-        const metaRO=$('#modalMetaReadonly');
-        metaRO.innerHTML=`<span>ID: ${esc(img.id)}</span><span>创建时间: ${esc(img.created_at||'未知')}</span>`;
-        updateFavoriteBtns(img.favorite||'none');
-        updateRefStrengthBtns(img.ref_strength||'style', img.ref_strength_reason||'');
-      }
     }catch(e){
       if(e.name==='AbortError')return;
       console.error('[Wardrobe] showDetail error:',e);
@@ -1649,9 +1644,9 @@
 
   function _statsChartClick(filterKey,value){
     toggleStatsView(false);
-    state.style='';state.scene='';state.atmosphere='';state.shot_size='';
+    state.style='';state.scene='';state.atmosphere='';state.shot_size='';state.ref_strength='';
     $('#styleFilter').value='';$('#sceneFilter').value='';
-    $('#atmosphereFilter').value='';$('#shotSizeFilter').value='';
+    $('#atmosphereFilter').value='';$('#shotSizeFilter').value='';$('#refStrengthFilter').value='';
     if(filterKey==='style'){state.style=value;$('#styleFilter').value=value;}
     else if(filterKey==='scene'){state.scene=value;$('#sceneFilter').value=value;}
     else if(filterKey==='atmosphere'){state.atmosphere=value;$('#atmosphereFilter').value=value;}
@@ -2254,7 +2249,8 @@
         }
       }
     },{rootMargin:'400px'});
-    _scrollObserver.observe($('#scrollSentinel'));
+    const _sentinel=$('#scrollSentinel');
+    if(_sentinel)_scrollObserver.observe(_sentinel);
 
     setupUpload();
     setupBackup();

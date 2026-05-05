@@ -184,7 +184,9 @@ class VideoService:
     ) -> str:
         system_prompt = await self.load_system_prompt()
 
-        user_prompt = f"当前档位：{tier_label}\n"
+        user_prompt = f"【必须遵守以下档位】{tier_label}档\n"
+        user_prompt += f"请严格使用 system prompt 中\"### {tier_label}档\"段落的规则生成视频提示词。提示词必须符合该档位标准。\n"
+        user_prompt += f"禁止使用其他档位的任何动词和规则。\n"
         if user_thoughts.strip():
             user_prompt += f"用户附加看法：{user_thoughts.strip()}\n"
         user_prompt += "请根据图片生成视频提示词。"
@@ -266,8 +268,11 @@ class VideoService:
             resp = await client.get(url)
             if resp.status_code != 200:
                 raise ValueError(f"下载视频失败 HTTP {resp.status_code}")
+            content = resp.content
+            if len(content) < 12 or content[4:8] != b'ftyp':
+                raise ValueError("下载的文件不是有效的 MP4 格式")
             async with aiofiles.open(dest, "wb") as f:
-                await f.write(resp.content)
+                await f.write(content)
 
     def _get_tier_backend(self, tier: str) -> str:
         key_map = {
