@@ -2226,12 +2226,24 @@
       if(state.videoCurrentPlayerId)deleteVideo(state.videoCurrentPlayerId,true);
     });
 
-    $('#videoTierFilter').addEventListener('change',e=>{
-      state.videoFilterTier=e.target.value;state.videoPage=1;state.videoHasMore=true;loadVideos(true);
+    $$('#videoTierSidebarFilters input[name="video_tier"]').forEach(radio=>{
+      radio.addEventListener('change',()=>{
+        if(!radio.checked)return;
+        state.videoFilterTier=radio.value;state.videoPage=1;state.videoHasMore=true;loadVideos(true);
+      });
     });
-    $('#videoPersonaFilter').addEventListener('change',e=>{
-      state.videoFilterPersona=e.target.value;state.videoPage=1;state.videoHasMore=true;loadVideos(true);
-    });
+    const _bindPersonaRadios=()=>{
+      $$('#videoPersonaSidebarFilters input[name="video_persona"]').forEach(radio=>{
+        radio.removeEventListener('change',radio._vpChange);
+        const handler=()=>{
+          if(!radio.checked)return;
+          state.videoFilterPersona=radio.value;state.videoPage=1;state.videoHasMore=true;loadVideos(true);
+        };
+        radio._vpChange=handler;
+        radio.addEventListener('change',handler);
+      });
+    };
+    _bindPersonaRadios();state._bindPersonaRadios=_bindPersonaRadios;
     $('#videoGotoImagesBtn').addEventListener('click',()=>toggleVideoView(false));
 
     let _scrollObserver=new IntersectionObserver(entries=>{
@@ -2267,11 +2279,13 @@
     const sidebar=$('#sidebar');
     const topbarRight=$('.topbar-right');
     const videoBtn=$('#videoViewBtn');
+    const content=$('.content');
     if(show){
       videoView.classList.remove('hidden');
       imageGrid.classList.add('hidden');
       if(statsView)statsView.classList.add('hidden');
       if(sidebar)sidebar.classList.add('hidden');
+      if(content)content.classList.add('content-video-active');
       $('#emptyState').classList.add('hidden');
       $('#scrollSentinel').classList.add('hidden');
       $('#pagination').classList.add('hidden');
@@ -2285,6 +2299,7 @@
       videoView.classList.add('hidden');
       imageGrid.classList.remove('hidden');
       if(sidebar)sidebar.classList.remove('hidden');
+      if(content)content.classList.remove('content-video-active');
       if(topbarRight)topbarRight.style.display='';
       $('#scrollSentinel').classList.remove('hidden');
       $('#pagination').classList.remove('hidden');
@@ -2308,10 +2323,12 @@
       if(!resp||!resp.ok){state.videoLoading=false;return;}
       const data=await resp.json();
       const videos=data.videos||[];
+      console.log('[Wardrobe] loadVideos received:', videos.length, 'videos');
       if(videos.length<state.videoPerPage)state.videoHasMore=false;
       renderVideoGrid(videos,!reset);
       state.videoPage++;
-      var hasContent=$('#videoGrid').children.length>0;
+      let hasContent=$('#videoGrid').children.length>0;
+      console.log('[Wardrobe] videoGrid children:', $('#videoGrid').children.length);
       $('#videoEmptyState').classList.toggle('hidden',hasContent);
       videos.forEach(v=>{if(v.status==='generating')startVideoPoll(v.id);});
     }catch(e){
@@ -2582,10 +2599,13 @@
       if(!resp||!resp.ok)return;
       const data=await resp.json();
       const personas=data.persona_names||data.personas||[];
-      const sel=$('#videoPersonaFilter');
-      let html='<option value="">全部人格</option>';
-      personas.forEach(p=>{html+='<option value="'+_escapeAttr(p)+'">'+_escapeHtml(p)+'</option>';});
-      sel.innerHTML=html;
+      const container=$('#videoPersonaSidebarFilters');
+      let html='<label class="filter-item"><input type="radio" name="video_persona" value="" checked><span class="filter-label">全部</span></label>';
+      personas.forEach(p=>{
+        html+='<label class="filter-item"><input type="radio" name="video_persona" value="'+_escapeAttr(p)+'"><span class="filter-label">'+_escapeHtml(p)+'</span></label>';
+      });
+      container.innerHTML=html;
+      if(state._bindPersonaRadios)state._bindPersonaRadios();
     }catch(e){}
   }
 
