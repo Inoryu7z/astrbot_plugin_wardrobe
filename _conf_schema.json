@@ -178,7 +178,7 @@
   },
   "video_prompt_provider_id": {
     "description": "视频提示词生成模型",
-    "hint": "用于根据图片和用户输入生成视频提示词的模型（需支持视觉能力）。留空则使用下方的直连 API 方式",
+    "hint": "回退方案：仅当下方直连 API 三项为空时生效。直连 API 优先，因为 Provider 传图可能不可靠",
     "type": "string",
     "default": "",
     "_special": "select_provider"
