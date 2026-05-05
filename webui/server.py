@@ -913,7 +913,7 @@ class WardrobeWebServer:
             user_thoughts = video.get("user_thoughts", "")
             backend_override = video.get("provider_id", "")
             persona = video.get("persona", "")
-            await self.plugin.db.update_video(video_id, {"status": "generating", "error_message": None})
+            await self.plugin.db.update_video(video_id, status="generating", error_message=None)
             image_description = self.plugin.video_service._build_image_description(image)
             asyncio.create_task(
                 self.plugin.video_service._process_video(

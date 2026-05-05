@@ -2638,7 +2638,6 @@
   }
 
   async function retryVideoGenerate(videoId){
-    if(!confirm('确定重新生成此视频？将使用相同的图片和档位重新生成。'))return;
     try{
       const resp=await api('/api/videos/'+videoId+'/retry',{method:'POST'});
       if(!resp||!resp.ok){toast('重试失败','error');return;}
