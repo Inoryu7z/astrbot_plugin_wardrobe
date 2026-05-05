@@ -2255,12 +2255,12 @@
     state.videoViewActive=show;
     const videoView=$('#videoView');
     const imageGrid=$('#imageGrid');
-    const sidebar=$('#sidebar');
+    const statsView=$('#statsView');
     const topbarRight=$('.topbar-right');
     if(show){
       videoView.classList.remove('hidden');
       imageGrid.classList.add('hidden');
-      if(sidebar)sidebar.classList.add('hidden');
+      if(statsView)statsView.classList.add('hidden');
       $('#emptyState').classList.add('hidden');
       $('#scrollSentinel').classList.add('hidden');
       $('#pagination').classList.add('hidden');
@@ -2272,9 +2272,6 @@
     }else{
       videoView.classList.add('hidden');
       imageGrid.classList.remove('hidden');
-      if(sidebar&&(!$('#statsView')||$('#statsView').classList.contains('hidden'))){
-        sidebar.classList.remove('hidden');
-      }
       if(topbarRight)topbarRight.style.display='';
       $('#scrollSentinel').classList.remove('hidden');
       $('#pagination').classList.remove('hidden');
