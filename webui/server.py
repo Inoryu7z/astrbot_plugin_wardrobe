@@ -832,10 +832,10 @@ class WardrobeWebServer:
         async def api_video_generate():
             await self.plugin._ensure_db()
             data = await request.get_json(silent=True) or {}
-            image_id = data.get("image_id", "").strip()
-            tier = data.get("tier", "normal").strip()
-            user_thoughts = data.get("user_thoughts", "").strip()
-            backend_override = data.get("backend_override", "").strip()
+            image_id = (data.get("image_id") or "").strip()
+            tier = (data.get("tier") or "normal").strip()
+            user_thoughts = (data.get("user_thoughts") or "").strip()
+            backend_override = (data.get("backend_override") or "").strip()
 
             if not image_id:
                 return jsonify({"error": "未指定图片"}), 400

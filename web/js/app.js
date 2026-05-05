@@ -2257,6 +2257,7 @@
     const imageGrid=$('#imageGrid');
     const statsView=$('#statsView');
     const topbarRight=$('.topbar-right');
+    const videoBtn=$('#videoViewBtn');
     if(show){
       videoView.classList.remove('hidden');
       imageGrid.classList.add('hidden');
@@ -2266,6 +2267,7 @@
       $('#pagination').classList.add('hidden');
       if(topbarRight)topbarRight.style.display='none';
       $('#batchBar').classList.add('hidden');
+      if(videoBtn){videoBtn.classList.add('btn-accent');videoBtn.classList.remove('btn-secondary');}
       if(!state._videoFiltersLoaded)loadVideoPersonaFilter();
       state.videoPage=1;state.videoHasMore=true;
       loadVideos(true);
@@ -2275,6 +2277,7 @@
       if(topbarRight)topbarRight.style.display='';
       $('#scrollSentinel').classList.remove('hidden');
       $('#pagination').classList.remove('hidden');
+      if(videoBtn){videoBtn.classList.remove('btn-accent');videoBtn.classList.add('btn-secondary');}
       Object.keys(state.videoPollIntervals).forEach(id=>stopVideoPoll(parseInt(id)));
     }
   }
