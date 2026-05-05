@@ -41,7 +41,6 @@ class VideoService:
     def __init__(self, plugin):
         self.plugin = plugin
         self.videos_dir: Path | None = None
-        self._ensure_dirs()
 
     def _ensure_dirs(self):
         if self.videos_dir is None:
