@@ -905,7 +905,7 @@ class WardrobeWebServer:
             image = await self.plugin.db.get_image(source_image_id)
             if not image:
                 return jsonify({"error": "源图片不存在"}), 404
-            image_path = self.plugin.store.get_image_path(image)
+            image_path = self.plugin.store.get_image_path(image["image_path"])
             if not image_path or not image_path.exists():
                 return jsonify({"error": "源图片文件不存在"}), 404
             tier = video.get("tier", "normal")
