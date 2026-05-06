@@ -1978,6 +1978,19 @@
     if(newId===state.currentImageId)$('#modalImage').src=src;
   }
 
+  function toggleSidebar(show){
+    const sb=$('#sidebar');
+    const bd=$('#sidebarBackdrop');
+    if(!sb)return;
+    if(show){
+      sb.classList.add('open');
+      if(bd)bd.classList.add('open');
+    }else{
+      sb.classList.remove('open');
+      if(bd)bd.classList.remove('open');
+    }
+  }
+
   function init(){
     _initOriginalObserver();
 
@@ -2017,6 +2030,22 @@
       if(!val){toast('请输入分类名称','error');return;}
       const resp=await api('/api/pools',{method:'POST',json:{key:val,action:'add_pool',value:val}});
       if(resp&&resp.ok){toast('分类已创建，现在可以添加选项了','success');$('#poolNewKey').value='';loadPoolsModal();loadFilters();}
+    });
+
+    const mobileFilterBtn=$('#mobileFilterBtn');
+    if(mobileFilterBtn){
+      mobileFilterBtn.addEventListener('click',()=>{
+        toggleSidebar(true);
+      });
+    }
+    const sidebarBackdrop=$('#sidebarBackdrop');
+    if(sidebarBackdrop){
+      sidebarBackdrop.addEventListener('click',()=>{
+        toggleSidebar(false);
+      });
+    }
+    document.addEventListener('keydown',e=>{
+      if(e.key==='Escape')toggleSidebar(false);
     });
 
     $('#searchBtn').addEventListener('click',doSearch);
