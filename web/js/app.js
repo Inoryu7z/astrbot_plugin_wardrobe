@@ -187,7 +187,7 @@
       const data=await resp.json();
 
       const container=$('#personaFilters');
-      container.innerHTML='<label class="filter-item"><input type="radio" name="persona" value="" checked><span class="filter-label">全部</span></label>';
+      container.innerHTML='<label class="filter-item"><input type="radio" name="persona" value="" checked><span class="filter-label">全部</span></label><label class="filter-item"><input type="radio" name="persona" value="__none__"><span class="filter-label">无人格</span></label>';
       (data.personas||[]).forEach(p=>{
         const label=document.createElement('label');
         label.className='filter-item';
@@ -2722,7 +2722,7 @@
       console.log('[Wardrobe] personas for video filter:', personas);
       const container=$('#videoPersonaSidebarFilters');
       if(!container)return;
-      let html='<label class="filter-item"><input type="radio" name="video_persona" value="" checked><span class="filter-label">全部</span></label>';
+      let html='<label class="filter-item"><input type="radio" name="video_persona" value="" checked><span class="filter-label">全部</span></label><label class="filter-item"><input type="radio" name="video_persona" value="__none__"><span class="filter-label">无人格</span></label>';
       personas.forEach(p=>{
         html+='<label class="filter-item"><input type="radio" name="video_persona" value="'+_escapeAttr(p)+'"><span class="filter-label">'+_escapeHtml(p)+'</span></label>';
       });

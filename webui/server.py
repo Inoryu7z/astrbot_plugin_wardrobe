@@ -211,6 +211,10 @@ class WardrobeWebServer:
             per_page = min(100, max(1, int(request.args.get("per_page", 24))))
             category = request.args.get("category", "")
             persona = request.args.get("persona", "")
+            if persona == "__none__":
+                persona = ""
+            else:
+                persona = persona or None
             style = request.args.get("style", "")
             scene = request.args.get("scene", "")
             shot_size = request.args.get("shot_size", "")
@@ -222,14 +226,14 @@ class WardrobeWebServer:
 
             offset = (page - 1) * per_page
 
-            needs_search = style or scene or atmosphere or shot_size or persona or category or (favorite in ("favorite", "like")) or ref_strength
+            needs_search = style or scene or atmosphere or shot_size or (persona is not None) or category or (favorite in ("favorite", "like")) or ref_strength
             if needs_search:
                 style_list = [style] if style else None
                 scene_list = [scene] if scene else None
                 atmosphere_list = [atmosphere] if atmosphere else None
                 images = await self.plugin.db.search_images(
                     category=category or None,
-                    persona=persona or None,
+                    persona=persona,
                     style=style_list,
                     scene=scene_list,
                     atmosphere=atmosphere_list,
@@ -242,7 +246,7 @@ class WardrobeWebServer:
                 )
                 total = await self.plugin.db.search_count(
                     category=category or None,
-                    persona=persona or None,
+                    persona=persona,
                     style=style_list,
                     scene=scene_list,
                     atmosphere=atmosphere_list,
@@ -254,7 +258,7 @@ class WardrobeWebServer:
                 images = await self.plugin.db.list_images_lightweight(
                     category=category or None,
                     shot_size=shot_size or None,
-                    persona=persona or None,
+                    persona=persona,
                     favorite=favorite if favorite in ("favorite", "like") else None,
                     ref_strength=ref_strength or None,
                     sort_by=sort_by,
@@ -264,7 +268,7 @@ class WardrobeWebServer:
                 total = await self.plugin.db.search_count(
                     category=category or None,
                     shot_size=shot_size or None,
-                    persona=persona or None,
+                    persona=persona,
                     favorite=favorite if favorite in ("favorite", "like") else None,
                     ref_strength=ref_strength or None,
                 )
@@ -567,6 +571,10 @@ class WardrobeWebServer:
             await self.plugin._ensure_db()
             query = request.args.get("q", "").strip()
             persona = request.args.get("persona", "")
+            if persona == "__none__":
+                persona = ""
+            else:
+                persona = persona or None
             category = request.args.get("category", "")
             favorite = request.args.get("favorite", "")
             limit = min(100, max(1, int(request.args.get("limit", 50))))
@@ -580,7 +588,7 @@ class WardrobeWebServer:
             if self.plugin.vector_searcher and self.plugin.vector_searcher.available:
                 try:
                     wardrobe_results = await self.plugin.vector_searcher.search(
-                        query=query, k=limit, persona=persona or "",
+                        query=query, k=limit, persona=persona,
                         exclude_persona=exclude_persona or "",
                     )
                     if wardrobe_results:
@@ -604,7 +612,7 @@ class WardrobeWebServer:
             results = await self.plugin.db.search_by_description(
                 keywords=keywords,
                 category=category or None,
-                persona=persona or None,
+                persona=persona,
                 exclude_persona=exclude_persona or None,
                 limit=limit,
             )
@@ -808,13 +816,17 @@ class WardrobeWebServer:
             page = max(1, int(request.args.get("page", 1)))
             per_page = min(100, max(1, int(request.args.get("per_page", 50))))
             persona = request.args.get("persona", "")
+            if persona == "__none__":
+                persona = ""
+            else:
+                persona = persona or None
             tier = request.args.get("tier", "")
             status = request.args.get("status", "")
             source_image_id = request.args.get("source_image_id", "")
             offset = (page - 1) * per_page
 
             videos = await self.plugin.db.list_videos(
-                persona=persona or None,
+                persona=persona,
                 tier=tier or None,
                 status=status or None,
                 source_image_id=source_image_id or None,
