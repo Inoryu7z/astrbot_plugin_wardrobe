@@ -2483,24 +2483,14 @@
       const video=data.video;
       if(video.status==='done'||video.status==='failed'){
         stopVideoPoll(videoId);
-        const card=$('#videoGrid').querySelector('[data-video-id="'+videoId+'"]');
-        if(card){
-          const statusEl=card.querySelector('.video-card-status');
-          const overlay=card.querySelector('.video-card-generating-overlay');
-          if(statusEl){statusEl.textContent=_statusLabel(video.status);statusEl.className='video-card-status '+_statusClass(video.status);}
-          if(overlay)overlay.remove();
-          const errEl=card.querySelector('.video-card-error');
-          if(video.status==='failed'&&video.error_message){
-            if(errEl){errEl.textContent=video.error_message.substring(0,50);errEl.title=video.error_message;errEl.style.display='';}
-          }else{if(errEl)errEl.remove();}
-        }
+        const newCard=createVideoCard(video);
+        const oldCard=$('#videoGrid').querySelector('[data-video-id="'+videoId+'"]');
+        if(oldCard){oldCard.replaceWith(newCard);}
+        else{const g=$('#videoGrid');if(g)g.appendChild(newCard);}
         const vpStatus=$('#vpMetaStatus');
         if(vpStatus){vpStatus.textContent=_statusLabel(video.status);}
-        const listCard=$('#videoListGrid').querySelector('[data-video-id="'+videoId+'"]');
-        if(listCard){
-          const s=listCard.querySelector('.video-card-status');
-          if(s){s.textContent=_statusLabel(video.status);s.className='video-card-status '+_statusClass(video.status);}
-        }
+        const oldListCard=$('#videoListGrid').querySelector('[data-video-id="'+videoId+'"]');
+        if(oldListCard){oldListCard.replaceWith(createVideoCard(video));}
       }
     }catch(e){}
   }
