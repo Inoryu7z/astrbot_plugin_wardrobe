@@ -1,3 +1,16 @@
+### v2.5.4
+
+🚀 性能优化：视频库加载加速
+
+* 数据库层新增 `list_videos_lightweight()` 轻量查询（仅 SELECT 必要字段）和 `count_videos()` 计数方法，减少不必要数据传输
+* 服务端 `/api/videos` 接口改用轻量查询并返回 `total` 字段，配合耗时诊断日志（>1s 输出 WARNING）
+* 前端视频库加载改为并行请求（filters + videos 同时发出，不再串行等待）
+* 前端新增客户端缓存（同参数不重复请求），二次切换视频库秒开
+* `createVideoCard` 从 innerHTML 改为 createElement + textContent 程序化构建，消除 XSS 风险并提升渲染性能
+* `renderVideoGrid` 使用 DocumentFragment 批量插入 DOM 节点，减少页面重排
+* 视频库新增独立加载指示器（加载中转圈提示）和页码指示器（X / Y 个视频）
+* 修复 `style.css` 缓存版本号长期落后（v=2.5.1 vs v=2.5.3）的问题
+
 ### v2.5.3
 
 🌟 新功能：无人格筛选

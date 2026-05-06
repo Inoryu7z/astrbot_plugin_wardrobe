@@ -825,7 +825,9 @@ class WardrobeWebServer:
             source_image_id = request.args.get("source_image_id", "")
             offset = (page - 1) * per_page
 
-            videos = await self.plugin.db.list_videos(
+            t0 = time.perf_counter()
+
+            videos = await self.plugin.db.list_videos_lightweight(
                 persona=persona,
                 tier=tier or None,
                 status=status or None,
@@ -835,11 +837,24 @@ class WardrobeWebServer:
             )
             for v in videos:
                 sid = str(v.get("source_image_id", ""))
-                if sid:
-                    v["source_thumbnail"] = f"/api/image-file/{sid}/thumbnail"
-                else:
-                    v["source_thumbnail"] = None
-            return jsonify({"videos": videos, "page": page, "per_page": per_page})
+                v["source_thumbnail"] = f"/api/image-file/{sid}/thumbnail" if sid else None
+
+            total = await self.plugin.db.count_videos(
+                persona=persona,
+                tier=tier or None,
+                status=status or None,
+                source_image_id=source_image_id or None,
+            )
+
+            elapsed = time.perf_counter() - t0
+            if elapsed > 1.0:
+                logger.warning("[Wardrobe] /api/videos 耗时 %.2fs (videos=%d total=%d filters: persona=%s tier=%s status=%s)",
+                               elapsed, len(videos), total, persona, tier or "-", status or "-")
+            else:
+                logger.debug("[Wardrobe] /api/videos OK %.2fs (videos=%d total=%d)",
+                             elapsed, len(videos), total)
+
+            return jsonify({"videos": videos, "total": total, "page": page, "per_page": per_page})
 
         @app.route("/api/videos/generate", methods=["POST"])
         async def api_video_generate():

@@ -2326,9 +2326,11 @@
       if(batchBar)batchBar.classList.add('hidden');
       if(videoBtn){videoBtn.classList.add('btn-accent');videoBtn.classList.remove('btn-secondary');}
       if(videoSettingsBtn)videoSettingsBtn.classList.remove('hidden');
-      if(!state._videoFiltersLoaded)loadVideoPersonaFilter();
       state.videoPage=1;state.videoHasMore=true;
-      loadVideos(true);
+      const filtersPromise=state._videoFiltersLoaded?Promise.resolve():loadVideoPersonaFilter();
+      state._videoFiltersLoaded=true;
+      const videosPromise=loadVideos(true);
+      Promise.all([filtersPromise,videosPromise]);
     }else{
       videoView.classList.add('hidden');
       imageGrid.classList.remove('hidden');
@@ -2342,6 +2344,9 @@
     }
   }
 
+  let _videoCache=null;
+  let _videoCacheKey='';
+
   async function loadVideos(reset){
     if(state.videoLoading)return;
     state.videoLoading=true;
@@ -2351,22 +2356,58 @@
     params.set('per_page',state.videoPerPage);
     if(state.videoFilterTier)params.set('tier',state.videoFilterTier);
     if(state.videoFilterPersona)params.set('persona',state.videoFilterPersona);
+
+    const paramsStr=params.toString();
+    if(reset&&_videoCache&&_videoCacheKey===paramsStr){
+      renderVideoGrid(_videoCache.videos,false);
+      state.videoHasMore=_videoCache.videos.length>=state.videoPerPage;
+      state.videoPage++;
+      updateVideoPageIndicator(_videoCache.total);
+      state.videoLoading=false;
+      return;
+    }
+
+    const loadEl=$('#videoLoadingIndicator');
+    if(loadEl&&reset)loadEl.classList.remove('hidden');
+
     try{
-      const resp=await api('/api/videos?'+params.toString());
-      if(!resp||!resp.ok){state.videoLoading=false;return;}
+      const resp=await api('/api/videos?'+paramsStr);
+      if(!resp||!resp.ok){state.videoLoading=false;if(loadEl)loadEl.classList.add('hidden');return;}
       const data=await resp.json();
       const videos=data.videos||[];
-      console.log('[Wardrobe] loadVideos received:', videos.length, 'videos');
-      if(videos.length<state.videoPerPage)state.videoHasMore=false;
+      if(data.total!=null){state.videoTotal=data.total;}
       renderVideoGrid(videos,!reset);
       state.videoPage++;
-      let hasContent=$('#videoGrid').children.length>0;
-      console.log('[Wardrobe] videoGrid children:', $('#videoGrid').children.length);
-      $('#videoEmptyState').classList.toggle('hidden',hasContent);
+      if(reset&&videos.length===data.total){state.videoHasMore=false;}
+      else if(videos.length<state.videoPerPage){state.videoHasMore=false;}
+      else{state.videoHasMore=true;}
       videos.forEach(v=>{if(v.status==='generating')startVideoPoll(v.id);});
+      if(reset){
+        _videoCache={videos:videos.slice(),total:data.total||videos.length};
+        _videoCacheKey=paramsStr;
+      }
+      updateVideoPageIndicator(data.total||videos.length);
     }catch(e){
       console.error('loadVideos error:',e);
-    }finally{state.videoLoading=false;}
+    }finally{
+      state.videoLoading=false;
+      if(loadEl)loadEl.classList.add('hidden');
+    }
+  }
+
+  function updateVideoPageIndicator(total){
+    const el=$('#videoPageIndicator');
+    if(!el)return;
+    const loaded=$('#videoGrid').children.length;
+    if(total>loaded){
+      el.textContent=loaded+' / '+total+' 个视频';
+      el.classList.remove('hidden');
+    }else if(total>0){
+      el.textContent='共 '+total+' 个视频';
+      el.classList.remove('hidden');
+    }else{
+      el.classList.add('hidden');
+    }
   }
 
   function _tierLabel(tier){
@@ -2402,22 +2443,77 @@
     div.className='video-card';
     div.dataset.videoId=video.id;
     const isFailed=video.status==='failed';
-    div.innerHTML='<div class="video-card-thumb">'+
-      (video.source_thumbnail
-        ?'<img src="'+_escapeAttr(video.source_thumbnail)+'" alt="" loading="lazy" onerror="this.parentElement.classList.add(\'video-thumb-error\');this.style.display=\'none\'">'
-        :'<div class="video-thumb-placeholder"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" width="32" height="32"><polygon points="23 7 16 12 23 17 23 7"/><rect x="1" y="5" width="15" height="14" rx="2" ry="2"/></svg></div>')+
-      (video.status==='generating'?'<div class="video-card-generating-overlay"><div class="video-spinner"></div></div>':'')+
-      (isFailed?'<div class="video-card-failed-overlay"><span class="video-failed-icon">✗</span></div>':'')+
-      '</div>'+
-      '<div class="video-card-info">'+
-        '<span class="video-card-tier '+_tierClass(video.tier)+'">'+_tierLabel(video.tier)+'</span>'+
-        '<span class="video-card-status '+_statusClass(video.status)+'">'+_statusLabel(video.status)+'</span>'+
-      '</div>'+
-      (video.error_message?'<div class="video-card-error" title="'+_escapeAttr(video.error_message)+'">'+_escapeHtml(video.error_message.substring(0,50))+'</div>':'')+
-      (isFailed?'<div class="video-card-actions">'+
-        '<button class="video-action-btn video-retry-btn" data-action="retry">↻ 重试</button>'+
-        '<button class="video-action-btn video-delete-btn" data-action="delete">🗑 删除</button>'+
-      '</div>':'');
+    const isGenerating=video.status==='generating';
+    const isDone=video.status==='done';
+
+    const thumbDiv=document.createElement('div');
+    thumbDiv.className='video-card-thumb';
+    if(video.source_thumbnail){
+      const img=document.createElement('img');
+      img.src=video.source_thumbnail;
+      img.alt='';
+      img.loading='lazy';
+      img.addEventListener('error',()=>{
+        thumbDiv.classList.add('video-thumb-error');
+        img.style.display='none';
+      });
+      thumbDiv.appendChild(img);
+    }else{
+      const ph=document.createElement('div');
+      ph.className='video-thumb-placeholder';
+      ph.innerHTML='<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" width="32" height="32"><polygon points="23 7 16 12 23 17 23 7"/><rect x="1" y="5" width="15" height="14" rx="2" ry="2"/></svg>';
+      thumbDiv.appendChild(ph);
+    }
+    if(isGenerating){
+      const overlay=document.createElement('div');
+      overlay.className='video-card-generating-overlay';
+      overlay.innerHTML='<div class="video-spinner"></div>';
+      thumbDiv.appendChild(overlay);
+    }
+    if(isFailed){
+      const overlay=document.createElement('div');
+      overlay.className='video-card-failed-overlay';
+      overlay.innerHTML='<span class="video-failed-icon">\u2717</span>';
+      thumbDiv.appendChild(overlay);
+    }
+    div.appendChild(thumbDiv);
+
+    const infoDiv=document.createElement('div');
+    infoDiv.className='video-card-info';
+    const tierSpan=document.createElement('span');
+    tierSpan.className='video-card-tier '+_tierClass(video.tier);
+    tierSpan.textContent=_tierLabel(video.tier);
+    infoDiv.appendChild(tierSpan);
+    const statusSpan=document.createElement('span');
+    statusSpan.className='video-card-status '+_statusClass(video.status);
+    statusSpan.textContent=_statusLabel(video.status);
+    infoDiv.appendChild(statusSpan);
+    div.appendChild(infoDiv);
+
+    if(video.error_message){
+      const errDiv=document.createElement('div');
+      errDiv.className='video-card-error';
+      errDiv.title=video.error_message;
+      errDiv.textContent=video.error_message.substring(0,50);
+      div.appendChild(errDiv);
+    }
+
+    if(isFailed){
+      const actionsDiv=document.createElement('div');
+      actionsDiv.className='video-card-actions';
+      const retryBtn=document.createElement('button');
+      retryBtn.className='video-action-btn video-retry-btn';
+      retryBtn.dataset.action='retry';
+      retryBtn.textContent='\u21BB 重试';
+      actionsDiv.appendChild(retryBtn);
+      const deleteBtn=document.createElement('button');
+      deleteBtn.className='video-action-btn video-delete-btn';
+      deleteBtn.dataset.action='delete';
+      deleteBtn.textContent='\uD83D\uDDD1 删除';
+      actionsDiv.appendChild(deleteBtn);
+      div.appendChild(actionsDiv);
+    }
+
     div.addEventListener('click',(e)=>{
       const btn=e.target.closest('[data-action]');
       if(btn){
@@ -2427,9 +2523,9 @@
         else if(action==='retry')retryVideoGenerate(video.id);
         return;
       }
-      if(video.status==='done')openVideoPlayer(video.id);
-      else if(video.status==='failed')toast('该视频生成失败：'+(video.error_message||'未知错误'),'error');
-      else if(video.status==='generating')toast('视频正在生成中，请等待','info');
+      if(isDone)openVideoPlayer(video.id);
+      else if(isFailed)toast('该视频生成失败：'+(video.error_message||'未知错误'),'error');
+      else if(isGenerating)toast('视频正在生成中，请等待','info');
     });
     return div;
   }
@@ -2443,10 +2539,14 @@
       grid.innerHTML='';
       state.videoGridIds=[];
     }
+    const frag=document.createDocumentFragment();
     videos.forEach(v=>{
-      grid.appendChild(createVideoCard(v));
+      frag.appendChild(createVideoCard(v));
       state.videoGridIds.push(v.id);
     });
+    grid.appendChild(frag);
+    const hasContent=grid.children.length>0;
+    $('#videoEmptyState').classList.toggle('hidden',hasContent);
     updateVideoPagination();
   }
 

@@ -1001,6 +1001,76 @@ class WardrobeDatabase:
                 rows = await cursor.fetchall()
                 return [dict(row) for row in rows]
 
+    async def list_videos_lightweight(
+        self,
+        *,
+        persona: Optional[str] = None,
+        tier: Optional[str] = None,
+        status: Optional[str] = None,
+        source_image_id: Optional[str] = None,
+        limit: int = 50,
+        offset: int = 0,
+    ) -> list[dict[str, Any]]:
+        conditions = []
+        params: list[Any] = []
+        if persona is not None:
+            if persona == "":
+                conditions.append("(persona = '' OR persona IS NULL)")
+            else:
+                conditions.append("persona = ?")
+                params.append(persona)
+        if tier:
+            conditions.append("tier = ?")
+            params.append(tier)
+        if status:
+            conditions.append("status = ?")
+            params.append(status)
+        if source_image_id is not None:
+            conditions.append("source_image_id = ?")
+            params.append(source_image_id)
+        where_clause = ""
+        if conditions:
+            where_clause = "WHERE " + " AND ".join(conditions)
+        params.extend([limit, offset])
+        async with aiosqlite.connect(self.db_path) as db:
+            db.row_factory = aiosqlite.Row
+            sql = f"SELECT id, source_image_id, video_path, provider_id, tier, user_thoughts, generated_prompt, persona, status, error_message, created_at FROM videos {where_clause} ORDER BY created_at DESC LIMIT ? OFFSET ?"
+            async with db.execute(sql, params) as cursor:
+                rows = await cursor.fetchall()
+                return [dict(row) for row in rows]
+
+    async def count_videos(
+        self,
+        *,
+        persona: Optional[str] = None,
+        tier: Optional[str] = None,
+        status: Optional[str] = None,
+        source_image_id: Optional[str] = None,
+    ) -> int:
+        conditions = []
+        params: list[Any] = []
+        if persona is not None:
+            if persona == "":
+                conditions.append("(persona = '' OR persona IS NULL)")
+            else:
+                conditions.append("persona = ?")
+                params.append(persona)
+        if tier:
+            conditions.append("tier = ?")
+            params.append(tier)
+        if status:
+            conditions.append("status = ?")
+            params.append(status)
+        if source_image_id is not None:
+            conditions.append("source_image_id = ?")
+            params.append(source_image_id)
+        where_clause = ""
+        if conditions:
+            where_clause = "WHERE " + " AND ".join(conditions)
+        async with aiosqlite.connect(self.db_path) as db:
+            async with db.execute(f"SELECT COUNT(*) FROM videos {where_clause}", params) as cursor:
+                return (await cursor.fetchone())[0]
+
     async def delete_video(self, video_id: str) -> bool:
         async with self._lock:
             async with aiosqlite.connect(self.db_path) as db:
