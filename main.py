@@ -10,7 +10,7 @@ import zipfile
 from astrbot.api import AstrBotConfig, logger
 from astrbot.api.event import AstrMessageEvent, filter
 from astrbot.api.event.filter import on_llm_tool_respond
-from astrbot.api.message_components import Image
+from astrbot.api.message_components import Image, Video
 from astrbot.api.star import Context, Star, register
 from astrbot.core.utils.astrbot_path import get_astrbot_data_path
 
@@ -42,7 +42,7 @@ _AIIMG_GENERATE_TOOLS = frozenset({"aiimg_generate"})
     "astrbot_plugin_wardrobe",
     "Inoryu7z",
     "图片衣柜管理插件，支持智能分类、语义检索和参考图接口",
-    "2.5.1",
+    "2.5.2",
 )
 class WardrobePlugin(Star):
     def __init__(self, context: Context, config: AstrBotConfig = None):
@@ -612,8 +612,9 @@ class WardrobePlugin(Star):
 
     @filter.after_message_sent()
     async def on_after_message_sent(self, event: AstrMessageEvent):
-        '''消息发送后钩子：检测 AiImg 命令方式生成的图片并自动存图'''
+        '''消息发送后钩子：检测 AiImg 命令方式生成的图片/视频并自动存图'''
         self._spawn_bg_task(self._auto_save_aiimg_image(event, tool=None))
+        self._spawn_bg_task(self._auto_save_video_from_message(event))
 
     @filter.llm_tool(name="save_wardrobe_image")
     async def save_wardrobe_image_tool(self, event: AstrMessageEvent, user_description: str = "", persona: str = "") -> str:
@@ -940,6 +941,108 @@ class WardrobePlugin(Star):
         except Exception as e:
             logger.error("[Wardrobe] AiImg 自动存图异常: %s", e)
 
+    async def _auto_save_video_from_message(self, event: AstrMessageEvent):
+        enabled = self._cfg("auto_save_video_enabled")
+        if enabled is None:
+            enabled = self._cfg("auto_save_aiimg_enabled", False)
+        if not enabled:
+            return
+
+        message_obj = getattr(event, "message_obj", None)
+        if not message_obj:
+            return
+
+        message_chain = getattr(message_obj, "message", [])
+        for comp in message_chain:
+            if isinstance(comp, Video):
+                video_src = getattr(comp, "url", None) or getattr(comp, "file", None) or getattr(comp, "path", None)
+                if video_src:
+                    self._spawn_bg_task(self._save_video_to_wardrobe(video_src, event))
+                break
+
+    async def _save_video_to_wardrobe(self, video_src: str, event: AstrMessageEvent):
+        try:
+            await self._ensure_db()
+            video_bytes = await self._download_or_read_image(video_src)
+            if not video_bytes:
+                logger.warning("[Wardrobe] 自动存视频失败：无法获取视频数据 src=%s", video_src[:80])
+                return
+
+            if len(video_bytes) < 12 or video_bytes[4:8] != b'ftyp':
+                logger.debug("[Wardrobe] 自动存视频跳过：非有效 MP4 格式 src=%s", video_src[:80])
+                return
+
+            file_hash = hashlib.md5(video_bytes).hexdigest()
+            self.video_service._ensure_dirs()
+
+            video_filename = f"auto_{file_hash}.mp4"
+            video_path = self.video_service.videos_dir / video_filename
+            if video_path.exists():
+                logger.info("[Wardrobe] 自动存视频跳过：文件已存在 hash=%s", file_hash)
+                return
+
+            import aiofiles
+            async with aiofiles.open(video_path, "wb") as f:
+                await f.write(video_bytes)
+
+            source_image_id = await self._find_source_image_id(event)
+
+            persona = await self._get_auto_save_persona(event)
+
+            await self.db.add_video(
+                source_image_id=source_image_id,
+                video_path=video_filename,
+                provider_id="auto_save",
+                tier="normal",
+                persona=persona,
+                status="done",
+            )
+
+            logger.info(
+                "[Wardrobe] 自动存视频完成 hash=%s size=%dKB source_image=%s persona=%s",
+                file_hash, len(video_bytes) // 1024, source_image_id or "无", persona or "无",
+            )
+
+        except Exception as e:
+            logger.error("[Wardrobe] 自动存视频异常: %s", e)
+
+    async def _find_source_image_id(self, event: AstrMessageEvent) -> str:
+        star = self.context.get_registered_star("astrbot_plugin_aiimg")
+        if not star or not star.activated or not star.star_cls:
+            return ""
+
+        instance = star.star_cls
+        last_image_dict = getattr(instance, "_last_image_by_user", None)
+        if not last_image_dict:
+            return ""
+
+        user_id = str(event.get_sender_id() or "")
+        entry = last_image_dict.get(user_id)
+        if not entry:
+            return ""
+
+        image_path = entry.get("path") if isinstance(entry, dict) else entry
+        if not image_path:
+            return ""
+
+        path = Path(image_path)
+        if not path.exists():
+            return ""
+
+        try:
+            import aiofiles
+            async with aiofiles.open(path, "rb") as f:
+                img_bytes = await f.read()
+            if img_bytes:
+                img_hash = hashlib.md5(img_bytes).hexdigest()
+                existing = await self.db.get_image_by_hash(img_hash)
+                if existing:
+                    return existing["id"]
+        except Exception:
+            pass
+
+        return ""
+
     async def _get_auto_save_persona(self, event: AstrMessageEvent) -> str:
         conv_persona = await self._get_current_persona_name(event)
         if conv_persona:
@@ -1029,7 +1132,8 @@ class WardrobePlugin(Star):
         await self._ensure_db()
 
         stats = await self.db.get_stats()
-        lines = [f"衣柜库共有 {stats['total']} 张图片"]
+        video_count = stats.get("video_count", 0)
+        lines = [f"衣柜库共有 {stats['total']} 张图片, {video_count} 个视频"]
 
         by_category = stats.get("by_category", {})
         if by_category:

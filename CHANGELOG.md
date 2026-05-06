@@ -1,3 +1,19 @@
+### v2.5.2
+
+🌟 新功能：自动存视频
+
+* 新增 `auto_save_video_enabled` 配置项（继承 `auto_save_aiimg_enabled`），启用后 AiImg 生成的视频和 DailySharing 分享的视频自动存入 wardrobe 视频库
+* 自动存视频通过 `after_message_sent` 钩子检测消息中的 Video 组件，无感知入库，无需手动命令
+* 自动入库的视频继承源图片的 wardrobe ID（通过 aiimg 的 `_last_image_by_user` 反查文件 hash 匹配），关联到源图片记录
+* 视频文件以 `auto_{md5}.mp4` 命名存入 wardrobe 视频目录，MD5 去重避免重复存储
+* 统计命令 `/衣柜统计` 现在同时显示视频数量
+
+🔄 改进
+
+* `get_stats()` 返回新增 `video_count` 字段
+* `on_after_message_sent` 钩子同时触发图片和视频的自动保存任务
+
+
 ### v2.5.1
 
 **🐛 修复：视频提示词生成图片未传递**

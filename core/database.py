@@ -705,10 +705,13 @@ class WardrobeDatabase:
                 "SELECT exposure_level, COUNT(*) FROM images GROUP BY exposure_level"
             ) as cursor:
                 exposure_counts = dict(await cursor.fetchall())
+            async with db.execute("SELECT COUNT(*) FROM videos") as cursor:
+                video_count = (await cursor.fetchone())[0]
         return {
             "total": total,
             "by_category": category_counts,
             "by_exposure": exposure_counts,
+            "video_count": video_count,
         }
 
     async def list_images(
