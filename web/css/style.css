@@ -1682,6 +1682,24 @@ html, body {
   text-align: center;
 }
 
+.video-loading {
+  padding: 40px 20px;
+  text-align: center;
+  color: var(--text-secondary);
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 8px;
+  animation: fadeIn .2s ease;
+}
+
+.video-page-indicator {
+  padding: 6px 20px;
+  text-align: center;
+  color: var(--text-secondary);
+  font-size: 13px;
+}
+
 .video-generate-section {
   padding: 8px 0;
   border-top: 1px solid var(--border);

@@ -6,7 +6,7 @@
 <title>衣橱图鉴</title>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link href="https://fonts.googleapis.com/css2?family=Fredoka:wght@400;500;600;700&family=Nunito:wght@300;400;500;600;700&display=swap" rel="stylesheet">
-<link rel="stylesheet" href="/static/css/style.css?v=2.5.1">
+<link rel="stylesheet" href="/static/css/style.css?v=2.5.4">
 <script src="https://cdn.jsdelivr.net/npm/echarts@5.5.1/dist/echarts.min.js"></script>
 </head>
 <body>
@@ -240,12 +240,17 @@
         </div>
       </aside>
       <div class="content">
+        <div class="video-loading hidden" id="videoLoadingIndicator">
+          <div class="loading-spinner"></div>
+          <span>加载视频中...</span>
+        </div>
         <div class="video-grid" id="videoGrid"></div>
         <div class="empty-state hidden" id="videoEmptyState">
           <span class="empty-icon">🎬</span>
           <p class="empty-text">还没有视频</p>
           <p class="empty-hint">去图片库选一张图片转视频吧</p>
         </div>
+        <div class="video-page-indicator hidden" id="videoPageIndicator"></div>
         <div class="video-pagination" id="videoPagination"></div>
       </div>
     </div>
@@ -503,6 +508,6 @@
     </div>
   </div>
 
-<script src="/static/js/app.js?v=2.5.3"></script>
+<script src="/static/js/app.js?v=2.5.4"></script>
 </body>
 </html>
