@@ -139,6 +139,7 @@ class VideoService:
         backend_override: str,
         persona: str,
         image_description: str = "",
+        reuse_prompt: str = "",
     ):
         try:
             async with aiofiles.open(image_path, "rb") as f:
@@ -148,19 +149,23 @@ class VideoService:
             if not provider_id:
                 raise ValueError(f"未配置「{tier_label}」档的视频后端")
 
-            prompt_provider_id = str(self.plugin._cfg("video_prompt_provider_id", "") or "").strip()
-            if not prompt_provider_id:
-                raise ValueError("未配置视频提示词生成模型")
+            if reuse_prompt.strip():
+                generated_prompt = reuse_prompt.strip()
+                logger.info("[VideoService] 重试复用已有提示词 video_id=%s len=%d", video_id, len(generated_prompt))
+            else:
+                prompt_provider_id = str(self.plugin._cfg("video_prompt_provider_id", "") or "").strip()
+                if not prompt_provider_id:
+                    raise ValueError("未配置视频提示词生成模型")
 
-            logger.info("[VideoService] 开始生成视频提示词 video_id=%s tier=%s", video_id, tier_label)
+                logger.info("[VideoService] 开始生成视频提示词 video_id=%s tier=%s", video_id, tier_label)
 
-            generated_prompt = await self._generate_prompt(
-                prompt_provider_id, image_bytes, tier, tier_label, user_thoughts, image_description
-            )
+                generated_prompt = await self._generate_prompt(
+                    prompt_provider_id, image_bytes, tier, tier_label, user_thoughts, image_description
+                )
 
-            logger.info("[VideoService] 提示词生成完成 video_id=%s len=%d", video_id, len(generated_prompt))
+                logger.info("[VideoService] 提示词生成完成 video_id=%s len=%d", video_id, len(generated_prompt))
 
-            await self.plugin.db.update_video(video_id, generated_prompt=generated_prompt)
+                await self.plugin.db.update_video(video_id, generated_prompt=generated_prompt)
 
             logger.info("[VideoService] 开始调用视频后端 video_id=%s backend=%s", video_id, provider_id)
 
