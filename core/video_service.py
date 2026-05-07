@@ -422,6 +422,127 @@ class VideoService:
             async with aiofiles.open(dest, "wb") as f:
                 await f.write(content)
 
+        await self._faststart_if_needed(dest)
+
+    async def _faststart_if_needed(self, video_path: Path):
+        try:
+            needs = await asyncio.to_thread(self._check_moov_position, video_path)
+            if not needs:
+                logger.info("[VideoService] moov 已在文件开头，无需 faststart")
+                return
+        except Exception as e:
+            logger.warning("[VideoService] moov 位置检测失败，尝试直接 faststart: %s", e)
+
+        try:
+            await asyncio.to_thread(self._run_ffmpeg_faststart, video_path)
+            logger.info("[VideoService] ffmpeg faststart 完成: %s", video_path.name)
+        except FileNotFoundError:
+            logger.warning("[VideoService] ffmpeg 不可用，尝试纯 Python faststart")
+            try:
+                await asyncio.to_thread(self._python_faststart, video_path)
+                logger.info("[VideoService] 纯 Python faststart 完成: %s", video_path.name)
+            except Exception as e2:
+                logger.warning("[VideoService] 纯 Python faststart 也失败，视频 moov 仍在末尾: %s", e2)
+        except Exception as e:
+            logger.warning("[VideoService] ffmpeg faststart 失败: %s", e)
+
+    @staticmethod
+    def _check_moov_position(path: Path) -> bool:
+        with open(path, "rb") as f:
+            offset = 0
+            first_atom = True
+            while True:
+                f.seek(offset)
+                header = f.read(8)
+                if len(header) < 8:
+                    break
+                size = int.from_bytes(header[:4], "big")
+                atom_type = header[4:8]
+                if size == 1:
+                    ext = f.read(8)
+                    if len(ext) < 8:
+                        break
+                    size = int.from_bytes(ext, "big")
+                elif size == 0:
+                    size = path.stat().st_size - offset
+                if size < 8:
+                    break
+                if atom_type == b'moov':
+                    return not first_atom
+                if atom_type in (b'ftyp', b'moov'):
+                    first_atom = False
+                offset += size
+        return True
+
+    @staticmethod
+    def _run_ffmpeg_faststart(path: Path):
+        import subprocess
+        tmp = path.with_suffix(".tmp.mp4")
+        cmd = [
+            "ffmpeg", "-y", "-i", str(path),
+            "-movflags", "+faststart", "-c", "copy",
+            str(tmp),
+        ]
+        result = subprocess.run(cmd, capture_output=True, timeout=120)
+        if result.returncode != 0:
+            raise RuntimeError(f"ffmpeg exit {result.returncode}: {result.stderr.decode(errors='replace')[:300]}")
+        tmp.replace(path)
+
+    @staticmethod
+    def _python_faststart(path: Path):
+        with open(path, "rb") as f:
+            data = f.read()
+
+        atoms = []
+        offset = 0
+        while offset < len(data):
+            if offset + 8 > len(data):
+                break
+            size = int.from_bytes(data[offset:offset + 4], "big")
+            atom_type = data[offset + 4:offset + 8]
+            if size == 1:
+                if offset + 16 > len(data):
+                    break
+                size = int.from_bytes(data[offset + 8:offset + 16], "big")
+            elif size == 0:
+                size = len(data) - offset
+            if size < 8 or offset + size > len(data):
+                break
+            atoms.append((atom_type, offset, size))
+            offset += size
+
+        ftyp_idx = None
+        moov_idx = None
+        for i, (atype, _, _) in enumerate(atoms):
+            if atype == b'ftyp' and ftyp_idx is None:
+                ftyp_idx = i
+            if atype == b'moov' and moov_idx is None:
+                moov_idx = i
+
+        if moov_idx is None:
+            raise ValueError("未找到 moov atom")
+        if ftyp_idx is not None and moov_idx == ftyp_idx + 1:
+            return
+        if ftyp_idx is None and moov_idx == 0:
+            return
+
+        moov_off, moov_size = atoms[moov_idx][1], atoms[moov_idx][2]
+        moov_data = data[moov_off:moov_off + moov_size]
+
+        other_parts = []
+        for i, (atype, aoff, asize) in enumerate(atoms):
+            if i != moov_idx:
+                other_parts.append(data[aoff:aoff + asize])
+
+        if ftyp_idx is not None:
+            adj = ftyp_idx if ftyp_idx < moov_idx else ftyp_idx - 1
+            out = b''.join(other_parts[:adj + 1]) + moov_data + b''.join(other_parts[adj + 1:])
+        else:
+            out = moov_data + b''.join(other_parts)
+
+        with open(path, "wb") as f:
+            f.write(out)
+
     def _parse_json_prompt(self, raw_text: str):
         """解析模型返回的 JSON: {"reasoning": "...", "prompt": "..."}
         
