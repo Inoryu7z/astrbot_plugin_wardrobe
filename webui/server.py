@@ -942,10 +942,12 @@ class WardrobeWebServer:
             persona = video.get("persona", "")
             await self.plugin.db.update_video(video_id, status="generating", error_message=None)
             image_description = self.plugin.video_service._build_image_description(image)
+            old_prompt = (video.get("generated_prompt") or "").strip()
             asyncio.create_task(
                 self.plugin.video_service._process_video(
                     video_id, source_image_id, image_path, tier, tier_label,
                     user_thoughts, backend_override, persona, image_description,
+                    reuse_prompt=old_prompt,
                 )
             )
             logger.info("[Wardrobe] WebUI 重试视频生成: video_id=%s tier=%s", video_id, tier)

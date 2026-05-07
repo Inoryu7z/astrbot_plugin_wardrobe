@@ -1,3 +1,10 @@
+### v2.5.5
+
+🔧 修复：视频重试浪费LLM token + WriteTimeout
+
+* 重试视频时复用已有的提示词（`generated_prompt`），不再重复调用 LLM 生成新提示词，节省 token 并加快重试速度
+* 配合 aiimg 端增大视频后端 write timeout（30s→120s），解决大图 Base64 data URL 上传超时导致提供商后台收不到请求的问题
+
 ### v2.5.4
 
 🚀 性能优化：视频库加载加速
