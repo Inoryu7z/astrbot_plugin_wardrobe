@@ -1,11 +1,14 @@
 ### v2.5.6
 
-🚀 性能优化：视频流式传输，秒开播放
+🚀 性能优化：视频流式传输 + faststart，秒开播放
 
 * 视频文件接口从手动 `_read_all()` 全量读取改为 `quart.send_file` 流式传输，30~40MB 视频不再一次性读入内存
 * 浏览器 Range 请求（206 Partial Content）由 Quart 原生处理，视频可边下边播，无需等待全量下载
 * 自动获得 ETag / 304 条件请求缓存，重复播放不重复传输
 * 约 40 行手动 Range 处理代码替换为 1 行 `send_file` 调用
+* 新增 MP4 faststart 后处理：下载视频后自动将 moov atom 移至文件开头，浏览器首次请求即可拿到索引，一次往返开始播放
+* 优先使用 `ffmpeg -movflags +faststart -c copy`（不重编码，秒级完成），不可用时回退纯 Python 实现
+* 自动存视频（AiImg/DailySharing）同样执行 faststart 后处理
 
 ### v2.5.5
 

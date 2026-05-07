@@ -985,6 +985,8 @@ class WardrobePlugin(Star):
             async with aiofiles.open(video_path, "wb") as f:
                 await f.write(video_bytes)
 
+            await self.video_service._faststart_if_needed(video_path)
+
             source_image_id = await self._find_source_image_id(event)
 
             persona = await self._get_auto_save_persona(event)
