@@ -969,46 +969,7 @@ class WardrobeWebServer:
             if not video_file.exists():
                 return jsonify({"error": "视频文件不存在"}), 404
 
-            file_size = video_file.stat().st_size
-            range_header = request.headers.get('Range', '')
-
-            if range_header.startswith('bytes='):
-                try:
-                    range_val = range_header[6:]
-                    if '-' in range_val:
-                        start_str, end_str = range_val.split('-', 1)
-                        start = int(start_str) if start_str else 0
-                        end = int(end_str) if end_str else file_size - 1
-                    else:
-                        start = int(range_val)
-                        end = file_size - 1
-                    if start >= file_size:
-                        return Response('', status=416, headers={'Content-Range': f'bytes */{file_size}'})
-                    end = min(end, file_size - 1)
-                    length = end - start + 1
-
-                    def _read_range():
-                        with open(str(video_file), 'rb') as f:
-                            f.seek(start)
-                            return f.read(length)
-
-                    data = await asyncio.to_thread(_read_range)
-                    headers = {
-                        'Content-Type': 'video/mp4',
-                        'Content-Range': f'bytes {start}-{end}/{file_size}',
-                        'Content-Length': str(length),
-                        'Accept-Ranges': 'bytes',
-                    }
-                    return Response(data, status=206, headers=headers)
-                except (ValueError, IndexError):
-                    pass
-
-            def _read_all():
-                with open(str(video_file), 'rb') as f:
-                    return f.read()
-
-            data = await asyncio.to_thread(_read_all)
-            return Response(data, mimetype='video/mp4', headers={'Accept-Ranges': 'bytes', 'Content-Length': str(file_size)})
+            return await send_file(str(video_file), mimetype='video/mp4')
 
         @app.route("/api/video-settings/prompt")
         async def api_video_prompt_get():
