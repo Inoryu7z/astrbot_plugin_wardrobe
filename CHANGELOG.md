@@ -1,3 +1,15 @@
+### v2.5.8
+
+ 修复：移动端/平板端瀑布流布局严重错位
+
+* 移动端（480px 以下）从单列 Grid 伪瀑布流改为双列 CSS Columns 真瀑布流，图片不再挤成一条竖线
+* 平板端（481-768px）同样改为 CSS Columns 瀑布流，消除 Grid span hack 导致的间距不均
+* 修复 recalculateAllSpans() 在移动端/平板端无效计算的问题，768px 以下直接跳过
+* 修复 gap 计算不一致的问题，桌面端统一使用 16px gap
+* 同步 main.py 版本号至 2.5.8（此前 metadata.yaml 与 main.py 版本不一致）
+
+---
+
 ### v2.5.7
 
 🔧 新增：`_save_video_from_bytes` 接口供外部插件调用
