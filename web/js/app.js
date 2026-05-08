@@ -277,7 +277,7 @@
 
       const resp=await api(url);
 
-      if(!resp)return;
+      if(!resp){state.loading=false;$('#loadingIndicator').classList.add('hidden');return;}
       const data=await resp.json();
       images=data.images||[];
       total=data.total||images.length;
@@ -348,7 +348,7 @@
 
     const fragment=document.createDocumentFragment();
     cardsWithHeights.forEach(({img,height,aspectRatio})=>{
-      state.gridImageIds.push(img.id);
+      if(state.gridImageIds.includes(img.id))return;state.gridImageIds.push(img.id);
       const card=document.createElement('div');
       card.className='image-card';
       card.dataset.id=img.id;
