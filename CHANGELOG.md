@@ -1,3 +1,13 @@
+### v2.5.7
+
+🔧 新增：`_save_video_from_bytes` 接口供外部插件调用
+
+* 新增 `_save_video_from_bytes` 方法，接受 video_bytes、persona、source_image_path、created_by 参数，不依赖 event 对象
+* 新增 `_find_source_image_id_by_path` 方法，通过图片文件路径查找对应的衣橱图片 ID
+* 修复 DailySharing 等插件通过 `context.send_message()` 主动发视频时，`after_message_sent` 钩子不触发导致视频无法自动保存的问题
+
+---
+
 ### v2.5.6
 
 🚀 性能优化：视频流式传输 + faststart，秒开播放

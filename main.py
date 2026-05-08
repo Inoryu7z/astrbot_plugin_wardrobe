@@ -1008,6 +1008,73 @@ class WardrobePlugin(Star):
         except Exception as e:
             logger.error("[Wardrobe] 自动存视频异常: %s", e)
 
+    async def _save_video_from_bytes(
+        self,
+        video_bytes: bytes,
+        *,
+        persona: str = "",
+        source_image_path: str = "",
+        created_by: str = "",
+    ) -> str:
+        await self._ensure_db()
+
+        if len(video_bytes) < 12 or video_bytes[4:8] != b'ftyp':
+            logger.debug("[Wardrobe] _save_video_from_bytes 跳过：非有效 MP4 格式")
+            return ""
+
+        file_hash = hashlib.md5(video_bytes).hexdigest()
+        self.video_service._ensure_dirs()
+
+        video_filename = f"auto_{file_hash}.mp4"
+        video_path = self.video_service.videos_dir / video_filename
+        if video_path.exists():
+            logger.info("[Wardrobe] _save_video_from_bytes 跳过：文件已存在 hash=%s", file_hash)
+            return ""
+
+        import aiofiles
+        async with aiofiles.open(video_path, "wb") as f:
+            await f.write(video_bytes)
+
+        await self.video_service._faststart_if_needed(video_path)
+
+        source_image_id = ""
+        if source_image_path:
+            source_image_id = await self._find_source_image_id_by_path(source_image_path)
+
+        await self.db.add_video(
+            source_image_id=source_image_id,
+            video_path=video_filename,
+            provider_id=created_by or "external",
+            tier="normal",
+            persona=persona,
+            status="done",
+        )
+
+        logger.info(
+            "[Wardrobe] _save_video_from_bytes 完成 hash=%s size=%dKB source_image=%s persona=%s",
+            file_hash, len(video_bytes) // 1024, source_image_id or "无", persona or "无",
+        )
+        return video_filename
+
+    async def _find_source_image_id_by_path(self, image_path: str) -> str:
+        if not image_path:
+            return ""
+        path = Path(image_path)
+        if not path.exists():
+            return ""
+        try:
+            import aiofiles
+            async with aiofiles.open(path, "rb") as f:
+                img_bytes = await f.read()
+            if img_bytes:
+                img_hash = hashlib.md5(img_bytes).hexdigest()
+                existing = await self.db.get_image_by_hash(img_hash)
+                if existing:
+                    return existing["id"]
+        except Exception:
+            pass
+        return ""
+
     async def _find_source_image_id(self, event: AstrMessageEvent) -> str:
         star = self.context.get_registered_star("astrbot_plugin_aiimg")
         if not star or not star.activated or not star.star_cls:
