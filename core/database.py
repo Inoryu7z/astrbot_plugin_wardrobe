@@ -410,13 +410,13 @@ class WardrobeDatabase:
         params.append(offset)
 
         if sort_by == "use_count":
-            order_clause = "use_count DESC, created_at DESC"
+            order_clause = "use_count DESC, created_at DESC, id DESC"
         elif sort_by == "favorite":
-            order_clause = "CASE favorite WHEN 'favorite' THEN 1 WHEN 'like' THEN 2 ELSE 3 END, created_at DESC"
+            order_clause = "CASE favorite WHEN 'favorite' THEN 1 WHEN 'like' THEN 2 ELSE 3 END, created_at DESC, id DESC"
         elif sort_by == "last_used_at":
-            order_clause = "COALESCE(last_used_at, '') DESC, created_at DESC"
+            order_clause = "COALESCE(last_used_at, '') DESC, created_at DESC, id DESC"
         else:
-            order_clause = "created_at DESC"
+            order_clause = "created_at DESC, id DESC"
 
         async with aiosqlite.connect(self.db_path) as db:
             db.row_factory = aiosqlite.Row
@@ -482,7 +482,7 @@ class WardrobeDatabase:
 
         async with aiosqlite.connect(self.db_path) as db:
             db.row_factory = aiosqlite.Row
-            sql = f"SELECT * FROM images {where_clause} ORDER BY created_at DESC LIMIT ? OFFSET ?"
+            sql = f"SELECT * FROM images {where_clause} ORDER BY created_at DESC, id DESC LIMIT ? OFFSET ?"
             async with db.execute(sql, params) as cursor:
                 rows = await cursor.fetchall()
                 results = [self._row_to_dict(row) for row in rows]
@@ -556,7 +556,7 @@ class WardrobeDatabase:
 
         async with aiosqlite.connect(self.db_path) as db:
             db.row_factory = aiosqlite.Row
-            sql = f"SELECT * FROM images {where_clause} ORDER BY created_at DESC LIMIT ? OFFSET ?"
+            sql = f"SELECT * FROM images {where_clause} ORDER BY created_at DESC, id DESC LIMIT ? OFFSET ?"
             async with db.execute(sql, base_params) as cursor:
                 rows = await cursor.fetchall()
                 return [self._row_to_dict(row) for row in rows]
@@ -744,13 +744,13 @@ class WardrobeDatabase:
             where_clause = "WHERE " + " AND ".join(conditions)
         params.extend([limit, offset])
         if sort_by == "use_count":
-            order_clause = "use_count DESC, created_at DESC"
+            order_clause = "use_count DESC, created_at DESC, id DESC"
         elif sort_by == "favorite":
-            order_clause = "CASE favorite WHEN 'favorite' THEN 1 WHEN 'like' THEN 2 ELSE 3 END, created_at DESC"
+            order_clause = "CASE favorite WHEN 'favorite' THEN 1 WHEN 'like' THEN 2 ELSE 3 END, created_at DESC, id DESC"
         elif sort_by == "last_used_at":
-            order_clause = "COALESCE(last_used_at, '') DESC, created_at DESC"
+            order_clause = "COALESCE(last_used_at, '') DESC, created_at DESC, id DESC"
         else:
-            order_clause = "created_at DESC"
+            order_clause = "created_at DESC, id DESC"
         async with aiosqlite.connect(self.db_path) as db:
             db.row_factory = aiosqlite.Row
             sql = f"SELECT * FROM images {where_clause} ORDER BY {order_clause} LIMIT ? OFFSET ?"
@@ -799,13 +799,13 @@ class WardrobeDatabase:
             where_clause = "WHERE " + " AND ".join(conditions)
         params.extend([limit, offset])
         if sort_by == "use_count":
-            order_clause = "use_count DESC, created_at DESC"
+            order_clause = "use_count DESC, created_at DESC, id DESC"
         elif sort_by == "favorite":
-            order_clause = "CASE favorite WHEN 'favorite' THEN 1 WHEN 'like' THEN 2 ELSE 3 END, created_at DESC"
+            order_clause = "CASE favorite WHEN 'favorite' THEN 1 WHEN 'like' THEN 2 ELSE 3 END, created_at DESC, id DESC"
         elif sort_by == "last_used_at":
-            order_clause = "COALESCE(last_used_at, '') DESC, created_at DESC"
+            order_clause = "COALESCE(last_used_at, '') DESC, created_at DESC, id DESC"
         else:
-            order_clause = "created_at DESC"
+            order_clause = "created_at DESC, id DESC"
         async with aiosqlite.connect(self.db_path) as db:
             db.row_factory = aiosqlite.Row
             sql = f"SELECT id, category, style, persona, image_path, created_at, favorite, use_count, ref_strength, last_used_at FROM images {where_clause} ORDER BY {order_clause} LIMIT ? OFFSET ?"
@@ -986,7 +986,7 @@ class WardrobeDatabase:
         params.extend([limit, offset])
         async with aiosqlite.connect(self.db_path) as db:
             db.row_factory = aiosqlite.Row
-            sql = f"SELECT * FROM videos {where_clause} ORDER BY created_at DESC LIMIT ? OFFSET ?"
+            sql = f"SELECT * FROM videos {where_clause} ORDER BY created_at DESC, id DESC LIMIT ? OFFSET ?"
             async with db.execute(sql, params) as cursor:
                 rows = await cursor.fetchall()
                 return [dict(row) for row in rows]
@@ -995,7 +995,7 @@ class WardrobeDatabase:
         async with aiosqlite.connect(self.db_path) as db:
             db.row_factory = aiosqlite.Row
             async with db.execute(
-                "SELECT * FROM videos WHERE source_image_id = ? ORDER BY created_at DESC",
+                "SELECT * FROM videos WHERE source_image_id = ? ORDER BY created_at DESC, id DESC",
                 (image_id,),
             ) as cursor:
                 rows = await cursor.fetchall()
@@ -1034,7 +1034,7 @@ class WardrobeDatabase:
         params.extend([limit, offset])
         async with aiosqlite.connect(self.db_path) as db:
             db.row_factory = aiosqlite.Row
-            sql = f"SELECT id, source_image_id, video_path, provider_id, tier, user_thoughts, generated_prompt, persona, status, error_message, created_at FROM videos {where_clause} ORDER BY created_at DESC LIMIT ? OFFSET ?"
+            sql = f"SELECT id, source_image_id, video_path, provider_id, tier, user_thoughts, generated_prompt, persona, status, error_message, created_at FROM videos {where_clause} ORDER BY created_at DESC, id DESC LIMIT ? OFFSET ?"
             async with db.execute(sql, params) as cursor:
                 rows = await cursor.fetchall()
                 return [dict(row) for row in rows]
