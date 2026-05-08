@@ -1,3 +1,14 @@
+### v2.6.1
+
+🐛 修复：v2.6.0 引入的若干问题
+
+* 修复 `_check_moov_position` 逻辑错误：moov 紧跟 ftyp 时误判为需要 faststart，导致不必要的视频重写
+* 修复 `list_images()` 缺少 `sort_by=random` 支持，与 `list_images_lightweight()` 不一致
+* 修复随机排序池耗尽后滚动哨兵仍可见的问题（图片总数 > 500 时）
+* 后台任务改用 `_spawn_bg_task` 保留引用，防止被垃圾回收（video_service / server 中的视频生成/重试任务）
+
+---
+
 ### v2.6.0
 
  新增：视频发送到会话 + 随机排序

@@ -123,7 +123,7 @@ class VideoService:
         # 提取图片描述信息传给提示词生成模型
         image_description = self._build_image_description(image)
 
-        asyncio.create_task(self._process_video(
+        self.plugin._spawn_bg_task(self._process_video(
             video_id, image_id, image_path, tier, tier_label,
             user_thoughts, backend_override, persona, image_description,
             auto_send=auto_send,
@@ -460,7 +460,7 @@ class VideoService:
     def _check_moov_position(path: Path) -> bool:
         with open(path, "rb") as f:
             offset = 0
-            first_atom = True
+            seen_non_ftyp_before_moov = False
             while True:
                 f.seek(offset)
                 header = f.read(8)
@@ -478,9 +478,9 @@ class VideoService:
                 if size < 8:
                     break
                 if atom_type == b'moov':
-                    return not first_atom
-                if atom_type in (b'ftyp', b'moov'):
-                    first_atom = False
+                    return seen_non_ftyp_before_moov
+                if atom_type != b'ftyp':
+                    seen_non_ftyp_before_moov = True
                 offset += size
         return True
 
@@ -710,7 +710,12 @@ class VideoService:
 
         video_comp = VideoComp.fromFileSystem(path=str(video_path))
         chain = MessageChain(chain=[video_comp])
-        success = await self.plugin.context.send_message(umo, chain)
+        try:
+            result = await self.plugin.context.send_message(umo, chain)
+            success = result is not None
+        except Exception as e:
+            logger.warning("[VideoService] 视频发送异常 video_id=%s error=%s", video_id, e)
+            success = False
         if success:
             logger.info("[VideoService] 视频已发送到会话 video_id=%s umo=%s", video_id, umo[:50])
         else:
