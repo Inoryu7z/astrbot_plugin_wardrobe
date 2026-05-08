@@ -1906,6 +1906,12 @@ html, body {
   font-weight: 500;
 }
 
+.setting-divider {
+  height: 1px;
+  background: var(--border);
+  margin: 20px 0;
+}
+
 .video-player-modal .modal {
   max-width: 800px;
 }

@@ -864,6 +864,7 @@ class WardrobeWebServer:
             tier = (data.get("tier") or "normal").strip()
             user_thoughts = (data.get("user_thoughts") or "").strip()
             backend_override = (data.get("backend_override") or "").strip()
+            auto_send = bool(data.get("auto_send", False))
 
             if not image_id:
                 return jsonify({"error": "未指定图片"}), 400
@@ -880,8 +881,9 @@ class WardrobeWebServer:
                     tier=tier,
                     user_thoughts=user_thoughts,
                     backend_override=backend_override,
+                    auto_send=auto_send,
                 )
-                logger.info("[Wardrobe] WebUI 触发视频生成: image_id=%s tier=%s video_id=%s", image_id, tier, video_id)
+                logger.info("[Wardrobe] WebUI 触发视频生成: image_id=%s tier=%s video_id=%s auto_send=%s", image_id, tier, video_id, auto_send)
                 return jsonify({"success": True, "video_id": video_id, "status": "generating"})
             except ValueError as e:
                 return jsonify({"error": str(e)}), 400
@@ -989,6 +991,37 @@ class WardrobeWebServer:
                 return jsonify({"success": True})
             except Exception as e:
                 return jsonify({"error": str(e)}), 500
+
+        @app.route("/api/video-settings/umo")
+        async def api_video_umo_get():
+            try:
+                config = await self.plugin.video_service.load_send_umo()
+                return jsonify({"umo": config.get("umo", ""), "auto_send": config.get("auto_send", False)})
+            except Exception as e:
+                return jsonify({"error": str(e)}), 500
+
+        @app.route("/api/video-settings/umo", methods=["POST"])
+        async def api_video_umo_save():
+            data = await request.get_json(silent=True) or {}
+            umo = str(data.get("umo", "") or "").strip()
+            auto_send = bool(data.get("auto_send", False))
+            try:
+                await self.plugin.video_service.save_send_umo(umo, auto_send)
+                logger.info("[Wardrobe] 视频发送会话已保存 umo=%s auto_send=%s", umo[:30] if umo else "(空)", auto_send)
+                return jsonify({"success": True})
+            except Exception as e:
+                return jsonify({"error": str(e)}), 500
+
+        @app.route("/api/videos/<video_id>/send", methods=["POST"])
+        async def api_video_send(video_id):
+            try:
+                result = await self.plugin.video_service.send_video_by_id(video_id)
+                return jsonify({"success": result})
+            except ValueError as e:
+                return jsonify({"error": str(e)}), 400
+            except Exception as e:
+                logger.error("[Wardrobe] 视频发送失败: %s", e, exc_info=True)
+                return jsonify({"error": f"发送失败: {e}"}), 500
 
         return app
 
