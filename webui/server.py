@@ -926,7 +926,9 @@ class WardrobeWebServer:
             video = await self.plugin.db.get_video(video_id)
             if not video:
                 return jsonify({"error": "未找到视频"}), 404
-            if video.get("status") != "failed":
+            if video.get("status") not in ("failed",):
+                if video.get("status") == "generating":
+                    return jsonify({"error": "视频正在生成中，请勿重复重试"}), 409
                 return jsonify({"error": "只有失败状态的视频可以重试"}), 400
             source_image_id = video.get("source_image_id")
             if not source_image_id:
@@ -945,11 +947,14 @@ class WardrobeWebServer:
             await self.plugin.db.update_video(video_id, status="generating", error_message=None)
             image_description = self.plugin.video_service._build_image_description(image)
             old_prompt = (video.get("generated_prompt") or "").strip()
-            asyncio.create_task(
+            umo_config = await self.plugin.video_service.load_send_umo()
+            auto_send = bool(umo_config.get("auto_send", False)) and bool(umo_config.get("umo", "").strip())
+            self.plugin._spawn_bg_task(
                 self.plugin.video_service._process_video(
                     video_id, source_image_id, image_path, tier, tier_label,
                     user_thoughts, backend_override, persona, image_description,
                     reuse_prompt=old_prompt,
+                    auto_send=auto_send,
                 )
             )
             logger.info("[Wardrobe] WebUI 重试视频生成: video_id=%s tier=%s", video_id, tier)

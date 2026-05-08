@@ -325,7 +325,7 @@
     }
 
     const loadedCount=$('#imageGrid').children.length;
-    if(!state.searchQuery && loadedCount<state.total){
+    if(!state.searchQuery && !state.allLoaded && loadedCount<state.total){
       $('#scrollSentinel').classList.remove('hidden');
     }else{
       $('#scrollSentinel').classList.add('hidden');
