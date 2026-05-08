@@ -6,7 +6,7 @@
 <title>衣橱图鉴</title>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link href="https://fonts.googleapis.com/css2?family=Fredoka:wght@400;500;600;700&family=Nunito:wght@300;400;500;600;700&display=swap" rel="stylesheet">
-<link rel="stylesheet" href="/static/css/style.css?v=2.5.9">
+<link rel="stylesheet" href="/static/css/style.css?v=2.6.0">
 <script src="https://cdn.jsdelivr.net/npm/echarts@5.5.1/dist/echarts.min.js"></script>
 </head>
 <body>
@@ -129,6 +129,7 @@
         <option value="favorite">喜爱优先</option>
         <option value="use_count">热度优先</option>
         <option value="last_used_at">最近调用</option>
+        <option value="random">随机</option>
       </select>
     </div>
     <div class="sidebar-section stats-section">
@@ -347,6 +348,13 @@
                 <label class="vgp-label">视频后端（可选，留空走默认）</label>
                 <input type="text" class="login-input" id="vgpBackend" placeholder="provider_id">
               </div>
+              <div class="vgp-input-row">
+                <label class="vgp-label">生成后发送到会话</label>
+                <label class="filter-item" style="padding:4px 0;">
+                  <input type="checkbox" id="vgpAutoSend">
+                  <span class="filter-label">自动发送</span>
+                </label>
+              </div>
               <div class="vgp-status hidden" id="vgpStatus"></div>
               <button class="btn btn-accent btn-block" id="vgpSubmitBtn">开始生成</button>
             </div>
@@ -471,6 +479,24 @@
         <button class="btn btn-accent" id="videoPromptSaveBtn">保存提示词</button>
         <span class="setting-save-status" id="videoPromptSaveStatus"></span>
       </div>
+      <div class="setting-divider"></div>
+      <div class="setting-group">
+        <label class="setting-label">视频发送会话</label>
+        <p class="setting-hint">配置会话后，生成的视频可自动或手动发送到该会话。UMO 值格式如：qq:12345:67890（可从任意消息事件的 unified_msg_origin 获取）</p>
+        <input type="text" class="login-input" id="videoSendUmo" placeholder="输入 UMO 值，如 qq:12345:67890">
+      </div>
+      <div class="setting-group">
+        <label class="setting-label">WebUI 生成后自动发送</label>
+        <p class="setting-hint">开启后，在 WebUI 触发视频生成完成后自动发送到上方配置的会话</p>
+        <label class="filter-item" style="padding:4px 0;">
+          <input type="checkbox" id="videoAutoSend">
+          <span class="filter-label">自动发送</span>
+        </label>
+      </div>
+      <div class="setting-actions">
+        <button class="btn btn-accent" id="videoUmoSaveBtn">保存发送配置</button>
+        <span class="setting-save-status" id="videoUmoSaveStatus"></span>
+      </div>
     </div>
   </div>
 
@@ -501,6 +527,7 @@
             <p class="vp-prompt-text" id="vpThoughtsText"></p>
           </div>
           <div class="video-player-actions">
+            <button class="btn btn-accent btn-sm" id="vpSendBtn">发送视频</button>
             <button class="btn btn-danger btn-sm" id="vpDeleteBtn">删除此视频</button>
           </div>
         </div>
@@ -508,6 +535,6 @@
     </div>
   </div>
 
-<script src="/static/js/app.js?v=2.5.9"></script>
+<script src="/static/js/app.js?v=2.6.0"></script>
 </body>
 </html>

@@ -67,6 +67,8 @@
     batchReanalyzing:false,
     batchOps:[],
     gridImageIds:[],
+    _randomPool:[],
+    _randomPoolIdx:0,
     preloadedPage2:null,
     loadedOriginals:new Set(),
     detailCache:new Map(),
@@ -248,6 +250,10 @@
       _originalActive=0;
       if(_originalObserver){_originalObserver.disconnect();}
       $('#imageGrid').innerHTML='';
+      if(state.sort_by==='random'){
+        state._randomPool=[];
+        state._randomPoolIdx=0;
+      }
     }
 
     state.loading=true;
@@ -257,7 +263,12 @@
     let images=[];
     let total=0;
 
-    if(!resetGrid && !state.searchQuery && state.preloadedPage2){
+    if(state.sort_by==='random' && !resetGrid && state._randomPool && state._randomPoolIdx<state._randomPool.length){
+      const end=Math.min(state._randomPoolIdx+state.perPage,state._randomPool.length);
+      images=state._randomPool.slice(state._randomPoolIdx,end);
+      state._randomPoolIdx=end;
+      total=state.total;
+    }else if(!resetGrid && !state.searchQuery && state.preloadedPage2){
       images=state.preloadedPage2;
       state.preloadedPage2=null;
       const statsResp=await api('/api/stats');
@@ -271,6 +282,8 @@
       let url;
       if(state.searchQuery){
         url=`/api/search?q=${encodeURIComponent(state.searchQuery)}&persona=${encodeURIComponent(state.persona)}&category=${encodeURIComponent(state.category)}&favorite=${encodeURIComponent(state.favorite)}&limit=${state.perPage}`;
+      }else if(state.sort_by==='random'){
+        url=`/api/images?page=1&per_page=500&category=${encodeURIComponent(state.category)}&persona=${encodeURIComponent(state.persona)}&style=${encodeURIComponent(state.style)}&scene=${encodeURIComponent(state.scene)}&shot_size=${encodeURIComponent(state.shot_size)}&atmosphere=${encodeURIComponent(state.atmosphere)}&favorite=${encodeURIComponent(state.favorite)}&ref_strength=${encodeURIComponent(state.ref_strength)}&sort_by=random&lightweight=1`;
       }else{
         url=`/api/images?page=${state.page}&per_page=${state.perPage}&category=${encodeURIComponent(state.category)}&persona=${encodeURIComponent(state.persona)}&style=${encodeURIComponent(state.style)}&scene=${encodeURIComponent(state.scene)}&shot_size=${encodeURIComponent(state.shot_size)}&atmosphere=${encodeURIComponent(state.atmosphere)}&favorite=${encodeURIComponent(state.favorite)}&ref_strength=${encodeURIComponent(state.ref_strength)}&sort_by=${encodeURIComponent(state.sort_by)}&lightweight=1`;
       }
@@ -279,8 +292,15 @@
 
       if(!resp){state.loading=false;$('#loadingIndicator').classList.add('hidden');return;}
       const data=await resp.json();
-      images=data.images||[];
-      total=data.total||images.length;
+      if(state.sort_by==='random' && !state.searchQuery){
+        state._randomPool=data.images||[];
+        state._randomPoolIdx=Math.min(state.perPage,state._randomPool.length);
+        images=state._randomPool.slice(0,state._randomPoolIdx);
+        total=data.total||state._randomPool.length;
+      }else{
+        images=data.images||[];
+        total=data.total||images.length;
+      }
     }
 
     state.total=total;
@@ -294,8 +314,12 @@
     state.loading=false;
     $('#loadingIndicator').classList.add('hidden');
 
-    if(!state.searchQuery && images.length<state.perPage){
+    if(!state.searchQuery && state.sort_by!=='random' && images.length<state.perPage){
       state.allLoaded=true;
+    }else if(!state.searchQuery && state.sort_by==='random'){
+      if(state._randomPool && state._randomPoolIdx>=state._randomPool.length){
+        state.allLoaded=true;
+      }
     }else if(!state.searchQuery){
       state.page++;
     }
@@ -309,9 +333,9 @@
 
     $('#emptyState').classList.toggle('hidden',loadedCount>0);
 
-    if(resetGrid && !state.searchQuery){
+    if(resetGrid && !state.searchQuery && state.sort_by!=='random'){
       preloadPage2AndOriginals();
-    }else if(!state.searchQuery){
+    }else if(!state.searchQuery && state.sort_by!=='random'){
       preloadNextPage();
     }
   }
@@ -2251,6 +2275,7 @@
     $('#videoSettingsCloseBtn').addEventListener('click',closeVideoSettings);
     $('#videoSettingsModal').addEventListener('click',e=>{if(e.target===e.currentTarget)closeVideoSettings();});
     $('#videoPromptSaveBtn').addEventListener('click',saveVideoSettings);
+    $('#videoUmoSaveBtn').addEventListener('click',saveVideoUmoSettings);
 
     $('#videoPlayerCloseBtn').addEventListener('click',closeVideoPlayer);
     $('#videoPlayerModal').addEventListener('click',e=>{if(e.target===e.currentTarget)closeVideoPlayer();});
@@ -2258,6 +2283,9 @@
     $('#videoPlayerNextBtn').addEventListener('click',e=>{e.stopPropagation();_navigateVideoPlayer(1);});
     $('#vpDeleteBtn').addEventListener('click',()=>{
       if(state.videoCurrentPlayerId)deleteVideo(state.videoCurrentPlayerId,true);
+    });
+    $('#vpSendBtn').addEventListener('click',()=>{
+      if(state.videoCurrentPlayerId)sendVideoToConversation(state.videoCurrentPlayerId);
     });
 
     $$('#videoTierSidebarFilters input[name="video_tier"]').forEach(radio=>{
@@ -2624,10 +2652,11 @@
     statusEl.style.color='var(--text-muted)';
     const thoughts=$('#vgpThoughts').value.trim();
     const backend=$('#vgpBackend').value.trim();
+    const autoSend=$('#vgpAutoSend').checked;
     try{
       const resp=await api('/api/videos/generate',{
         method:'POST',
-        json:{image_id:state.currentImageId,tier:tier,user_thoughts:thoughts||null,backend_override:backend||null}
+        json:{image_id:state.currentImageId,tier:tier,user_thoughts:thoughts||null,backend_override:backend||null,auto_send:autoSend}
       });
       if(!resp||!resp.ok){
         statusEl.textContent=(resp&&resp.error)||'请求失败';
@@ -2701,6 +2730,8 @@
       if(v.user_thoughts){$('#vpThoughtsBlock').classList.remove('hidden');$('#vpThoughtsText').textContent=v.user_thoughts;}
       else{$('#vpThoughtsBlock').classList.add('hidden');}
       $('#videoPlayerModal').classList.remove('hidden');
+      const vpSendBtn=$('#vpSendBtn');
+      if(v.status==='done'){vpSendBtn.classList.remove('hidden');}else{vpSendBtn.classList.add('hidden');}
       const vidEl=$('#videoPlayerElement');
       vidEl.innerHTML='';
       const source=document.createElement('source');
@@ -2797,6 +2828,13 @@
       const data=await resp.json();
       $('#videoSystemPrompt').value=data.prompt||'';
     }catch(e){$('#videoSystemPrompt').value='加载失败: '+e.message;}
+    try{
+      const resp=await api('/api/video-settings/umo');
+      if(!resp||!resp.ok)return;
+      const data=await resp.json();
+      $('#videoSendUmo').value=data.umo||'';
+      $('#videoAutoSend').checked=!!data.auto_send;
+    }catch(e){}
   }
 
   async function saveVideoSettings(){
@@ -2811,6 +2849,35 @@
       if(data.success){statusEl.textContent='已保存';statusEl.style.color='#40A060';setTimeout(()=>{statusEl.textContent='';},3000);}
       else{statusEl.textContent=data.error||'保存失败';statusEl.style.color='var(--danger)';}
     }catch(e){statusEl.textContent='网络错误: '+e.message;statusEl.style.color='var(--danger)';}
+  }
+
+  async function saveVideoUmoSettings(){
+    const umo=$('#videoSendUmo').value.trim();
+    const autoSend=$('#videoAutoSend').checked;
+    const statusEl=$('#videoUmoSaveStatus');
+    statusEl.textContent='保存中...';
+    statusEl.style.color='var(--text-muted)';
+    try{
+      const resp=await api('/api/video-settings/umo',{method:'POST',json:{umo:umo,auto_send:autoSend}});
+      if(!resp||!resp.ok){statusEl.textContent='保存失败';statusEl.style.color='var(--danger)';return;}
+      const data=await resp.json();
+      if(data.success){statusEl.textContent='已保存';statusEl.style.color='#40A060';setTimeout(()=>{statusEl.textContent='';},3000);}
+      else{statusEl.textContent=data.error||'保存失败';statusEl.style.color='var(--danger)';}
+    }catch(e){statusEl.textContent='网络错误: '+e.message;statusEl.style.color='var(--danger)';}
+  }
+
+  async function sendVideoToConversation(videoId){
+    try{
+      const resp=await api('/api/videos/'+videoId+'/send',{method:'POST'});
+      if(!resp||!resp.ok){
+        const data=await resp.json().catch(()=>({}));
+        toast(data.error||'发送失败','error');
+        return;
+      }
+      const data=await resp.json();
+      if(data.success){toast('视频已发送','success');}
+      else{toast(data.error||'发送失败','error');}
+    }catch(e){toast('网络错误: '+e.message,'error');}
   }
 
   async function loadVideoPersonaFilter(){

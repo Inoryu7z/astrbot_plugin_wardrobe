@@ -1,5 +1,6 @@
 import asyncio
 import hashlib
+import json
 import os
 import uuid
 from pathlib import Path
@@ -87,6 +88,7 @@ class VideoService:
         tier: str,
         user_thoughts: str = "",
         backend_override: str = "",
+        auto_send: bool = False,
     ) -> str:
         self._ensure_dirs()
         await self.plugin._ensure_db()
@@ -124,6 +126,7 @@ class VideoService:
         asyncio.create_task(self._process_video(
             video_id, image_id, image_path, tier, tier_label,
             user_thoughts, backend_override, persona, image_description,
+            auto_send=auto_send,
         ))
 
         return video_id
@@ -140,6 +143,7 @@ class VideoService:
         persona: str,
         image_description: str = "",
         reuse_prompt: str = "",
+        auto_send: bool = False,
     ):
         try:
             async with aiofiles.open(image_path, "rb") as f:
@@ -185,6 +189,12 @@ class VideoService:
             )
 
             logger.info("[VideoService] 视频处理完成 video_id=%s", video_id)
+
+            if auto_send:
+                try:
+                    await self._auto_send_video(video_id, video_path)
+                except Exception as send_err:
+                    logger.warning("[VideoService] 视频自动发送失败 video_id=%s error=%s", video_id, send_err)
 
         except Exception as e:
             error_msg = str(e)
@@ -641,6 +651,71 @@ class VideoService:
         if not key:
             return ""
         return str(self.plugin._cfg(key, "") or "").strip()
+
+    def _get_send_umo_path(self) -> Path:
+        return self.plugin.data_dir / "video_send_umo.json"
+
+    async def load_send_umo(self) -> dict:
+        path = self._get_send_umo_path()
+        if path.exists():
+            try:
+                async with aiofiles.open(path, "r", encoding="utf-8") as f:
+                    content = await f.read()
+                    data = json.loads(content)
+                    if isinstance(data, dict):
+                        return data
+            except Exception:
+                pass
+        return {}
+
+    async def save_send_umo(self, umo: str, auto_send: bool = False) -> None:
+        self.plugin.data_dir.mkdir(parents=True, exist_ok=True)
+        path = self._get_send_umo_path()
+        data = {"umo": umo.strip(), "auto_send": auto_send}
+        async with aiofiles.open(path, "w", encoding="utf-8") as f:
+            await f.write(json.dumps(data, ensure_ascii=False, indent=2))
+
+    async def _auto_send_video(self, video_id: str, video_path: Path):
+        config = await self.load_send_umo()
+        umo = config.get("umo", "").strip()
+        if not umo:
+            logger.info("[VideoService] 未配置发送会话，跳过自动发送 video_id=%s", video_id)
+            return
+        await self._send_video_to_conversation(umo, video_path, video_id)
+
+    async def send_video_by_id(self, video_id: str) -> bool:
+        self._ensure_dirs()
+        await self.plugin._ensure_db()
+        video = await self.plugin.db.get_video(video_id)
+        if not video:
+            raise ValueError(f"未找到视频: {video_id}")
+        if video.get("status") != "done":
+            raise ValueError("只有已完成的视频才能发送")
+        video_path_str = video.get("video_path", "")
+        if not video_path_str:
+            raise ValueError("视频文件路径为空")
+        video_path = self.videos_dir / video_path_str
+        if not video_path.exists():
+            raise ValueError("视频文件不存在")
+        config = await self.load_send_umo()
+        umo = config.get("umo", "").strip()
+        if not umo:
+            raise ValueError("未配置发送会话，请先在视频设置中配置")
+        await self._send_video_to_conversation(umo, video_path, video_id)
+        return True
+
+    async def _send_video_to_conversation(self, umo: str, video_path: Path, video_id: str = ""):
+        from astrbot.api.message_components import Video as VideoComp
+        from astrbot.api.event import MessageChain
+
+        video_comp = VideoComp.fromFileSystem(path=str(video_path))
+        chain = MessageChain(chain=[video_comp])
+        success = await self.plugin.context.send_message(umo, chain)
+        if success:
+            logger.info("[VideoService] 视频已发送到会话 video_id=%s umo=%s", video_id, umo[:50])
+        else:
+            logger.warning("[VideoService] 视频发送失败（平台不支持或会话无效） video_id=%s umo=%s", video_id, umo[:50])
+        return success
 
     @staticmethod
     def _extract_completion(resp) -> str:

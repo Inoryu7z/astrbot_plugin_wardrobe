@@ -415,6 +415,8 @@ class WardrobeDatabase:
             order_clause = "CASE favorite WHEN 'favorite' THEN 1 WHEN 'like' THEN 2 ELSE 3 END, created_at DESC, id DESC"
         elif sort_by == "last_used_at":
             order_clause = "COALESCE(last_used_at, '') DESC, created_at DESC, id DESC"
+        elif sort_by == "random":
+            order_clause = "RANDOM()"
         else:
             order_clause = "created_at DESC, id DESC"
 
@@ -804,6 +806,8 @@ class WardrobeDatabase:
             order_clause = "CASE favorite WHEN 'favorite' THEN 1 WHEN 'like' THEN 2 ELSE 3 END, created_at DESC, id DESC"
         elif sort_by == "last_used_at":
             order_clause = "COALESCE(last_used_at, '') DESC, created_at DESC, id DESC"
+        elif sort_by == "random":
+            order_clause = "RANDOM()"
         else:
             order_clause = "created_at DESC, id DESC"
         async with aiosqlite.connect(self.db_path) as db:
