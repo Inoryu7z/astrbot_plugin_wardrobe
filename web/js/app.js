@@ -1930,8 +1930,9 @@
   function recalculateAllSpans(){
     const grid=$('#imageGrid');
     if(!grid)return;
+    if(window.innerWidth<=768)return;
     const cols=getGridColumnCount();
-    const gap=cols===1?0:window.innerWidth<=768?8:16;
+    const gap=16;
     const gridWidth=grid.clientWidth;
     const cardWidth=(gridWidth-(cols-1)*gap)/cols;
     if(cardWidth<=0)return;
