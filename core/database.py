@@ -79,7 +79,7 @@ CREATE INDEX IF NOT EXISTS idx_videos_persona ON videos(persona);
 """
 
 _UPDATABLE_VIDEO_FIELDS = frozenset({
-    "video_path", "provider_id", "tier", "user_thoughts",
+    "video_path", "video_url", "provider_id", "tier", "user_thoughts",
     "generated_prompt", "persona", "status", "error_message",
 })
 
@@ -127,6 +127,13 @@ class WardrobeDatabase:
                         pass
                 await db.executescript(_CREATE_INDEX_SQL)
                 await db.executescript(_CREATE_VIDEOS_TABLE_SQL)
+                for col, default in [
+                    ("video_url", "TEXT DEFAULT ''"),
+                ]:
+                    try:
+                        await db.execute(f"ALTER TABLE videos ADD COLUMN {col} {default}")
+                    except Exception:
+                        pass
                 await db.commit()
         logger.info("[Wardrobe] 数据库初始化完成")
 

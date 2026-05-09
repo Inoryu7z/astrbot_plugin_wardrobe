@@ -184,6 +184,7 @@ class VideoService:
             await self.plugin.db.update_video(
                 video_id,
                 video_path=video_filename,
+                video_url=video_url,
                 provider_id=provider_id,
                 status="done",
             )
@@ -192,7 +193,7 @@ class VideoService:
 
             if auto_send:
                 try:
-                    await self._auto_send_video(video_id, video_path)
+                    await self._auto_send_video(video_id, video_path, video_url)
                 except Exception as send_err:
                     logger.warning("[VideoService] 视频自动发送失败 video_id=%s error=%s", video_id, send_err)
 
@@ -681,13 +682,13 @@ class VideoService:
         async with aiofiles.open(path, "w", encoding="utf-8") as f:
             await f.write(json.dumps(data, ensure_ascii=False, indent=2))
 
-    async def _auto_send_video(self, video_id: str, video_path: Path):
+    async def _auto_send_video(self, video_id: str, video_path: Path, video_url: str = ""):
         config = await self.load_send_umo()
         umo = config.get("umo", "").strip()
         if not umo:
             logger.info("[VideoService] 未配置发送会话，跳过自动发送 video_id=%s", video_id)
             return
-        await self._send_video_to_conversation(umo, video_path, video_id)
+        await self._send_video_to_conversation(umo, video_path, video_id, video_url)
 
     async def send_video_by_id(self, video_id: str) -> bool:
         self._ensure_dirs()
@@ -707,10 +708,11 @@ class VideoService:
         umo = config.get("umo", "").strip()
         if not umo:
             raise ValueError("未配置发送会话，请先在视频设置中配置")
-        await self._send_video_to_conversation(umo, video_path, video_id)
+        video_url = video.get("video_url", "")
+        await self._send_video_to_conversation(umo, video_path, video_id, video_url)
         return True
 
-    async def _send_video_to_conversation(self, umo: str, video_path: Path, video_id: str = ""):
+    async def _send_video_to_conversation(self, umo: str, video_path: Path, video_id: str = "", video_url: str = ""):
         from astrbot.api.message_components import Video as VideoComp
         from astrbot.api.event import MessageChain
 
@@ -728,20 +730,42 @@ class VideoService:
         if not success and send_error is not None:
             error_str = str(send_error).lower()
             if "enoent" in error_str or "no such file" in error_str:
-                logger.info(
-                    "[VideoService] 协议端无法访问本地文件，尝试 base64 发送 video_id=%s "
-                    "（建议配置 AstrBot 的 callback_api_base 以避免此问题）", video_id,
-                )
-                try:
-                    success = await self._send_video_as_base64(umo, video_path, video_id)
-                except Exception as e2:
-                    logger.warning("[VideoService] base64 发送也失败 video_id=%s error=%s", video_id, e2)
+                if video_url:
+                    logger.info(
+                        "[VideoService] 协议端无法访问本地文件，尝试 URL 发送 video_id=%s", video_id,
+                    )
+                    try:
+                        success = await self._send_video_as_url(umo, video_url, video_id)
+                    except Exception as e_url:
+                        logger.warning("[VideoService] URL 发送失败 video_id=%s error=%s", video_id, e_url)
+
+                if not success:
+                    logger.info(
+                        "[VideoService] 尝试 base64 发送 video_id=%s "
+                        "（建议配置 AstrBot 的 callback_api_base 以避免此问题）", video_id,
+                    )
+                    try:
+                        success = await self._send_video_as_base64(umo, video_path, video_id)
+                    except Exception as e2:
+                        logger.warning("[VideoService] base64 发送也失败 video_id=%s error=%s", video_id, e2)
 
         if success:
             logger.info("[VideoService] 视频已发送到会话 video_id=%s umo=%s", video_id, umo[:50])
         else:
             logger.warning("[VideoService] 视频发送失败（平台不支持或会话无效） video_id=%s umo=%s", video_id, umo[:50])
         return success
+
+    async def _send_video_as_url(self, umo: str, video_url: str, video_id: str = "") -> bool:
+        from astrbot.api.message_components import Video as VideoComp
+        from astrbot.api.event import MessageChain
+
+        if not video_url or not video_url.startswith("http"):
+            raise ValueError("视频 URL 为空或非 HTTP 链接")
+
+        video_comp = VideoComp.fromURL(video_url)
+        chain = MessageChain(chain=[video_comp])
+        result = await self.plugin.context.send_message(umo, chain)
+        return result is not None
 
     async def _send_video_as_base64(self, umo: str, video_path: Path, video_id: str = "") -> bool:
         from astrbot.api.message_components import Video as VideoComp
