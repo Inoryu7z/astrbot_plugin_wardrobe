@@ -716,17 +716,65 @@ class VideoService:
 
         video_comp = VideoComp(file=f"file://{str(video_path)}", path=str(video_path))
         chain = MessageChain(chain=[video_comp])
+        send_error = None
         try:
             result = await self.plugin.context.send_message(umo, chain)
             success = result is not None
         except Exception as e:
             logger.warning("[VideoService] 视频发送异常 video_id=%s error=%s", video_id, e)
+            send_error = e
             success = False
+
+        if not success and send_error is not None:
+            error_str = str(send_error).lower()
+            if "enoent" in error_str or "no such file" in error_str:
+                logger.info(
+                    "[VideoService] 协议端无法访问本地文件，尝试 base64 发送 video_id=%s "
+                    "（建议配置 AstrBot 的 callback_api_base 以避免此问题）", video_id,
+                )
+                try:
+                    success = await self._send_video_as_base64(umo, video_path, video_id)
+                except Exception as e2:
+                    logger.warning("[VideoService] base64 发送也失败 video_id=%s error=%s", video_id, e2)
+
         if success:
             logger.info("[VideoService] 视频已发送到会话 video_id=%s umo=%s", video_id, umo[:50])
         else:
             logger.warning("[VideoService] 视频发送失败（平台不支持或会话无效） video_id=%s umo=%s", video_id, umo[:50])
         return success
+
+    async def _send_video_as_base64(self, umo: str, video_path: Path, video_id: str = "") -> bool:
+        from astrbot.api.message_components import Video as VideoComp
+        from astrbot.api.event import MessageChain
+
+        if not video_path.exists():
+            raise ValueError("视频文件不存在")
+
+        file_size = video_path.stat().st_size
+        max_size = 50 * 1024 * 1024
+        if file_size > max_size:
+            raise ValueError(
+                f"视频文件过大({file_size / 1024 / 1024:.1f}MB)，"
+                f"无法使用 base64 发送(上限50MB)，请配置 callback_api_base"
+            )
+
+        import base64
+
+        def _read_and_encode():
+            with open(video_path, "rb") as f:
+                data = f.read()
+            return base64.b64encode(data).decode("ascii")
+
+        b64_data = await asyncio.to_thread(_read_and_encode)
+        logger.info(
+            "[VideoService] base64 编码完成 video_id=%s size=%.1fMB b64_len=%d",
+            video_id, file_size / 1024 / 1024, len(b64_data),
+        )
+
+        video_comp = VideoComp(file=f"base64://{b64_data}")
+        chain = MessageChain(chain=[video_comp])
+        result = await self.plugin.context.send_message(umo, chain)
+        return result is not None
 
     @staticmethod
     def _extract_completion(resp) -> str:
