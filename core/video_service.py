@@ -423,14 +423,19 @@ class VideoService:
 
     async def _download_video(self, url: str, dest: Path):
         async with httpx.AsyncClient(timeout=_DOWNLOAD_TIMEOUT, follow_redirects=True) as client:
-            resp = await client.get(url)
-            if resp.status_code != 200:
-                raise ValueError(f"下载视频失败 HTTP {resp.status_code}")
-            content = resp.content
-            if len(content) < 12 or content[4:8] != b'ftyp':
-                raise ValueError("下载的文件不是有效的 MP4 格式")
-            async with aiofiles.open(dest, "wb") as f:
-                await f.write(content)
+            async with client.stream("GET", url) as resp:
+                if resp.status_code != 200:
+                    raise ValueError(f"下载视频失败 HTTP {resp.status_code}")
+                first_chunk = None
+                async with aiofiles.open(dest, "wb") as f:
+                    async for chunk in resp.aiter_bytes(chunk_size=65536):
+                        if first_chunk is None:
+                            first_chunk = chunk
+                            if len(chunk) < 12 or chunk[4:8] != b'ftyp':
+                                raise ValueError("下载的文件不是有效的 MP4 格式")
+                        await f.write(chunk)
+                if first_chunk is None:
+                    raise ValueError("下载的文件为空")
 
         await self._faststart_if_needed(dest)
 
@@ -458,9 +463,10 @@ class VideoService:
 
     @staticmethod
     def _check_moov_position(path: Path) -> bool:
+        _SKIP_ATOMS = {b'free', b'skip', b'wide', b'mdat'}
         with open(path, "rb") as f:
             offset = 0
-            seen_non_ftyp_before_moov = False
+            seen_significant_before_moov = False
             while True:
                 f.seek(offset)
                 header = f.read(8)
@@ -478,9 +484,9 @@ class VideoService:
                 if size < 8:
                     break
                 if atom_type == b'moov':
-                    return seen_non_ftyp_before_moov
-                if atom_type != b'ftyp':
-                    seen_non_ftyp_before_moov = True
+                    return seen_significant_before_moov
+                if atom_type != b'ftyp' and atom_type not in _SKIP_ATOMS:
+                    seen_significant_before_moov = True
                 offset += size
         return True
 
@@ -708,7 +714,7 @@ class VideoService:
         from astrbot.api.message_components import Video as VideoComp
         from astrbot.api.event import MessageChain
 
-        video_comp = VideoComp.fromFileSystem(path=str(video_path))
+        video_comp = VideoComp(file=f"file://{str(video_path)}", path=str(video_path))
         chain = MessageChain(chain=[video_comp])
         try:
             result = await self.plugin.context.send_message(umo, chain)
