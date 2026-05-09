@@ -505,6 +505,77 @@ class VideoService:
             raise RuntimeError(f"ffmpeg exit {result.returncode}: {result.stderr.decode(errors='replace')[:300]}")
         tmp.replace(path)
 
+    _CONTAINER_ATOMS = frozenset({
+        b'moov', b'trak', b'mdia', b'minf', b'stbl',
+        b'edts', b'udta', b'meta', b'moof', b'traf',
+        b'mvex', b'sinf', b'schi', b'rinf',
+    })
+
+    @staticmethod
+    def _fix_chunk_offsets(moov_data: bytes, delta: int) -> bytes:
+        buf = bytearray(moov_data)
+        VideoService._fix_chunk_offsets_recursive(buf, 8, len(moov_data), delta)
+        return bytes(buf)
+
+    @staticmethod
+    def _fix_chunk_offsets_recursive(buf: bytearray, start: int, end: int, delta: int):
+        offset = start
+        while offset < end:
+            if offset + 8 > end:
+                break
+            size = int.from_bytes(buf[offset:offset + 4], "big")
+            atom_type = buf[offset + 4:offset + 8]
+            header_size = 8
+            if size == 1:
+                if offset + 16 > end:
+                    break
+                size = int.from_bytes(buf[offset + 8:offset + 16], "big")
+                header_size = 16
+            elif size == 0:
+                size = end - offset
+            if size < 8 or offset + size > end:
+                break
+            if atom_type == b'stco':
+                VideoService._update_stco(buf, offset, delta)
+            elif atom_type == b'co64':
+                VideoService._update_co64(buf, offset, delta)
+            elif atom_type in VideoService._CONTAINER_ATOMS:
+                child_start = offset + header_size
+                if atom_type == b'meta':
+                    child_start = offset + 12
+                VideoService._fix_chunk_offsets_recursive(buf, child_start, offset + size, delta)
+            offset += size
+
+    @staticmethod
+    def _update_stco(buf: bytearray, offset: int, delta: int):
+        entry_count_pos = offset + 12
+        if entry_count_pos + 4 > len(buf):
+            return
+        entry_count = int.from_bytes(buf[entry_count_pos:entry_count_pos + 4], "big")
+        offsets_start = entry_count_pos + 4
+        for i in range(entry_count):
+            pos = offsets_start + i * 4
+            if pos + 4 > len(buf):
+                break
+            old_val = int.from_bytes(buf[pos:pos + 4], "big")
+            new_val = old_val + delta
+            buf[pos:pos + 4] = new_val.to_bytes(4, "big")
+
+    @staticmethod
+    def _update_co64(buf: bytearray, offset: int, delta: int):
+        entry_count_pos = offset + 12
+        if entry_count_pos + 4 > len(buf):
+            return
+        entry_count = int.from_bytes(buf[entry_count_pos:entry_count_pos + 4], "big")
+        offsets_start = entry_count_pos + 4
+        for i in range(entry_count):
+            pos = offsets_start + i * 8
+            if pos + 8 > len(buf):
+                break
+            old_val = int.from_bytes(buf[pos:pos + 8], "big")
+            new_val = old_val + delta
+            buf[pos:pos + 8] = new_val.to_bytes(8, "big")
+
     @staticmethod
     def _python_faststart(path: Path):
         with open(path, "rb") as f:
@@ -545,6 +616,8 @@ class VideoService:
 
         moov_off, moov_size = atoms[moov_idx][1], atoms[moov_idx][2]
         moov_data = data[moov_off:moov_off + moov_size]
+
+        moov_data = VideoService._fix_chunk_offsets(moov_data, moov_size)
 
         other_parts = []
         for i, (atype, aoff, asize) in enumerate(atoms):
@@ -716,43 +789,78 @@ class VideoService:
         from astrbot.api.message_components import Video as VideoComp
         from astrbot.api.event import MessageChain
 
-        video_comp = VideoComp(file=f"file://{str(video_path)}", path=str(video_path))
+        _SEND_TIMEOUT = 120
+
+        video_comp = VideoComp.fromFileSystem(str(video_path))
         chain = MessageChain(chain=[video_comp])
         send_error = None
         try:
-            result = await self.plugin.context.send_message(umo, chain)
+            logger.info("[VideoService] 尝试文件路径发送 video_id=%s path=%s", video_id, video_path.name)
+            result = await asyncio.wait_for(
+                self.plugin.context.send_message(umo, chain),
+                timeout=_SEND_TIMEOUT,
+            )
             success = result is not None
+        except asyncio.TimeoutError:
+            logger.warning("[VideoService] 文件路径发送超时 video_id=%s timeout=%ds", video_id, _SEND_TIMEOUT)
+            send_error = TimeoutError(f"发送超时({_SEND_TIMEOUT}s)")
+            success = False
         except Exception as e:
-            logger.warning("[VideoService] 视频发送异常 video_id=%s error=%s", video_id, e)
+            logger.warning("[VideoService] 文件路径发送异常 video_id=%s error_type=%s error=%s", video_id, type(e).__name__, e)
             send_error = e
             success = False
 
-        if not success and send_error is not None:
-            error_str = str(send_error).lower()
-            if "enoent" in error_str or "no such file" in error_str:
-                if video_url:
-                    logger.info(
-                        "[VideoService] 协议端无法访问本地文件，尝试 URL 发送 video_id=%s", video_id,
-                    )
-                    try:
-                        success = await self._send_video_as_url(umo, video_url, video_id)
-                    except Exception as e_url:
-                        logger.warning("[VideoService] URL 发送失败 video_id=%s error=%s", video_id, e_url)
+        if not success and video_url:
+            logger.info(
+                "[VideoService] 文件路径发送失败（%s），尝试 URL 发送 video_id=%s",
+                type(send_error).__name__, video_id,
+            )
+            try:
+                success = await asyncio.wait_for(
+                    self._send_video_as_url(umo, video_url, video_id),
+                    timeout=_SEND_TIMEOUT,
+                )
+            except asyncio.TimeoutError:
+                logger.warning("[VideoService] URL 发送超时 video_id=%s", video_id)
+            except Exception as e_url:
+                logger.warning("[VideoService] URL 发送失败 video_id=%s error=%s", video_id, e_url)
 
-                if not success:
-                    logger.info(
-                        "[VideoService] 尝试 base64 发送 video_id=%s "
-                        "（建议配置 AstrBot 的 callback_api_base 以避免此问题）", video_id,
+        if not success:
+            callback_base = self._get_callback_api_base()
+            if callback_base:
+                logger.info(
+                    "[VideoService] callback_api_base 已配置，跳过 base64 发送（该模式下 base64 不可用）video_id=%s",
+                    video_id,
+                )
+            else:
+                logger.info("[VideoService] 尝试 base64 发送 video_id=%s", video_id)
+                try:
+                    success = await asyncio.wait_for(
+                        self._send_video_as_base64(umo, video_path, video_id),
+                        timeout=_SEND_TIMEOUT,
                     )
-                    try:
-                        success = await self._send_video_as_base64(umo, video_path, video_id)
-                    except Exception as e2:
-                        logger.warning("[VideoService] base64 发送也失败 video_id=%s error=%s", video_id, e2)
+                except asyncio.TimeoutError:
+                    logger.warning("[VideoService] base64 发送超时 video_id=%s", video_id)
+                except Exception as e2:
+                    logger.warning("[VideoService] base64 发送失败 video_id=%s error=%s", video_id, e2)
+
+        if not success and video_url:
+            logger.info("[VideoService] 尝试纯文本 URL 兜底 video_id=%s", video_id)
+            try:
+                from astrbot.api.message_components import Plain
+                plain_chain = MessageChain(chain=[Plain(text=video_url)])
+                await asyncio.wait_for(
+                    self.plugin.context.send_message(umo, plain_chain),
+                    timeout=30,
+                )
+                logger.info("[VideoService] 纯文本 URL 已发送 video_id=%s", video_id)
+            except Exception as e_plain:
+                logger.warning("[VideoService] 纯文本 URL 发送也失败 video_id=%s error=%s", video_id, e_plain)
 
         if success:
             logger.info("[VideoService] 视频已发送到会话 video_id=%s umo=%s", video_id, umo[:50])
         else:
-            logger.warning("[VideoService] 视频发送失败（平台不支持或会话无效） video_id=%s umo=%s", video_id, umo[:50])
+            logger.warning("[VideoService] 视频发送失败（所有方式均失败） video_id=%s umo=%s", video_id, umo[:50])
         return success
 
     async def _send_video_as_url(self, umo: str, video_url: str, video_id: str = "") -> bool:
@@ -799,6 +907,14 @@ class VideoService:
         chain = MessageChain(chain=[video_comp])
         result = await self.plugin.context.send_message(umo, chain)
         return result is not None
+
+    def _get_callback_api_base(self) -> str:
+        try:
+            from astrbot.core import astrbot_config
+            return str(astrbot_config.get("callback_api_base", "") or "").strip()
+        except Exception:
+            pass
+        return ""
 
     @staticmethod
     def _extract_completion(resp) -> str:
