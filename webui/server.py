@@ -318,6 +318,8 @@ class WardrobeWebServer:
             deleted = await self.plugin.db.delete_image(image_id)
             if deleted and image.get("image_path"):
                 await self.plugin.store.delete_image(image["image_path"])
+            if deleted:
+                await self.plugin._cleanup_videos_for_image(image_id)
             return jsonify({"success": bool(deleted)})
 
         @app.route("/api/images/<image_id>", methods=["PUT"])
@@ -503,6 +505,7 @@ class WardrobeWebServer:
                                 await self.plugin.vector_searcher.remove_image(image_id)
                             except Exception:
                                 pass
+                        await self.plugin._cleanup_videos_for_image(image_id)
             return jsonify({"success": True, "deleted": deleted_count})
 
         @app.route("/api/images/upload", methods=["POST"])
@@ -718,8 +721,9 @@ class WardrobeWebServer:
         @app.route("/api/backup/export")
         async def api_backup_export():
             try:
-                buf, total_records, added_files = await self.plugin.build_backup_zip()
-                logger.info("[Wardrobe] 备份导出: %d条记录, %d个图片文件", total_records, added_files)
+                include_videos = request.args.get("include_videos", "") == "1"
+                buf, total_records, added_files = await self.plugin.build_backup_zip(include_videos=include_videos)
+                logger.info("[Wardrobe] 备份导出: %d条记录, %d个图片文件, 包含视频=%s", total_records, added_files, include_videos)
 
                 return await send_file(
                     buf,
@@ -796,12 +800,68 @@ class WardrobeWebServer:
                     except Exception as e:
                         logger.warning("[Wardrobe] 备份恢复后向量索引重建失败: %s", e)
 
-                logger.info("[Wardrobe] 备份恢复: 导入%d条记录, 复制%d个图片文件", imported, copied_files)
+                imported_videos = 0
+                copied_videos = 0
+                videos_path = Path(tmp_dir) / "videos.json"
+                if videos_path.exists():
+                    try:
+                        def _read_videos():
+                            with open(str(videos_path), "r", encoding="utf-8") as f:
+                                return json.load(f)
+                        video_records = await asyncio.to_thread(_read_videos)
+                        if isinstance(video_records, list):
+                            videos_src = Path(tmp_dir) / "videos"
+                            self.plugin.video_service._ensure_dirs()
+                            videos_dst = self.plugin.video_service.videos_dir
+                            if videos_src.exists():
+                                def _copy_videos():
+                                    nonlocal copied_videos
+                                    for vrec in video_records:
+                                        vfilename = vrec.get("video_path", "")
+                                        if not vfilename:
+                                            continue
+                                        src = videos_src / vfilename
+                                        dst = videos_dst / vfilename
+                                        if src.exists() and not dst.exists():
+                                            shutil.copy2(str(src), str(dst))
+                                            copied_videos += 1
+                                await asyncio.to_thread(_copy_videos)
+                            imported_videos = await self.plugin.db.import_video_records(video_records, skip_existing=True)
+                    except Exception as e:
+                        logger.warning("[Wardrobe] 备份恢复视频数据失败: %s", e)
+
+                video_settings_path = Path(tmp_dir) / "video_settings.json"
+                if video_settings_path.exists():
+                    try:
+                        def _read_video_settings():
+                            with open(str(video_settings_path), "r", encoding="utf-8") as f:
+                                return json.load(f)
+                        vsettings = await asyncio.to_thread(_read_video_settings)
+                        if isinstance(vsettings, dict):
+                            if "video_send_umo" in vsettings:
+                                try:
+                                    data = json.loads(vsettings["video_send_umo"])
+                                    umo = data.get("umo", "")
+                                    auto_send = data.get("auto_send", False)
+                                    await self.plugin.video_service.save_send_umo(umo, auto_send)
+                                except Exception:
+                                    pass
+                            if "video_system_prompt" in vsettings:
+                                try:
+                                    await self.plugin.video_service.save_system_prompt(vsettings["video_system_prompt"])
+                                except Exception:
+                                    pass
+                    except Exception as e:
+                        logger.warning("[Wardrobe] 备份恢复视频设置失败: %s", e)
+
+                logger.info("[Wardrobe] 备份恢复: 导入%d条图片记录, 复制%d个图片文件, 导入%d条视频记录, 复制%d个视频文件", imported, copied_files, imported_videos, copied_videos)
                 return jsonify({
                     "success": True,
                     "imported": imported,
                     "copied_files": copied_files,
                     "total_in_backup": len(records),
+                    "imported_videos": imported_videos,
+                    "copied_videos": copied_videos,
                 })
             except Exception as e:
                 logger.error("[Wardrobe] 备份恢复失败: %s", e, exc_info=True)
@@ -875,6 +935,14 @@ class WardrobeWebServer:
             if not video_enabled:
                 return jsonify({"error": "图片转视频功能未启用"}), 400
 
+            prompt_provider_id = str(self.plugin._cfg("video_prompt_provider_id", "") or "").strip()
+            api_base = str(self.plugin._cfg("video_prompt_base_url", "") or "").strip()
+            api_key = str(self.plugin._cfg("video_prompt_api_key", "") or "").strip()
+            api_model = str(self.plugin._cfg("video_prompt_model", "") or "").strip()
+            has_prompt_config = bool(prompt_provider_id) or (api_base and api_key and api_model)
+            if not has_prompt_config:
+                return jsonify({"error": "未配置视频提示词生成模型，请在插件设置中配置"}), 400
+
             try:
                 video_id = await self.plugin.video_service.generate_video(
                     image_id=image_id,
@@ -944,7 +1012,7 @@ class WardrobeWebServer:
             user_thoughts = video.get("user_thoughts", "")
             backend_override = video.get("provider_id", "")
             persona = video.get("persona", "")
-            await self.plugin.db.update_video(video_id, status="generating", error_message=None)
+            await self.plugin.db.update_video(video_id, status="generating", error_message="")
             image_description = self.plugin.video_service._build_image_description(image)
             old_prompt = (video.get("generated_prompt") or "").strip()
             umo_config = await self.plugin.video_service.load_send_umo()
@@ -976,7 +1044,10 @@ class WardrobeWebServer:
             if not video_file.exists():
                 return jsonify({"error": "视频文件不存在"}), 404
 
-            return await send_file(str(video_file), mimetype='video/mp4')
+            resp = await send_file(str(video_file), mimetype='video/mp4')
+            resp.headers['Cache-Control'] = 'public, max-age=604800'
+            resp.headers['ETag'] = f'"{video_id}"'
+            return resp
 
         @app.route("/api/video-settings/prompt")
         async def api_video_prompt_get():

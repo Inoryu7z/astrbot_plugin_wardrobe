@@ -726,6 +726,7 @@ class WardrobeDatabase:
         *,
         category: Optional[str] = None,
         shot_size: Optional[str] = None,
+        persona: Optional[str] = None,
         favorite: Optional[str] = None,
         ref_strength: Optional[str] = None,
         sort_by: str = "created_at",
@@ -740,6 +741,12 @@ class WardrobeDatabase:
         if shot_size:
             conditions.append("shot_size = ?")
             params.append(shot_size)
+        if persona is not None:
+            if persona == "":
+                conditions.append("(persona = '' OR persona IS NULL)")
+            else:
+                conditions.append("persona = ?")
+                params.append(persona)
         if favorite and favorite in ("favorite", "like"):
             conditions.append("favorite = ?")
             params.append(favorite)
@@ -1116,3 +1123,50 @@ class WardrobeDatabase:
                 )
                 await db.commit()
         return True
+
+    async def get_all_video_records(self) -> list[dict[str, Any]]:
+        async with aiosqlite.connect(self.db_path) as db:
+            db.row_factory = aiosqlite.Row
+            async with db.execute("SELECT * FROM videos") as cursor:
+                rows = await cursor.fetchall()
+                return [dict(row) for row in rows]
+
+    async def import_video_records(self, records: list[dict[str, Any]], skip_existing: bool = True) -> int:
+        existing_ids = set()
+        if skip_existing:
+            async with aiosqlite.connect(self.db_path) as db:
+                async with db.execute("SELECT id FROM videos") as cursor:
+                    async for row in cursor:
+                        existing_ids.add(row[0])
+
+        imported = 0
+        async with self._lock:
+            async with aiosqlite.connect(self.db_path) as db:
+                for rec in records:
+                    if skip_existing and rec.get("id") in existing_ids:
+                        continue
+                    try:
+                        await db.execute(
+                            """INSERT INTO videos (
+                                id, source_image_id, video_path, provider_id, tier,
+                                user_thoughts, generated_prompt, persona, status, error_message, created_at
+                            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+                            (
+                                rec.get("id", str(uuid.uuid4())),
+                                rec.get("source_image_id", ""),
+                                rec.get("video_path", ""),
+                                rec.get("provider_id", ""),
+                                rec.get("tier", "normal"),
+                                rec.get("user_thoughts", ""),
+                                rec.get("generated_prompt", ""),
+                                rec.get("persona", ""),
+                                rec.get("status", "pending"),
+                                rec.get("error_message", ""),
+                                rec.get("created_at", datetime.now(timezone.utc).isoformat()),
+                            ),
+                        )
+                        imported += 1
+                    except Exception as e:
+                        logger.warning("[Wardrobe] 导入视频记录跳过: id=%s error=%s", rec.get("id"), e)
+                await db.commit()
+        return imported

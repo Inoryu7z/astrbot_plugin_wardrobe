@@ -42,7 +42,7 @@ _AIIMG_GENERATE_TOOLS = frozenset({"aiimg_generate"})
     "astrbot_plugin_wardrobe",
     "Inoryu7z",
     "图片衣柜管理插件，支持智能分类、语义检索和参考图接口",
-    "2.6.1",
+    "2.6.2",
 )
 class WardrobePlugin(Star):
     def __init__(self, context: Context, config: AstrBotConfig = None):
@@ -439,22 +439,47 @@ class WardrobePlugin(Star):
         task.add_done_callback(self._bg_tasks.discard)
         return task
 
-    async def build_backup_zip(self) -> tuple[io.BytesIO, int, int]:
+    async def build_backup_zip(self, include_videos: bool = False) -> tuple[io.BytesIO, int, int]:
         await self._ensure_db()
         records = await self.db.get_all_records()
         images_dir = self.store.images_dir
         total_records = len(records)
 
+        video_records = []
+        videos_dir = None
+        if include_videos:
+            video_records = await self.db.get_all_video_records()
+            self.video_service._ensure_dirs()
+            videos_dir = self.video_service.videos_dir
+
+        video_settings = {}
+        umo_path = self.video_service._get_send_umo_path()
+        if umo_path.exists():
+            try:
+                video_settings["video_send_umo"] = umo_path.read_text(encoding="utf-8")
+            except Exception:
+                pass
+        prompt_path = self.video_service.get_system_prompt_path()
+        if prompt_path.exists():
+            try:
+                video_settings["video_system_prompt"] = prompt_path.read_text(encoding="utf-8")
+            except Exception:
+                pass
+
         def _build():
             buf = io.BytesIO()
             with zipfile.ZipFile(buf, "w", zipfile.ZIP_DEFLATED) as zf:
                 metadata = json.dumps({
-                    "version": "1.0",
+                    "version": "2.0",
                     "export_time": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
                     "total_records": total_records,
+                    "total_videos": len(video_records),
+                    "include_video_files": include_videos,
                 }, ensure_ascii=False)
                 zf.writestr("backup_metadata.json", metadata)
                 zf.writestr("records.json", json.dumps(records, ensure_ascii=False, indent=2))
+                if video_records:
+                    zf.writestr("videos.json", json.dumps(video_records, ensure_ascii=False, indent=2))
                 added_files = 0
                 for rec in records:
                     img_filename = rec.get("image_path", "")
@@ -464,10 +489,22 @@ class WardrobePlugin(Star):
                     if img_path.exists():
                         zf.write(str(img_path), f"images/{img_filename}")
                         added_files += 1
+                added_videos = 0
+                if include_videos and videos_dir:
+                    for vrec in video_records:
+                        vfilename = vrec.get("video_path", "")
+                        if not vfilename:
+                            continue
+                        vpath = videos_dir / vfilename
+                        if vpath.exists():
+                            zf.write(str(vpath), f"videos/{vfilename}")
+                            added_videos += 1
+                if video_settings:
+                    zf.writestr("video_settings.json", json.dumps(video_settings, ensure_ascii=False, indent=2))
             buf.seek(0)
-            return buf, added_files
+            return buf, added_files, added_videos
 
-        buf, added_files = await asyncio.to_thread(_build)
+        buf, added_files, added_videos = await asyncio.to_thread(_build)
         return buf, total_records, added_files
 
     async def _auto_backup_loop(self):
@@ -963,27 +1000,72 @@ class WardrobePlugin(Star):
     async def _save_video_to_wardrobe(self, video_src: str, event: AstrMessageEvent):
         try:
             await self._ensure_db()
-            video_bytes = await self._download_or_read_image(video_src)
-            if not video_bytes:
-                logger.warning("[Wardrobe] 自动存视频失败：无法获取视频数据 src=%s", video_src[:80])
-                return
-
-            if len(video_bytes) < 12 or video_bytes[4:8] != b'ftyp':
-                logger.debug("[Wardrobe] 自动存视频跳过：非有效 MP4 格式 src=%s", video_src[:80])
-                return
-
-            file_hash = hashlib.md5(video_bytes).hexdigest()
             self.video_service._ensure_dirs()
 
-            video_filename = f"auto_{file_hash}.mp4"
-            video_path = self.video_service.videos_dir / video_filename
-            if video_path.exists():
-                logger.info("[Wardrobe] 自动存视频跳过：文件已存在 hash=%s", file_hash)
+            video_src = str(video_src or "").strip()
+            if not video_src:
                 return
 
-            import aiofiles
-            async with aiofiles.open(video_path, "wb") as f:
-                await f.write(video_bytes)
+            video_filename = None
+            video_path = None
+
+            if video_src.startswith(("http://", "https://")):
+                import httpx
+                tmp_path = self.video_service.videos_dir / f"_tmp_{uuid.uuid4().hex}.mp4"
+                try:
+                    async with httpx.AsyncClient(timeout=300.0, follow_redirects=True) as client:
+                        async with client.stream("GET", video_src) as resp:
+                            if resp.status_code != 200:
+                                logger.warning("[Wardrobe] 自动存视频下载失败 HTTP %d src=%s", resp.status_code, video_src[:80])
+                                return
+                            first_chunk = None
+                            file_hash = hashlib.md5()
+                            import aiofiles
+                            async with aiofiles.open(tmp_path, "wb") as f:
+                                async for chunk in resp.aiter_bytes(chunk_size=65536):
+                                    if first_chunk is None:
+                                        first_chunk = chunk
+                                        if len(chunk) < 12 or chunk[4:8] != b'ftyp':
+                                            logger.debug("[Wardrobe] 自动存视频跳过：非有效 MP4 格式 src=%s", video_src[:80])
+                                            tmp_path.unlink(missing_ok=True)
+                                            return
+                                    file_hash.update(chunk)
+                                    await f.write(chunk)
+                            if first_chunk is None:
+                                logger.warning("[Wardrobe] 自动存视频失败：下载为空 src=%s", video_src[:80])
+                                tmp_path.unlink(missing_ok=True)
+                                return
+
+                    final_hash = file_hash.hexdigest()
+                    video_filename = f"auto_{final_hash}.mp4"
+                    video_path = self.video_service.videos_dir / video_filename
+                    if video_path.exists():
+                        logger.info("[Wardrobe] 自动存视频跳过：文件已存在 hash=%s", final_hash)
+                        tmp_path.unlink(missing_ok=True)
+                        return
+                    tmp_path.rename(video_path)
+                except Exception as e:
+                    if tmp_path.exists():
+                        tmp_path.unlink(missing_ok=True)
+                    logger.warning("[Wardrobe] 自动存视频下载异常: %s src=%s", e, video_src[:80])
+                    return
+            else:
+                video_bytes = await self._download_or_read_image(video_src)
+                if not video_bytes:
+                    logger.warning("[Wardrobe] 自动存视频失败：无法获取视频数据 src=%s", video_src[:80])
+                    return
+                if len(video_bytes) < 12 or video_bytes[4:8] != b'ftyp':
+                    logger.debug("[Wardrobe] 自动存视频跳过：非有效 MP4 格式 src=%s", video_src[:80])
+                    return
+                file_hash_val = hashlib.md5(video_bytes).hexdigest()
+                video_filename = f"auto_{file_hash_val}.mp4"
+                video_path = self.video_service.videos_dir / video_filename
+                if video_path.exists():
+                    logger.info("[Wardrobe] 自动存视频跳过：文件已存在 hash=%s", file_hash_val)
+                    return
+                import aiofiles
+                async with aiofiles.open(video_path, "wb") as f:
+                    await f.write(video_bytes)
 
             await self.video_service._faststart_if_needed(video_path)
 
@@ -1001,8 +1083,8 @@ class WardrobePlugin(Star):
             )
 
             logger.info(
-                "[Wardrobe] 自动存视频完成 hash=%s size=%dKB source_image=%s persona=%s",
-                file_hash, len(video_bytes) // 1024, source_image_id or "无", persona or "无",
+                "[Wardrobe] 自动存视频完成 source_image=%s persona=%s",
+                source_image_id or "无", persona or "无",
             )
 
         except Exception as e:
@@ -1195,7 +1277,29 @@ class WardrobePlugin(Star):
             except Exception:
                 pass
 
+        await self._cleanup_videos_for_image(image_id)
+
         return f"已删除图片（ID: {image_id}）"
+
+    async def _cleanup_videos_for_image(self, image_id: str):
+        try:
+            videos = await self.db.get_videos_by_image_id(image_id)
+            if not videos:
+                return
+            self.video_service._ensure_dirs()
+            for v in videos:
+                video_path_str = v.get("video_path", "")
+                if video_path_str:
+                    video_file = self.video_service.videos_dir / video_path_str
+                    try:
+                        if video_file.exists():
+                            video_file.unlink()
+                    except Exception:
+                        pass
+            await self.db.delete_videos_by_image_id(image_id)
+            logger.info("[Wardrobe] 已清理图片 %s 关联的 %d 个视频", image_id, len(videos))
+        except Exception as e:
+            logger.warning("[Wardrobe] 清理关联视频失败 image_id=%s error=%s", image_id, e)
 
     async def _do_get_stats(self) -> str:
         await self._ensure_db()
