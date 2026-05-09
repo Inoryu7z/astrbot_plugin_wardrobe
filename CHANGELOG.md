@@ -1,3 +1,16 @@
+### v2.6.3
+
+🐛 修复：视频发送失败（retcode=1200 terminated）+ 发送逻辑加固
+
+* 修复 Python faststart 未修正 stco/co64 chunk 偏移量，导致 moov 前移后视频文件损坏，协议端上传终止
+* 修复视频发送使用手动构造的 `file://` URI（Windows 路径不兼容），改用 `Video.fromFileSystem()` 确保格式正确
+* 修复 `callback_api_base` 已配置时 base64 回退必然失败（FileTokenService 无法处理 base64 URI），改为条件跳过
+* 新增发送超时保护（120 秒），防止 send_message 无限挂起
+* 新增纯文本 URL 兜底：所有视频发送方式均失败时，发送视频链接作为纯文本消息
+* 增强诊断日志：每步发送尝试记录路径/URL/错误类型，便于排查
+
+---
+
 ### v2.6.2
 
 🐛 修复：视频功能数据完整性 + 性能优化
