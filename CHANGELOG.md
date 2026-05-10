@@ -1,3 +1,30 @@
+﻿### v2.6.5
+
+✨ 新增：补拍衰减过滤机制
+
+* images 表新增 `daily_selfie_use_count` 字段，仅统计补拍场景的选中次数
+* `search()` 新增 `daily_selfie_mode` 参数：补拍时在向量检索后、取图模型前执行指数衰减过滤（0.6^n，权重低于0.05直接排除）
+* `get_reference_image()` 新增 `daily_selfie_mode` 参数并透传；补拍选中后递增计数
+* 新增每周衰减后台任务：每周一凌晨4点所有图片的 daily_selfie_use_count 减1（最低0）
+* 仅影响补拍场景，手动自拍和手动取图不受影响
+
+---
+
+### v2.6.4
+
+🐛 修复：视频发送 retcode=1200 terminated 体验优化
+
+* 修复 `retcode=1200 message='terminated'` 被当作普通发送失败处理：NapCat 上传超时后返回此错误，但上传可能仍在后台进行
+* 新增 terminated 错误专项检测（`_is_upload_terminated`），区分"上传被终止"和"发送异常"
+* 新增 30 秒宽限期：terminated 错误后等待 NapCat 完成后台上传，再尝试回退方法
+* URL 回退超时从 120 秒增至 300 秒，给大视频上传更多时间
+* 修复 `send_video_by_id` 忽略 `_send_video_to_conversation` 返回值，始终返回 True 的 bug
+* 新增 `VideoSendResult` 数据类，返回发送结果含 `success`/`terminated`/`message` 三个字段
+* WebUI 视频发送按钮现在区分"发送成功"/"上传被终止（可能仍在后台）"/"发送失败"三种状态
+* 增强日志：发送日志包含视频文件大小，terminated 错误给出 NapCat 配置建议
+
+---
+
 ### v2.6.3
 
 🐛 修复：视频发送失败（retcode=1200 terminated）+ 发送逻辑加固

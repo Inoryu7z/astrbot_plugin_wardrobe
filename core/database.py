@@ -92,6 +92,7 @@ _UPDATABLE_FIELDS = frozenset({
     "image_path", "updated_at", "favorite", "use_count", "file_hash",
     "ref_strength",
     "ref_strength_reason",
+    "daily_selfie_use_count",
 })
 
 
@@ -120,6 +121,7 @@ class WardrobeDatabase:
                     ("ref_strength", "TEXT DEFAULT 'style'"),
                     ("ref_strength_reason", "TEXT DEFAULT ''"),
                     ("last_used_at", "TEXT DEFAULT ''"),
+                    ("daily_selfie_use_count", "INTEGER DEFAULT 0"),
                 ]:
                     try:
                         await db.execute(f"ALTER TABLE images ADD COLUMN {col} {default}")
@@ -290,6 +292,27 @@ class WardrobeDatabase:
                     (now, now, image_id),
                 )
                 await db.commit()
+
+    async def increment_daily_selfie_use_count(self, image_id: str) -> None:
+        async with self._lock:
+            async with aiosqlite.connect(self.db_path) as db:
+                await db.execute(
+                    "UPDATE images SET daily_selfie_use_count = COALESCE(daily_selfie_use_count, 0) + 1 WHERE id = ?",
+                    (image_id,),
+                )
+                await db.commit()
+
+    async def decay_daily_selfie_use_counts(self, amount: int = 1) -> int:
+        if amount <= 0:
+            return 0
+        async with self._lock:
+            async with aiosqlite.connect(self.db_path) as db:
+                cursor = await db.execute(
+                    "UPDATE images SET daily_selfie_use_count = MAX(0, COALESCE(daily_selfie_use_count, 0) - ?) WHERE COALESCE(daily_selfie_use_count, 0) > 0",
+                    (amount,),
+                )
+                await db.commit()
+                return cursor.rowcount
 
     @staticmethod
     def _escape_like(value: str) -> str:
