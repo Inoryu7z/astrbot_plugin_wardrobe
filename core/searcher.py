@@ -143,6 +143,7 @@ class ImageSearcher:
         persona_mode: str = "no_persona_only",
         prioritize_unused: bool = False,
         min_similarity: float | None = None,
+        daily_selfie_mode: bool = False,
     ) -> tuple[list[dict[str, Any]], dict[str, Any]]:
         meta = {"persona_mismatch": False, "searched_persona": persona, "persona_scope": "global"}
 
@@ -243,6 +244,34 @@ class ImageSearcher:
                     base -= 1
                 return base
             candidates.sort(key=_effective_use_count)
+
+        if daily_selfie_mode:
+            _DECAY_FACTOR = 0.6
+            _EXCLUDE_THRESHOLD = 0.05
+            before_count = len(candidates)
+            filtered = []
+            for c in candidates:
+                dsuc = int(c.get("daily_selfie_use_count", 0) or 0)
+                if dsuc <= 0:
+                    filtered.append(c)
+                    continue
+                weight = _DECAY_FACTOR ** dsuc
+                if weight >= _EXCLUDE_THRESHOLD:
+                    filtered.append(c)
+                else:
+                    logger.info(
+                        "[Wardrobe] 补拍衰减排除: id=%s daily_selfie_use_count=%d weight=%.4f",
+                        c.get("id", "?"), dsuc, weight,
+                    )
+            candidates = filtered
+            logger.info(
+                "[Wardrobe] 补拍衰减过滤: %d -> %d (排除%d张, factor=%.1f, threshold=%.2f)",
+                before_count, len(candidates), before_count - len(candidates),
+                _DECAY_FACTOR, _EXCLUDE_THRESHOLD,
+            )
+            if not candidates:
+                logger.info("[Wardrobe] 补拍衰减过滤后无候选图片")
+                return [], meta
 
         if len(candidates) <= max_select:
             selected = candidates

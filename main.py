@@ -42,7 +42,7 @@ _AIIMG_GENERATE_TOOLS = frozenset({"aiimg_generate"})
     "astrbot_plugin_wardrobe",
     "Inoryu7z",
     "图片衣柜管理插件，支持智能分类、语义检索和参考图接口",
-    "2.6.3",
+    "2.6.5",
 )
 class WardrobePlugin(Star):
     def __init__(self, context: Context, config: AstrBotConfig = None):
@@ -439,6 +439,35 @@ class WardrobePlugin(Star):
         task.add_done_callback(self._bg_tasks.discard)
         return task
 
+    async def _weekly_daily_selfie_decay_loop(self):
+        while True:
+            now = datetime.now()
+            days_until_monday = (7 - now.weekday()) % 7
+            if days_until_monday == 0:
+                days_until_monday = 7
+            next_monday = now + timedelta(days=days_until_monday)
+            next_monday = next_monday.replace(hour=4, minute=0, second=0, microsecond=0)
+            wait_seconds = (next_monday - now).total_seconds()
+            if wait_seconds <= 0:
+                wait_seconds = 7 * 86400
+            logger.info(
+                "[Wardrobe] 补拍衰减: 下次执行在 %.1f 小时后",
+                wait_seconds / 3600,
+            )
+            await asyncio.sleep(wait_seconds)
+            try:
+                await self._ensure_db()
+                affected = await self.db.decay_daily_selfie_use_counts(amount=1)
+                logger.info(
+                    "[Wardrobe] 补拍衰减完成: %d 张图片的 daily_selfie_use_count 减1",
+                    affected,
+                )
+            except asyncio.CancelledError:
+                break
+            except Exception as e:
+                logger.error("[Wardrobe] 补拍衰减任务异常: %s", e)
+                await asyncio.sleep(3600)
+
     async def build_backup_zip(self, include_videos: bool = False) -> tuple[io.BytesIO, int, int]:
         await self._ensure_db()
         records = await self.db.get_all_records()
@@ -641,6 +670,7 @@ class WardrobePlugin(Star):
 
         self._spawn_bg_task(self._auto_backup_loop())
         self._spawn_bg_task(self._ensure_all_thumbnails())
+        self._spawn_bg_task(self._weekly_daily_selfie_decay_loop())
 
     @on_llm_tool_respond()
     async def on_aiimg_tool_respond(self, event: AstrMessageEvent, tool, tool_args, tool_result):
@@ -1323,6 +1353,7 @@ class WardrobePlugin(Star):
     async def get_reference_image(
         self, query: str, current_persona: str = "",
         min_similarity: float | None = None,
+        daily_selfie_mode: bool = False,
     ) -> Optional[dict]:
         await self._ensure_db()
         await self._ensure_vector_searcher()
@@ -1358,6 +1389,7 @@ class WardrobePlugin(Star):
             persona_mode=str(self._cfg("search_persona_mode", "no_persona_only")),
             prioritize_unused=bool(self._cfg("search_prioritize_unused", False)),
             min_similarity=min_similarity,
+            daily_selfie_mode=daily_selfie_mode,
         )
 
         if not results:
@@ -1379,6 +1411,16 @@ class WardrobePlugin(Star):
             await self.db.increment_use_count(best["id"])
         except Exception:
             pass
+
+        if daily_selfie_mode:
+            try:
+                await self.db.increment_daily_selfie_use_count(best["id"])
+                logger.info(
+                    "[Wardrobe] 补拍参考图计数+1: id=%s daily_selfie_use_count=%s",
+                    best["id"], best.get("daily_selfie_use_count", 0),
+                )
+            except Exception:
+                pass
 
         return {
             "image_path": str(image_path),
