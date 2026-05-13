@@ -3,6 +3,7 @@ import hashlib
 import json
 import os
 import uuid
+from dataclasses import dataclass
 from pathlib import Path
 
 import aiofiles
@@ -49,6 +50,13 @@ _DEFAULT_SYSTEM_PROMPT = """# 图片转视频提示词生成器
 
 _VIDEO_TIMEOUT = 600
 _DOWNLOAD_TIMEOUT = 300
+
+
+@dataclass
+class VideoSendResult:
+    success: bool
+    terminated: bool = False
+    message: str = ""
 
 
 class VideoService:
@@ -259,7 +267,7 @@ class VideoService:
 
         prompt_text, reasoning_text = self._parse_json_prompt(raw_text)
         if reasoning_text:
-            logger.info("[VideoService] 模型推理依据: %s", reasoning_text[:300])
+            logger.info("[VideoService] 模型推理依据: %s", reasoning_text)
 
         if not prompt_text:
             raise ValueError("提示词生成模型返回了空提示词")
@@ -326,7 +334,7 @@ class VideoService:
 
             msg = choices[0].get("message", {})
             text = msg.get("content", "") or ""
-            logger.info("[VideoService] 直连 API 原始返回: %s", text[:500] if text else "(空)")
+            logger.info("[VideoService] 直连 API 原始返回: %s", text if text else "(空)")
             return text.strip()
 
     async def _call_astrbot_llm_generate(
@@ -375,7 +383,7 @@ class VideoService:
             elapsed = _time.perf_counter() - t0
             raw_text = (getattr(llm_resp, "completion_text", "") or "").strip()
             logger.info("[VideoService] AstrBot模型返回 耗时=%.2fs len=%d", elapsed, len(raw_text))
-            logger.info("[VideoService] AstrBot原始返回: %s", raw_text[:500] if raw_text else "(空)")
+            logger.info("[VideoService] AstrBot原始返回: %s", raw_text if raw_text else "(空)")
             return raw_text
         finally:
             try:
@@ -761,9 +769,11 @@ class VideoService:
         if not umo:
             logger.info("[VideoService] 未配置发送会话，跳过自动发送 video_id=%s", video_id)
             return
-        await self._send_video_to_conversation(umo, video_path, video_id, video_url)
+        result = await self._send_video_to_conversation(umo, video_path, video_id, video_url)
+        if result.terminated:
+            logger.info("[VideoService] 自动发送：上传被终止，可能仍在后台进行 video_id=%s", video_id)
 
-    async def send_video_by_id(self, video_id: str) -> bool:
+    async def send_video_by_id(self, video_id: str) -> VideoSendResult:
         self._ensure_dirs()
         await self.plugin._ensure_db()
         video = await self.plugin.db.get_video(video_id)
@@ -782,48 +792,90 @@ class VideoService:
         if not umo:
             raise ValueError("未配置发送会话，请先在视频设置中配置")
         video_url = video.get("video_url", "")
-        await self._send_video_to_conversation(umo, video_path, video_id, video_url)
-        return True
+        return await self._send_video_to_conversation(umo, video_path, video_id, video_url)
+
+    @staticmethod
+    def _is_upload_terminated(error: Exception) -> bool:
+        error_str = str(error).lower()
+        return "retcode=1200" in error_str and "terminated" in error_str
 
     async def _send_video_to_conversation(self, umo: str, video_path: Path, video_id: str = "", video_url: str = ""):
         from astrbot.api.message_components import Video as VideoComp
         from astrbot.api.event import MessageChain
 
         _SEND_TIMEOUT = 120
+        _URL_SEND_TIMEOUT = 300
+        _TERMINATED_GRACE_PERIOD = 30
 
+        file_size_mb = video_path.stat().st_size / 1024 / 1024
         video_comp = VideoComp.fromFileSystem(str(video_path))
         chain = MessageChain(chain=[video_comp])
         send_error = None
+        is_terminated = False
         try:
-            logger.info("[VideoService] 尝试文件路径发送 video_id=%s path=%s", video_id, video_path.name)
+            logger.info(
+                "[VideoService] 尝试文件路径发送 video_id=%s path=%s size=%.1fMB",
+                video_id, video_path.name, file_size_mb,
+            )
             result = await asyncio.wait_for(
                 self.plugin.context.send_message(umo, chain),
                 timeout=_SEND_TIMEOUT,
             )
             success = result is not None
         except asyncio.TimeoutError:
-            logger.warning("[VideoService] 文件路径发送超时 video_id=%s timeout=%ds", video_id, _SEND_TIMEOUT)
+            logger.warning(
+                "[VideoService] 文件路径发送超时 video_id=%s timeout=%ds size=%.1fMB",
+                video_id, _SEND_TIMEOUT, file_size_mb,
+            )
             send_error = TimeoutError(f"发送超时({_SEND_TIMEOUT}s)")
             success = False
         except Exception as e:
-            logger.warning("[VideoService] 文件路径发送异常 video_id=%s error_type=%s error=%s", video_id, type(e).__name__, e)
+            is_terminated = self._is_upload_terminated(e)
+            if is_terminated:
+                logger.warning(
+                    "[VideoService] 文件路径发送被终止（上传可能仍在后台进行）"
+                    "video_id=%s size=%.1fMB error=%s",
+                    video_id, file_size_mb, e,
+                )
+            else:
+                logger.warning(
+                    "[VideoService] 文件路径发送异常 video_id=%s error_type=%s error=%s",
+                    video_id, type(e).__name__, e,
+                )
             send_error = e
             success = False
 
+        if not success and is_terminated:
+            logger.info(
+                "[VideoService] 等待 %d 秒（NapCat 可能仍在后台上传）video_id=%s",
+                _TERMINATED_GRACE_PERIOD, video_id,
+            )
+            await asyncio.sleep(_TERMINATED_GRACE_PERIOD)
+
         if not success and video_url:
             logger.info(
-                "[VideoService] 文件路径发送失败（%s），尝试 URL 发送 video_id=%s",
-                type(send_error).__name__, video_id,
+                "[VideoService] %s，尝试 URL 发送 video_id=%s",
+                "文件路径发送被终止" if is_terminated else f"文件路径发送失败（{type(send_error).__name__}）",
+                video_id,
             )
             try:
                 success = await asyncio.wait_for(
                     self._send_video_as_url(umo, video_url, video_id),
-                    timeout=_SEND_TIMEOUT,
+                    timeout=_URL_SEND_TIMEOUT,
                 )
             except asyncio.TimeoutError:
-                logger.warning("[VideoService] URL 发送超时 video_id=%s", video_id)
+                logger.warning(
+                    "[VideoService] URL 发送超时 video_id=%s timeout=%ds",
+                    video_id, _URL_SEND_TIMEOUT,
+                )
             except Exception as e_url:
-                logger.warning("[VideoService] URL 发送失败 video_id=%s error=%s", video_id, e_url)
+                if self._is_upload_terminated(e_url):
+                    logger.warning(
+                        "[VideoService] URL 发送也被终止（上传可能仍在后台进行）video_id=%s",
+                        video_id,
+                    )
+                else:
+                    logger.warning("[VideoService] URL 发送失败 video_id=%s error=%s", video_id, e_url)
 
         if not success:
             callback_base = self._get_callback_api_base()
@@ -859,9 +911,26 @@ class VideoService:
 
         if success:
             logger.info("[VideoService] 视频已发送到会话 video_id=%s umo=%s", video_id, umo[:50])
+            return VideoSendResult(success=True, message="视频已发送")
         else:
-            logger.warning("[VideoService] 视频发送失败（所有方式均失败） video_id=%s umo=%s", video_id, umo[:50])
-        return success
+            if is_terminated:
+                logger.warning(
+                    "[VideoService] 视频发送方法均返回终止错误，但上传可能仍在后台进行 "
+                    "video_id=%s umo=%s size=%.1fMB "
+                    "建议：增大 NapCat 上传超时或检查网络",
+                    video_id, umo[:50], file_size_mb,
+                )
+                return VideoSendResult(
+                    success=False,
+                    terminated=True,
+                    message="视频上传被终止，但可能仍在后台进行，请稍后检查聊天记录",
+                )
+            else:
+                logger.warning(
+                    "[VideoService] 视频发送失败（所有方式均失败） video_id=%s umo=%s",
+                    video_id, umo[:50],
+                )
+                return VideoSendResult(success=False, message="视频发送失败")
 
     async def _send_video_as_url(self, umo: str, video_url: str, video_id: str = "") -> bool:
         from astrbot.api.message_components import Video as VideoComp

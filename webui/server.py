@@ -1092,7 +1092,11 @@ class WardrobeWebServer:
         async def api_video_send(video_id):
             try:
                 result = await self.plugin.video_service.send_video_by_id(video_id)
-                return jsonify({"success": result})
+                return jsonify({
+                    "success": result.success,
+                    "terminated": result.terminated,
+                    "message": result.message,
+                })
             except ValueError as e:
                 return jsonify({"error": str(e)}), 400
             except Exception as e:
