@@ -2876,7 +2876,8 @@
       }
       const data=await resp.json();
       if(data.success){toast('视频已发送','success');}
-      else{toast(data.error||'发送失败','error');}
+      else if(data.terminated){toast(data.message||'上传可能仍在后台进行，请稍后检查聊天记录','warning');}
+      else{toast(data.message||data.error||'发送失败','error');}
     }catch(e){toast('网络错误: '+e.message,'error');}
   }
 
