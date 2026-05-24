@@ -878,6 +878,13 @@ class WardrobeDatabase:
                 rows = await cursor.fetchall()
                 return [self._row_to_dict(row) for row in rows]
 
+    async def get_records_since(self, since_ts: str) -> list[dict[str, Any]]:
+        async with aiosqlite.connect(self.db_path) as db:
+            db.row_factory = aiosqlite.Row
+            async with db.execute("SELECT * FROM images WHERE created_at > ?", (since_ts,)) as cursor:
+                rows = await cursor.fetchall()
+                return [self._row_to_dict(row) for row in rows]
+
     async def get_failed_image_ids(self) -> list[str]:
         async with aiosqlite.connect(self.db_path) as db:
             async with db.execute(
@@ -1158,6 +1165,13 @@ class WardrobeDatabase:
         async with aiosqlite.connect(self.db_path) as db:
             db.row_factory = aiosqlite.Row
             async with db.execute("SELECT * FROM videos") as cursor:
+                rows = await cursor.fetchall()
+                return [dict(row) for row in rows]
+
+    async def get_video_records_since(self, since_ts: str) -> list[dict[str, Any]]:
+        async with aiosqlite.connect(self.db_path) as db:
+            db.row_factory = aiosqlite.Row
+            async with db.execute("SELECT * FROM videos WHERE created_at > ?", (since_ts,)) as cursor:
                 rows = await cursor.fetchall()
                 return [dict(row) for row in rows]
 

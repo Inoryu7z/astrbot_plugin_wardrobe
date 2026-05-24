@@ -423,11 +423,11 @@
     <div class="backup-divider"></div>
     <div class="backup-section">
       <h3 class="backup-section-title">恢复备份</h3>
-      <p class="backup-section-desc">上传之前导出的 zip 备份文件，已有数据不会被覆盖（按 ID 跳过重复）。</p>
+      <p class="backup-section-desc">上传 zip 备份文件（支持多选），已有数据不会被覆盖（按 ID 跳过重复）。系统会自动识别全量/增量备份并按时间顺序恢复。</p>
       <div class="backup-upload-zone" id="backupUploadZone">
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" width="32" height="32"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="17 8 12 3 7 8"/><line x1="12" y1="3" x2="12" y2="15"/></svg>
-        <p class="backup-upload-text">点击选择备份文件（.zip）</p>
-        <input type="file" id="backupFile" accept=".zip" class="hidden">
+        <p class="backup-upload-text">点击选择备份文件（.zip，可多选）</p>
+        <input type="file" id="backupFile" accept=".zip" class="hidden" multiple>
       </div>
       <button class="btn btn-secondary btn-block" id="backupImportBtn" disabled>恢复备份</button>
       <div id="backupStatus" class="upload-status"></div>

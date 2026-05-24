@@ -1,8 +1,8 @@
+from datetime import datetime, timedelta
 from pathlib import Path
 from typing import Optional
 import asyncio
 import hashlib
-import io
 import json
 import time
 import zipfile
@@ -36,13 +36,14 @@ _MAX_DESCRIPTION_LEN = 2000
 # aiimg_draw / aiimg_edit 内部最终都走 aiimg_generate，所以只需监听这一个即可覆盖所有 LLM 工具调用路径。
 # 命令路径（/自拍 /aiimg 等）则由 on_after_message_sent 钩子兜底。
 _AIIMG_GENERATE_TOOLS = frozenset({"aiimg_generate"})
+_BACKUP_STATE_FILE = "backup_state.json"
 
 
 @register(
     "astrbot_plugin_wardrobe",
     "Inoryu7z",
     "图片衣柜管理插件，支持智能分类、语义检索和参考图接口",
-    "2.6.5",
+    "2.7.0",
 )
 class WardrobePlugin(Star):
     def __init__(self, context: Context, config: AstrBotConfig = None):
@@ -439,6 +440,121 @@ class WardrobePlugin(Star):
         task.add_done_callback(self._bg_tasks.discard)
         return task
 
+    async def _load_backup_state(self) -> dict:
+        path = self.data_dir / "backups" / _BACKUP_STATE_FILE
+        if path.exists():
+            try:
+                content = await asyncio.to_thread(path.read_text, encoding="utf-8")
+                data = json.loads(content)
+                return data if isinstance(data, dict) else {}
+            except Exception:
+                pass
+        return {}
+
+    async def _save_backup_state(self, state: dict):
+        path = self.data_dir / "backups" / _BACKUP_STATE_FILE
+        path.parent.mkdir(parents=True, exist_ok=True)
+        content = json.dumps(state, ensure_ascii=False, indent=2)
+        await asyncio.to_thread(self._write_text_file, path, content)
+
+    @staticmethod
+    def _write_text_file(path: Path, content: str):
+        with open(str(path), "w", encoding="utf-8") as f:
+            f.write(content)
+
+    async def _build_backup_to_file(
+        self,
+        output_path: Path,
+        include_videos: bool = False,
+        incremental: bool = False,
+        throttle_sleep: float = 0.0,
+    ) -> tuple[int, int, int]:
+        await self._ensure_db()
+
+        state = await self._load_backup_state()
+        since_ts = state.get("last_backup_ts", "")
+
+        if incremental and since_ts:
+            records = await self.db.get_records_since(since_ts)
+        else:
+            records = await self.db.get_all_records()
+            incremental = False
+
+        images_dir = self.store.images_dir
+        total_records = len(records)
+
+        video_records = []
+        videos_dir = None
+        if include_videos:
+            if incremental and since_ts:
+                video_records = await self.db.get_video_records_since(since_ts)
+            else:
+                video_records = await self.db.get_all_video_records()
+            self.video_service._ensure_dirs()
+            videos_dir = self.video_service.videos_dir
+
+        video_settings = {}
+        umo_path = self.video_service._get_send_umo_path()
+        if umo_path.exists():
+            try:
+                video_settings["video_send_umo"] = umo_path.read_text(encoding="utf-8")
+            except Exception:
+                pass
+        prompt_path = self.video_service.get_system_prompt_path()
+        if prompt_path.exists():
+            try:
+                video_settings["video_system_prompt"] = prompt_path.read_text(encoding="utf-8")
+            except Exception:
+                pass
+
+        backup_type = "incremental" if incremental else "full"
+        _sleep = throttle_sleep
+
+        def _build():
+            output_path.parent.mkdir(parents=True, exist_ok=True)
+            with zipfile.ZipFile(str(output_path), "w", zipfile.ZIP_DEFLATED) as zf:
+                metadata = json.dumps({
+                    "version": "3.0",
+                    "type": backup_type,
+                    "export_time": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
+                    "total_records": total_records,
+                    "total_videos": len(video_records),
+                    "include_video_files": include_videos,
+                }, ensure_ascii=False)
+                zf.writestr("backup_metadata.json", metadata)
+                zf.writestr("records.json", json.dumps(records, ensure_ascii=False, indent=2))
+                if video_records:
+                    zf.writestr("videos.json", json.dumps(video_records, ensure_ascii=False, indent=2))
+                added_files = 0
+                for rec in records:
+                    img_filename = rec.get("image_path", "")
+                    if not img_filename:
+                        continue
+                    img_path = images_dir / img_filename
+                    if img_path.exists():
+                        zf.write(str(img_path), f"images/{img_filename}", compress_type=zipfile.ZIP_STORED)
+                        added_files += 1
+                        if _sleep > 0:
+                            time.sleep(_sleep)
+                added_videos = 0
+                if include_videos and videos_dir:
+                    for vrec in video_records:
+                        vfilename = vrec.get("video_path", "")
+                        if not vfilename:
+                            continue
+                        vpath = videos_dir / vfilename
+                        if vpath.exists():
+                            zf.write(str(vpath), f"videos/{vfilename}", compress_type=zipfile.ZIP_STORED)
+                            added_videos += 1
+                            if _sleep > 0:
+                                time.sleep(_sleep)
+                if video_settings:
+                    zf.writestr("video_settings.json", json.dumps(video_settings, ensure_ascii=False, indent=2))
+            return added_files, added_videos
+
+        added_files, added_videos = await asyncio.to_thread(_build)
+        return total_records, added_files, added_videos
+
     async def _weekly_daily_selfie_decay_loop(self):
         while True:
             now = datetime.now()
@@ -468,100 +584,112 @@ class WardrobePlugin(Star):
                 logger.error("[Wardrobe] 补拍衰减任务异常: %s", e)
                 await asyncio.sleep(3600)
 
-    async def build_backup_zip(self, include_videos: bool = False) -> tuple[io.BytesIO, int, int]:
-        await self._ensure_db()
-        records = await self.db.get_all_records()
-        images_dir = self.store.images_dir
-        total_records = len(records)
+    async def build_backup_zip(self, include_videos: bool = False) -> tuple[Path, int, int]:
+        backup_dir = self.data_dir / "backups"
+        backup_dir.mkdir(exist_ok=True)
+        export_path = backup_dir / "wardrobe_manual_export.zip"
 
-        video_records = []
-        videos_dir = None
-        if include_videos:
-            video_records = await self.db.get_all_video_records()
-            self.video_service._ensure_dirs()
-            videos_dir = self.video_service.videos_dir
+        total_records, added_files, _ = await self._build_backup_to_file(
+            export_path,
+            include_videos=include_videos,
+            incremental=False,
+            throttle_sleep=0.5,
+        )
 
-        video_settings = {}
-        umo_path = self.video_service._get_send_umo_path()
-        if umo_path.exists():
-            try:
-                video_settings["video_send_umo"] = umo_path.read_text(encoding="utf-8")
-            except Exception:
-                pass
-        prompt_path = self.video_service.get_system_prompt_path()
-        if prompt_path.exists():
-            try:
-                video_settings["video_system_prompt"] = prompt_path.read_text(encoding="utf-8")
-            except Exception:
-                pass
-
-        def _build():
-            buf = io.BytesIO()
-            with zipfile.ZipFile(buf, "w", zipfile.ZIP_DEFLATED) as zf:
-                metadata = json.dumps({
-                    "version": "2.0",
-                    "export_time": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
-                    "total_records": total_records,
-                    "total_videos": len(video_records),
-                    "include_video_files": include_videos,
-                }, ensure_ascii=False)
-                zf.writestr("backup_metadata.json", metadata)
-                zf.writestr("records.json", json.dumps(records, ensure_ascii=False, indent=2))
-                if video_records:
-                    zf.writestr("videos.json", json.dumps(video_records, ensure_ascii=False, indent=2))
-                added_files = 0
-                for rec in records:
-                    img_filename = rec.get("image_path", "")
-                    if not img_filename:
-                        continue
-                    img_path = images_dir / img_filename
-                    if img_path.exists():
-                        zf.write(str(img_path), f"images/{img_filename}")
-                        added_files += 1
-                added_videos = 0
-                if include_videos and videos_dir:
-                    for vrec in video_records:
-                        vfilename = vrec.get("video_path", "")
-                        if not vfilename:
-                            continue
-                        vpath = videos_dir / vfilename
-                        if vpath.exists():
-                            zf.write(str(vpath), f"videos/{vfilename}")
-                            added_videos += 1
-                if video_settings:
-                    zf.writestr("video_settings.json", json.dumps(video_settings, ensure_ascii=False, indent=2))
-            buf.seek(0)
-            return buf, added_files, added_videos
-
-        buf, added_files, added_videos = await asyncio.to_thread(_build)
-        return buf, total_records, added_files
+        return export_path, total_records, added_files
 
     async def _auto_backup_loop(self):
         while True:
             try:
-                from datetime import datetime, timedelta
                 now = datetime.now()
-                target = now.replace(hour=1, minute=0, second=0, microsecond=0)
+                target = now.replace(hour=4, minute=0, second=0, microsecond=0)
                 if target <= now:
                     target += timedelta(days=1)
                 wait_seconds = (target - now).total_seconds()
+                logger.info("[Wardrobe] 下次备份在 %.1f 小时后", wait_seconds / 3600)
                 await asyncio.sleep(wait_seconds)
 
-                buf, total_records, added_files = await self.build_backup_zip()
+                now = datetime.now()
+                is_first_of_month = now.day == 1
                 backup_dir = self.data_dir / "backups"
                 backup_dir.mkdir(exist_ok=True)
-                backup_path = backup_dir / "wardrobe_auto_backup.zip"
+                date_str = now.strftime("%Y-%m-%d")
 
-                def _write():
-                    with open(str(backup_path), "wb") as f:
-                        f.write(buf.getvalue())
+                if is_first_of_month:
+                    backup_path = backup_dir / f"full_{date_str}.zip"
+                    total_records, added_files, _ = await self._build_backup_to_file(
+                        backup_path,
+                        include_videos=False,
+                        incremental=False,
+                        throttle_sleep=0.5,
+                    )
+                    logger.info("[Wardrobe] 月度全量备份完成: %d条记录, %d个图片文件", total_records, added_files)
 
-                await asyncio.to_thread(_write)
-                logger.info("[Wardrobe] 自动备份完成: %d条记录, %d个图片文件", total_records, added_files)
+                    state = await self._load_backup_state()
+                    state["last_full_backup_ts"] = now.isoformat()
+                    state["last_backup_ts"] = now.isoformat()
+                    state["last_full_backup_date"] = date_str
+                    await self._save_backup_state(state)
+                else:
+                    backup_path = backup_dir / f"incr_{date_str}.zip"
+                    total_records, added_files, _ = await self._build_backup_to_file(
+                        backup_path,
+                        include_videos=False,
+                        incremental=True,
+                        throttle_sleep=0.1,
+                    )
+                    logger.info("[Wardrobe] 每日增量备份完成: %d条新记录, %d个新图片文件", total_records, added_files)
+
+                    state = await self._load_backup_state()
+                    state["last_backup_ts"] = now.isoformat()
+                    await self._save_backup_state(state)
+
+                await self._cleanup_old_backups()
             except asyncio.CancelledError:
                 return
             except Exception as e:
                 logger.error("[Wardrobe] 自动备份失败: %s", e, exc_info=True)
+                await asyncio.sleep(3600)
+
+    async def _cleanup_old_backups(self):
+        try:
+            backup_dir = self.data_dir / "backups"
+            if not backup_dir.exists():
+                return
+
+            now = datetime.now()
+            cutoff = now - timedelta(days=30)
+
+            latest_full = None
+            to_delete = []
+
+            for f in backup_dir.iterdir():
+                if not f.is_file():
+                    continue
+                if f.name == _BACKUP_STATE_FILE or f.name == "wardrobe_manual_export.zip":
+                    continue
+                if not f.name.endswith(".zip"):
+                    continue
+
+                mtime = datetime.fromtimestamp(f.stat().st_mtime)
+                if f.name.startswith("full_"):
+                    if latest_full is None or mtime > datetime.fromtimestamp(latest_full.stat().st_mtime):
+                        latest_full = f
+
+                if mtime < cutoff:
+                    to_delete.append(f)
+
+            if latest_full and latest_full in to_delete:
+                to_delete.remove(latest_full)
+
+            for f in to_delete:
+                try:
+                    f.unlink()
+                    logger.info("[Wardrobe] 清理旧备份: %s", f.name)
+                except Exception:
+                    pass
+        except Exception as e:
+            logger.warning("[Wardrobe] 清理旧备份失败: %s", e)
 
     async def _ensure_all_thumbnails(self):
         try:

@@ -722,11 +722,11 @@ class WardrobeWebServer:
         async def api_backup_export():
             try:
                 include_videos = request.args.get("include_videos", "") == "1"
-                buf, total_records, added_files = await self.plugin.build_backup_zip(include_videos=include_videos)
+                file_path, total_records, added_files = await self.plugin.build_backup_zip(include_videos=include_videos)
                 logger.info("[Wardrobe] 备份导出: %d条记录, %d个图片文件, 包含视频=%s", total_records, added_files, include_videos)
 
                 return await send_file(
-                    buf,
+                    str(file_path),
                     mimetype="application/zip",
                     as_attachment=True,
                     download_name=f"wardrobe_backup_{time.strftime('%Y%m%d_%H%M%S')}.zip",
@@ -737,137 +737,176 @@ class WardrobeWebServer:
 
         @app.route("/api/backup/import", methods=["POST"])
         async def api_backup_import():
-            tmp_dir = None
+            tmp_dirs = []
             try:
                 await self.plugin._ensure_db()
                 files = await request.files
-                file = files.get("backup")
-                if not file:
+                uploaded_files = files.getlist("backup")
+                if not uploaded_files:
                     return jsonify({"error": "未选择备份文件"}), 400
 
-                file_bytes = file.read()
-                if not file_bytes:
-                    return jsonify({"error": "备份文件为空"}), 400
+                file_info = []
+                for file in uploaded_files:
+                    file_bytes = file.read()
+                    if not file_bytes:
+                        continue
+                    tmp_dir = tempfile.mkdtemp(prefix="wardrobe_restore_")
+                    tmp_dirs.append(tmp_dir)
+                    zip_path = Path(tmp_dir) / "backup.zip"
+                    async with aiofiles_open(zip_path, "wb") as f:
+                        await f.write(file_bytes)
 
-                tmp_dir = tempfile.mkdtemp(prefix="wardrobe_restore_")
-                zip_path = Path(tmp_dir) / "backup.zip"
-                async with aiofiles_open(zip_path, "wb") as f:
-                    await f.write(file_bytes)
+                    def _extract_metadata(zp):
+                        with zipfile.ZipFile(str(zp), "r") as zf:
+                            if "backup_metadata.json" in zf.namelist():
+                                return json.loads(zf.read("backup_metadata.json"))
+                        return {}
 
-                def _extract():
-                    with zipfile.ZipFile(str(zip_path), "r") as zf:
-                        zf.extractall(tmp_dir)
+                    meta = await asyncio.to_thread(_extract_metadata, zip_path)
+                    backup_type = meta.get("type", "full")
+                    export_time = meta.get("export_time", "")
+                    file_info.append({
+                        "tmp_dir": tmp_dir,
+                        "zip_path": zip_path,
+                        "type": backup_type,
+                        "export_time": export_time,
+                    })
 
-                await asyncio.to_thread(_extract)
+                if not file_info:
+                    return jsonify({"error": "所有备份文件为空"}), 400
 
-                records_path = Path(tmp_dir) / "records.json"
-                if not records_path.exists():
-                    return jsonify({"error": "无效的备份文件：缺少 records.json"}), 400
+                file_info.sort(key=lambda x: (0 if x["type"] == "full" else 1, x["export_time"]))
 
-                def _read_records():
-                    with open(str(records_path), "r", encoding="utf-8") as f:
-                        return json.load(f)
+                total_imported = 0
+                total_copied_files = 0
+                total_imported_videos = 0
+                total_copied_videos = 0
+                total_in_backup = 0
 
-                records = await asyncio.to_thread(_read_records)
-                if not isinstance(records, list):
-                    return jsonify({"error": "无效的备份文件：records.json 格式错误"}), 400
+                for info in file_info:
+                    tmp_dir = info["tmp_dir"]
+                    zip_path = info["zip_path"]
 
-                images_src = Path(tmp_dir) / "images"
-                images_dst = self.plugin.store.images_dir
-                copied_files = 0
+                    def _extract(zp, td):
+                        with zipfile.ZipFile(str(zp), "r") as zf:
+                            zf.extractall(td)
 
-                if images_src.exists():
-                    def _copy_images():
-                        nonlocal copied_files
-                        for rec in records:
-                            img_filename = rec.get("image_path", "")
-                            if not img_filename:
-                                continue
-                            src = images_src / img_filename
-                            dst = images_dst / img_filename
-                            if src.exists() and not dst.exists():
-                                shutil.copy2(str(src), str(dst))
-                                copied_files += 1
+                    await asyncio.to_thread(_extract, zip_path, tmp_dir)
 
-                    await asyncio.to_thread(_copy_images)
+                    records_path = Path(tmp_dir) / "records.json"
+                    if not records_path.exists():
+                        continue
 
-                imported = await self.plugin.db.import_records(records, skip_existing=True)
+                    def _read_records(rp):
+                        with open(str(rp), "r", encoding="utf-8") as f:
+                            return json.load(f)
 
-                if imported > 0 and self.plugin.vector_searcher and self.plugin.vector_searcher.available:
+                    records = await asyncio.to_thread(_read_records, records_path)
+                    if not isinstance(records, list):
+                        continue
+
+                    total_in_backup += len(records)
+
+                    images_src = Path(tmp_dir) / "images"
+                    images_dst = self.plugin.store.images_dir
+                    copied_files = 0
+
+                    if images_src.exists():
+                        def _copy_images(src, dst, recs):
+                            nonlocal copied_files
+                            for rec in recs:
+                                img_filename = rec.get("image_path", "")
+                                if not img_filename:
+                                    continue
+                                s = src / img_filename
+                                d = dst / img_filename
+                                if s.exists() and not d.exists():
+                                    shutil.copy2(str(s), str(d))
+                                    copied_files += 1
+
+                        await asyncio.to_thread(_copy_images, images_src, images_dst, records)
+
+                    total_copied_files += copied_files
+                    imported = await self.plugin.db.import_records(records, skip_existing=True)
+                    total_imported += imported
+
+                    videos_path = Path(tmp_dir) / "videos.json"
+                    if videos_path.exists():
+                        try:
+                            def _read_videos(vp):
+                                with open(str(vp), "r", encoding="utf-8") as f:
+                                    return json.load(f)
+
+                            video_records = await asyncio.to_thread(_read_videos, videos_path)
+                            if isinstance(video_records, list):
+                                videos_src = Path(tmp_dir) / "videos"
+                                self.plugin.video_service._ensure_dirs()
+                                videos_dst = self.plugin.video_service.videos_dir
+                                copied_videos = 0
+                                if videos_src.exists():
+                                    def _copy_videos(src, dst, vrecs):
+                                        nonlocal copied_videos
+                                        for vrec in vrecs:
+                                            vfilename = vrec.get("video_path", "")
+                                            if not vfilename:
+                                                continue
+                                            s = src / vfilename
+                                            d = dst / vfilename
+                                            if s.exists() and not d.exists():
+                                                shutil.copy2(str(s), str(d))
+                                                copied_videos += 1
+                                    await asyncio.to_thread(_copy_videos, videos_src, videos_dst, video_records)
+                                total_copied_videos += copied_videos
+                                imported_videos = await self.plugin.db.import_video_records(video_records, skip_existing=True)
+                                total_imported_videos += imported_videos
+                        except Exception as e:
+                            logger.warning("[Wardrobe] 备份恢复视频数据失败: %s", e)
+
+                    video_settings_path = Path(tmp_dir) / "video_settings.json"
+                    if video_settings_path.exists():
+                        try:
+                            def _read_video_settings(vsp):
+                                with open(str(vsp), "r", encoding="utf-8") as f:
+                                    return json.load(f)
+                            vsettings = await asyncio.to_thread(_read_video_settings, video_settings_path)
+                            if isinstance(vsettings, dict):
+                                if "video_send_umo" in vsettings:
+                                    try:
+                                        data = json.loads(vsettings["video_send_umo"])
+                                        umo = data.get("umo", "")
+                                        auto_send = data.get("auto_send", False)
+                                        await self.plugin.video_service.save_send_umo(umo, auto_send)
+                                    except Exception:
+                                        pass
+                                if "video_system_prompt" in vsettings:
+                                    try:
+                                        await self.plugin.video_service.save_system_prompt(vsettings["video_system_prompt"])
+                                    except Exception:
+                                        pass
+                        except Exception as e:
+                            logger.warning("[Wardrobe] 备份恢复视频设置失败: %s", e)
+
+                if total_imported > 0 and self.plugin.vector_searcher and self.plugin.vector_searcher.available:
                     try:
                         await self.plugin.vector_searcher.index_existing_images()
                         logger.info("[Wardrobe] 备份恢复后向量索引重建完成")
                     except Exception as e:
                         logger.warning("[Wardrobe] 备份恢复后向量索引重建失败: %s", e)
 
-                imported_videos = 0
-                copied_videos = 0
-                videos_path = Path(tmp_dir) / "videos.json"
-                if videos_path.exists():
-                    try:
-                        def _read_videos():
-                            with open(str(videos_path), "r", encoding="utf-8") as f:
-                                return json.load(f)
-                        video_records = await asyncio.to_thread(_read_videos)
-                        if isinstance(video_records, list):
-                            videos_src = Path(tmp_dir) / "videos"
-                            self.plugin.video_service._ensure_dirs()
-                            videos_dst = self.plugin.video_service.videos_dir
-                            if videos_src.exists():
-                                def _copy_videos():
-                                    nonlocal copied_videos
-                                    for vrec in video_records:
-                                        vfilename = vrec.get("video_path", "")
-                                        if not vfilename:
-                                            continue
-                                        src = videos_src / vfilename
-                                        dst = videos_dst / vfilename
-                                        if src.exists() and not dst.exists():
-                                            shutil.copy2(str(src), str(dst))
-                                            copied_videos += 1
-                                await asyncio.to_thread(_copy_videos)
-                            imported_videos = await self.plugin.db.import_video_records(video_records, skip_existing=True)
-                    except Exception as e:
-                        logger.warning("[Wardrobe] 备份恢复视频数据失败: %s", e)
-
-                video_settings_path = Path(tmp_dir) / "video_settings.json"
-                if video_settings_path.exists():
-                    try:
-                        def _read_video_settings():
-                            with open(str(video_settings_path), "r", encoding="utf-8") as f:
-                                return json.load(f)
-                        vsettings = await asyncio.to_thread(_read_video_settings)
-                        if isinstance(vsettings, dict):
-                            if "video_send_umo" in vsettings:
-                                try:
-                                    data = json.loads(vsettings["video_send_umo"])
-                                    umo = data.get("umo", "")
-                                    auto_send = data.get("auto_send", False)
-                                    await self.plugin.video_service.save_send_umo(umo, auto_send)
-                                except Exception:
-                                    pass
-                            if "video_system_prompt" in vsettings:
-                                try:
-                                    await self.plugin.video_service.save_system_prompt(vsettings["video_system_prompt"])
-                                except Exception:
-                                    pass
-                    except Exception as e:
-                        logger.warning("[Wardrobe] 备份恢复视频设置失败: %s", e)
-
-                logger.info("[Wardrobe] 备份恢复: 导入%d条图片记录, 复制%d个图片文件, 导入%d条视频记录, 复制%d个视频文件", imported, copied_files, imported_videos, copied_videos)
+                logger.info("[Wardrobe] 备份恢复: 导入%d条图片记录, 复制%d个图片文件, 导入%d条视频记录, 复制%d个视频文件", total_imported, total_copied_files, total_imported_videos, total_copied_videos)
                 return jsonify({
                     "success": True,
-                    "imported": imported,
-                    "copied_files": copied_files,
-                    "total_in_backup": len(records),
-                    "imported_videos": imported_videos,
-                    "copied_videos": copied_videos,
+                    "imported": total_imported,
+                    "copied_files": total_copied_files,
+                    "total_in_backup": total_in_backup,
+                    "imported_videos": total_imported_videos,
+                    "copied_videos": total_copied_videos,
                 })
             except Exception as e:
                 logger.error("[Wardrobe] 备份恢复失败: %s", e, exc_info=True)
                 return jsonify({"error": f"恢复失败: {e}"}), 500
             finally:
-                if tmp_dir:
+                for tmp_dir in tmp_dirs:
                     await asyncio.to_thread(shutil.rmtree, tmp_dir, ignore_errors=True)
 
         @app.route("/api/videos")

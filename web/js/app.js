@@ -1312,13 +1312,14 @@
     const zone=$('#backupUploadZone');
     const fileInput=$('#backupFile');
     const importBtn=$('#backupImportBtn');
-    let selectedBackupFile=null;
+    let selectedBackupFiles=[];
 
     zone.addEventListener('click',()=>fileInput.click());
     fileInput.addEventListener('change',()=>{
       if(fileInput.files.length){
-        selectedBackupFile=fileInput.files[0];
-        zone.querySelector('.backup-upload-text').textContent=selectedBackupFile.name;
+        selectedBackupFiles=Array.from(fileInput.files);
+        const names=selectedBackupFiles.map(f=>f.name).join(', ');
+        zone.querySelector('.backup-upload-text').textContent=selectedBackupFiles.length===1?selectedBackupFiles[0].name:`已选择 ${selectedBackupFiles.length} 个文件`;
         importBtn.disabled=false;
       }
     });
@@ -1355,14 +1356,14 @@
     });
 
     importBtn.addEventListener('click',async()=>{
-      if(!selectedBackupFile)return;
+      if(!selectedBackupFiles.length)return;
       if(!confirm('确定要恢复此备份？已有数据不会被覆盖，只会导入新数据。'))return;
       importBtn.disabled=true;
       importBtn.textContent='正在恢复...';
       $('#backupStatus').textContent='上传并恢复中，请稍候...';
       try{
         const fd=new FormData();
-        fd.append('backup',selectedBackupFile);
+        selectedBackupFiles.forEach(f=>fd.append('backup',f));
         const resp=await api('/api/backup/import',{method:'POST',body:fd});
         if(!resp){toast('恢复失败','error');$('#backupStatus').textContent='请求失败';return;}
         const data=await resp.json();
@@ -1385,9 +1386,9 @@
 
     $('#backupModalClose').addEventListener('click',()=>{
       $('#backupModal').classList.add('hidden');
-      selectedBackupFile=null;
+      selectedBackupFiles=[];
       fileInput.value='';
-      zone.querySelector('.backup-upload-text').textContent='点击选择备份文件（.zip）';
+      zone.querySelector('.backup-upload-text').textContent='点击选择备份文件（.zip，可多选）';
       importBtn.disabled=true;
       $('#backupStatus').textContent='';
     });
