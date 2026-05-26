@@ -48,7 +48,7 @@
     {key:'description',label:'描述',type:'textarea'},
     {key:'user_tags',label:'用户标签',type:'text'},
     {key:'persona',label:'人格',type:'text'},
-    {key:'favorite',label:'收藏',type:'select',options:['none','favorite','like']},
+    {key:'favorite',label:'收藏',type:'select',options:['none','favorite','like','meh']},
     {key:'use_count',label:'热度',type:'number',min:0},
   ];
 
@@ -380,7 +380,7 @@
       card.style.gridRowEnd='span '+height;
       card.style.containIntrinsicSize='auto '+height+'px';
       const personaText=img.persona?`<div class="image-card-persona">${esc(img.persona)}</div>`:'';
-      const favIcon=img.favorite==='favorite'?'❤️':img.favorite==='like'?'👍':'';
+      const favIcon=img.favorite==='favorite'?'❤️':img.favorite==='like'?'👍':img.favorite==='meh'?'😐':'';
       const favMark=favIcon?`<div class="image-card-fav">${favIcon}</div>`:'';
       const useCount=img.use_count?`<span class="image-card-uses">🔥${img.use_count}</span>`:'';
       const lastUsed=img.last_used_at?`<span class="image-card-last-used">🕐${_fmtRelative(img.last_used_at)}</span>`:'';
@@ -557,10 +557,13 @@
   function updateFavoriteBtns(fav){
     const favBtn=$('#favFavoriteBtn');
     const likeBtn=$('#favLikeBtn');
+    const mehBtn=$('#favMehBtn');
     favBtn.textContent=fav==='favorite'?'❤️':'🤍';
     likeBtn.textContent=fav==='like'?'👍🏻':'👍';
+    mehBtn.textContent=fav==='meh'?'😶':'😐';
     favBtn.classList.toggle('active-favorite',fav==='favorite');
     likeBtn.classList.toggle('active-like',fav==='like');
+    mehBtn.classList.toggle('active-meh',fav==='meh');
   }
 
   async function toggleFavorite(value){
@@ -577,7 +580,7 @@
       state.currentImageData.favorite=newFav;
       state.detailCache.set(state.currentImageId,state.currentImageData);
       updateFavoriteBtns(newFav);
-      toast(newFav==='none'?'已取消':newFav==='favorite'?'已收藏':'已标记喜欢','success');
+      toast(newFav==='none'?'已取消':newFav==='favorite'?'已收藏':newFav==='like'?'已标记喜欢':'已标记无感','success');
     }else{
       toast(result.error||'操作失败','error');
     }
@@ -800,6 +803,7 @@
           let hint='';
           if(fav==='favorite')hint=' (收藏-3 → 有效热度 '+(val-3)+')';
           else if(fav==='like')hint=' (喜欢-1 → 有效热度 '+(val-1)+')';
+          else if(fav==='meh')hint=' (无感+0)';
           valWrap.innerHTML=`<span class="field-value-text">🔥${val!=null?val:0}${hint}</span>`;
         }else{
           valWrap.innerHTML=val?`<span class="field-value-text">${esc(String(val))}</span>`:'<span class="field-empty">-</span>';
@@ -923,6 +927,30 @@
     state.selectedIds.clear();
     updateBatchUI();
     state.page=1;state.allLoaded=false;loadImages(true);loadStats();
+  }
+
+  async function batchFavorite(value){
+    if(state.selectedIds.size===0){
+      toast('请先选择图片','warning');
+      return;
+    }
+    const labels={favorite:'收藏',like:'喜欢',meh:'无感',none:'取消标记'};
+    const label=labels[value]||value;
+    if(!confirm(`确定将选中的 ${state.selectedIds.size} 张图片标记为「${label}」？`))return;
+    const resp=await api('/api/images/batch-favorite',{
+      method:'POST',
+      json:{ids:[...state.selectedIds],favorite:value}
+    });
+    if(!resp)return;
+    const data=await resp.json();
+    if(data.success){
+      toast(`已将 ${data.updated} 张图片标记为「${label}」`,'success');
+      state.selectedIds.clear();
+      updateBatchUI();
+      state.page=1;state.allLoaded=false;loadImages(true);loadStats();
+    }else{
+      toast(data.error||'操作失败','error');
+    }
   }
 
   async function batchReanalyze(){
@@ -1829,6 +1857,7 @@
     const items=[
       {icon:'❤️',label:'收藏',action:()=>quickFavorite(id,'favorite')},
       {icon:'👍',label:'喜欢',action:()=>quickFavorite(id,'like')},
+      {icon:'😐',label:'无感',action:()=>quickFavorite(id,'meh')},
       {icon:'🎨',label:'切换参考强度',action:()=>quickRefStrength(id)},
       {type:'divider'},
       {icon:'🔄',label:'重新分析',action:()=>quickReanalyze(id)},
@@ -1872,7 +1901,7 @@
     const result=await resp.json();
     if(result.success){
       const newFav=result.favorite||value;
-      toast(newFav===value?'已'+ (value==='favorite'?'收藏':'标记喜欢'):'已取消','success');
+      toast(newFav===value?'已'+ (value==='favorite'?'收藏':value==='like'?'标记喜欢':'标记无感'):'已取消','success');
       if(state.currentImageId===id){
         state.currentImageData.favorite=newFav;
         state.detailCache.set(id,state.currentImageData);
@@ -1893,7 +1922,7 @@
       favMark.className='image-card-fav';
       card.appendChild(favMark);
     }
-    favMark.textContent=fav==='favorite'?'❤️':fav==='like'?'👍':'';
+    favMark.textContent=fav==='favorite'?'❤️':fav==='like'?'👍':fav==='meh'?'😐':'';
   }
 
   async function quickDelete(id){
@@ -2116,6 +2145,22 @@
     $('#batchDeleteBtn').addEventListener('click',batchDelete);
     $('#batchReanalyzeBtn').addEventListener('click',batchReanalyze);
     $('#batchReanalyzeFailedBtn').addEventListener('click',batchReanalyzeFailed);
+    $('#batchFavToggle').addEventListener('click',()=>{
+      $('#batchFavDropdown').classList.toggle('hidden');
+    });
+    document.querySelectorAll('.batch-fav-item').forEach(btn=>{
+      btn.addEventListener('click',()=>{
+        const fav=btn.dataset.fav;
+        $('#batchFavDropdown').classList.add('hidden');
+        batchFavorite(fav);
+      });
+    });
+    document.addEventListener('click',e=>{
+      if(!e.target.closest('#batchFavGroup')){
+        const dd=$('#batchFavDropdown');
+        if(dd)dd.classList.add('hidden');
+      }
+    });
     $('#batchCancelBtn').addEventListener('click',()=>{
       state.batchMode=false;state.selectedIds.clear();
       document.body.classList.remove('batch-mode');
@@ -2182,6 +2227,7 @@
     $('#modalSaveBtn').addEventListener('click',saveEdit);
     $('#favFavoriteBtn').addEventListener('click',()=>toggleFavorite('favorite'));
     $('#favLikeBtn').addEventListener('click',()=>toggleFavorite('like'));
+    $('#favMehBtn').addEventListener('click',()=>toggleFavorite('meh'));
     $('#refStrengthBtn').addEventListener('click',()=>toggleRefStrengthDropdown());
     document.addEventListener('click',(e)=>{
       const wrap=$('.rs-dropdown-wrap');

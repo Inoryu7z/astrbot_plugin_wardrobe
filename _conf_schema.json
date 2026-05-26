@@ -140,6 +140,12 @@
       }
     }
   },
+  "auto_backup_enabled": {
+    "description": "自动备份",
+    "hint": "开启后每天凌晨4点自动备份衣橱数据（每月全量+每日增量），关闭可节省存储空间",
+    "type": "bool",
+    "default": true
+  },
   "auto_save_aiimg_enabled": {
     "description": "AiImg 自拍自动存图",
     "hint": "开启后，当 AiImg 插件生成自拍图片时，衣橱图鉴会自动将图片存入当前对话人格的图库。仅保存自拍模式，文生图/改图不会自动存入。",

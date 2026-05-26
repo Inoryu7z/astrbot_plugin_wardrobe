@@ -1,5 +1,6 @@
 from datetime import datetime, timedelta
 from pathlib import Path
+import uuid
 from typing import Optional
 import asyncio
 import hashlib
@@ -43,7 +44,7 @@ _BACKUP_STATE_FILE = "backup_state.json"
     "astrbot_plugin_wardrobe",
     "Inoryu7z",
     "图片衣柜管理插件，支持智能分类、语义检索和参考图接口",
-    "2.7.0",
+    "2.8.0",
 )
 class WardrobePlugin(Star):
     def __init__(self, context: Context, config: AstrBotConfig = None):
@@ -601,6 +602,10 @@ class WardrobePlugin(Star):
     async def _auto_backup_loop(self):
         while True:
             try:
+                if not self._cfg("auto_backup_enabled", True):
+                    await asyncio.sleep(3600)
+                    continue
+
                 now = datetime.now()
                 target = now.replace(hour=4, minute=0, second=0, microsecond=0)
                 if target <= now:
@@ -608,6 +613,9 @@ class WardrobePlugin(Star):
                 wait_seconds = (target - now).total_seconds()
                 logger.info("[Wardrobe] 下次备份在 %.1f 小时后", wait_seconds / 3600)
                 await asyncio.sleep(wait_seconds)
+
+                if not self._cfg("auto_backup_enabled", True):
+                    continue
 
                 now = datetime.now()
                 is_first_of_month = now.day == 1
@@ -690,6 +698,88 @@ class WardrobePlugin(Star):
                     pass
         except Exception as e:
             logger.warning("[Wardrobe] 清理旧备份失败: %s", e)
+
+    async def _video_retention_loop(self):
+        while True:
+            try:
+                now = datetime.now()
+                target = now.replace(hour=5, minute=0, second=0, microsecond=0)
+                if target <= now:
+                    target += timedelta(days=1)
+                wait_seconds = (target - now).total_seconds()
+                logger.info("[Wardrobe] 视频保留策略: 下次清理在 %.1f 小时后", wait_seconds / 3600)
+                await asyncio.sleep(wait_seconds)
+
+                await self._ensure_db()
+                expired = await self.db.get_expired_auto_save_videos(max_age_days=7)
+                if not expired:
+                    continue
+
+                self.video_service._ensure_dirs()
+                deleted = 0
+                for v in expired:
+                    video_path_str = v.get("video_path", "")
+                    if video_path_str:
+                        video_file = self.video_service.videos_dir / video_path_str
+                        try:
+                            if video_file.exists():
+                                video_file.unlink()
+                        except Exception:
+                            pass
+                    await self.db.delete_video(v["id"])
+                    deleted += 1
+
+                logger.info("[Wardrobe] 视频保留策略: 清理了 %d 个超过7天的自动保存视频", deleted)
+            except asyncio.CancelledError:
+                return
+            except Exception as e:
+                logger.error("[Wardrobe] 视频保留策略任务异常: %s", e)
+                await asyncio.sleep(3600)
+
+    async def _meh_cleanup_loop(self):
+        while True:
+            try:
+                now = datetime.now()
+                target = now.replace(hour=5, minute=30, second=0, microsecond=0)
+                if target <= now:
+                    target += timedelta(days=1)
+                wait_seconds = (target - now).total_seconds()
+                logger.info("[Wardrobe] 无感清理: 下次清理在 %.1f 小时后", wait_seconds / 3600)
+                await asyncio.sleep(wait_seconds)
+
+                await self._ensure_db()
+                expired = await self.db.get_expired_meh_images(max_age_days=30)
+                if not expired:
+                    continue
+
+                deleted = 0
+                for img in expired:
+                    image_id = img.get("id", "")
+                    if not image_id:
+                        continue
+
+                    ok = await self.db.delete_image(image_id)
+                    if not ok:
+                        continue
+
+                    if img.get("image_path"):
+                        await self.store.delete_image(img["image_path"])
+
+                    if self.vector_searcher:
+                        try:
+                            await self.vector_searcher.remove_image(image_id)
+                        except Exception:
+                            pass
+
+                    await self._cleanup_videos_for_image(image_id)
+                    deleted += 1
+
+                logger.info("[Wardrobe] 无感清理: 删除了 %d 张超过30天的无感图片", deleted)
+            except asyncio.CancelledError:
+                return
+            except Exception as e:
+                logger.error("[Wardrobe] 无感清理任务异常: %s", e)
+                await asyncio.sleep(3600)
 
     async def _ensure_all_thumbnails(self):
         try:
@@ -799,6 +889,8 @@ class WardrobePlugin(Star):
         self._spawn_bg_task(self._auto_backup_loop())
         self._spawn_bg_task(self._ensure_all_thumbnails())
         self._spawn_bg_task(self._weekly_daily_selfie_decay_loop())
+        self._spawn_bg_task(self._video_retention_loop())
+        self._spawn_bg_task(self._meh_cleanup_loop())
 
     @on_llm_tool_respond()
     async def on_aiimg_tool_respond(self, event: AstrMessageEvent, tool, tool_args, tool_result):
@@ -1234,6 +1326,7 @@ class WardrobePlugin(Star):
             await self.db.add_video(
                 source_image_id=source_image_id,
                 video_path=video_filename,
+                video_url=video_src if video_src.startswith(("http://", "https://")) else "",
                 provider_id="auto_save",
                 tier="normal",
                 persona=persona,
