@@ -85,7 +85,9 @@
     videoPollIntervals:{},
     videoViewActive:false,
     videoCurrentPlayerId:null,
-    videoGridIds:[]
+    videoGridIds:[],
+    dragSelecting:false,
+    dragSelectAction:null
   };
 
   let _originalObserver=null;
@@ -402,10 +404,25 @@
       card.addEventListener('click',e=>{
         if(state.batchMode){
           if(e.target.closest('.image-card-checkbox'))return;
-          toggleSelect(img.id);
+          if(!state.dragSelecting)toggleSelect(img.id);
           return;
         }
         showDetail(img.id);
+      });
+      card.addEventListener('mousedown',e=>{
+        if(!state.batchMode||e.button!==0)return;
+        e.preventDefault();
+        state.dragSelecting=true;
+        state.dragSelectAction=state.selectedIds.has(img.id)?'deselect':'select';
+        if(state.dragSelectAction==='select')state.selectedIds.add(img.id);
+        else state.selectedIds.delete(img.id);
+        updateBatchUI();
+      });
+      card.addEventListener('mouseenter',()=>{
+        if(!state.dragSelecting)return;
+        if(state.dragSelectAction==='select')state.selectedIds.add(img.id);
+        else state.selectedIds.delete(img.id);
+        updateBatchUI();
       });
       card.addEventListener('contextmenu',e=>{
         e.preventDefault();
@@ -2270,6 +2287,12 @@
       if(!e.target.closest('#batchExportGroup')){
         const dd=$('#batchExportDropdown');
         if(dd)dd.classList.add('hidden');
+      }
+    });
+    document.addEventListener('mouseup',()=>{
+      if(state.dragSelecting){
+        state.dragSelecting=false;
+        state.dragSelectAction=null;
       }
     });
     $('#batchCancelBtn').addEventListener('click',()=>{
