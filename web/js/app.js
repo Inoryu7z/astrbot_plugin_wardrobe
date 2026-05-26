@@ -403,8 +403,6 @@
       `;
       card.addEventListener('click',e=>{
         if(state.batchMode){
-          if(e.target.closest('.image-card-checkbox'))return;
-          if(!state.dragSelecting)toggleSelect(img.id);
           return;
         }
         showDetail(img.id);
@@ -430,7 +428,7 @@
         showContextMenu(e,img.id);
       });
       const cb=card.querySelector('.image-card-checkbox');
-      cb.addEventListener('click',e=>{e.stopPropagation();toggleSelect(img.id);});
+      cb.addEventListener('click',e=>{e.stopPropagation();});
       if(_originalObserver)_originalObserver.observe(card);
       fragment.appendChild(card);
     });
