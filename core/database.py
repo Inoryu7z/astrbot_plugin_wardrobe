@@ -1,7 +1,7 @@
 import asyncio
 import json
 import uuid
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any, Optional
 
@@ -380,7 +380,7 @@ class WardrobeDatabase:
                 params.append(f'%{WardrobeDatabase._escape_like(v)}%')
             conditions.append(f"({' OR '.join(bf_conds)})")
 
-        if favorite and favorite in ("favorite", "like"):
+        if favorite and favorite in ("favorite", "like", "meh"):
             conditions.append("favorite = ?")
             params.append(favorite)
 
@@ -447,7 +447,7 @@ class WardrobeDatabase:
         if sort_by == "use_count":
             order_clause = "use_count DESC, created_at DESC, id DESC"
         elif sort_by == "favorite":
-            order_clause = "CASE favorite WHEN 'favorite' THEN 1 WHEN 'like' THEN 2 ELSE 3 END, created_at DESC, id DESC"
+            order_clause = "CASE favorite WHEN 'favorite' THEN 1 WHEN 'like' THEN 2 WHEN 'meh' THEN 3 ELSE 4 END, created_at DESC, id DESC"
         elif sort_by == "last_used_at":
             order_clause = "COALESCE(last_used_at, '') DESC, created_at DESC, id DESC"
         elif sort_by == "random":
@@ -651,7 +651,7 @@ class WardrobeDatabase:
         if persona:
             conditions.append("persona = ?")
             params.append(persona)
-        if favorite and favorite in ("favorite", "like"):
+        if favorite and favorite in ("favorite", "like", "meh"):
             conditions.append("favorite = ?")
             params.append(favorite)
         where_clause = ""
@@ -716,7 +716,7 @@ class WardrobeDatabase:
         if persona:
             conditions.append("persona = ?")
             params.append(persona)
-        if favorite and favorite in ("favorite", "like"):
+        if favorite and favorite in ("favorite", "like", "meh"):
             conditions.append("favorite = ?")
             params.append(favorite)
         where_clause = ""
@@ -777,7 +777,7 @@ class WardrobeDatabase:
             else:
                 conditions.append("persona = ?")
                 params.append(persona)
-        if favorite and favorite in ("favorite", "like"):
+        if favorite and favorite in ("favorite", "like", "meh"):
             conditions.append("favorite = ?")
             params.append(favorite)
         if ref_strength:
@@ -790,7 +790,7 @@ class WardrobeDatabase:
         if sort_by == "use_count":
             order_clause = "use_count DESC, created_at DESC, id DESC"
         elif sort_by == "favorite":
-            order_clause = "CASE favorite WHEN 'favorite' THEN 1 WHEN 'like' THEN 2 ELSE 3 END, created_at DESC, id DESC"
+            order_clause = "CASE favorite WHEN 'favorite' THEN 1 WHEN 'like' THEN 2 WHEN 'meh' THEN 3 ELSE 4 END, created_at DESC, id DESC"
         elif sort_by == "last_used_at":
             order_clause = "COALESCE(last_used_at, '') DESC, created_at DESC, id DESC"
         elif sort_by == "random":
@@ -834,7 +834,7 @@ class WardrobeDatabase:
         if exclude_persona:
             conditions.append("persona != ?")
             params.append(exclude_persona)
-        if favorite and favorite in ("favorite", "like"):
+        if favorite and favorite in ("favorite", "like", "meh"):
             conditions.append("favorite = ?")
             params.append(favorite)
         if ref_strength:
@@ -847,7 +847,7 @@ class WardrobeDatabase:
         if sort_by == "use_count":
             order_clause = "use_count DESC, created_at DESC, id DESC"
         elif sort_by == "favorite":
-            order_clause = "CASE favorite WHEN 'favorite' THEN 1 WHEN 'like' THEN 2 ELSE 3 END, created_at DESC, id DESC"
+            order_clause = "CASE favorite WHEN 'favorite' THEN 1 WHEN 'like' THEN 2 WHEN 'meh' THEN 3 ELSE 4 END, created_at DESC, id DESC"
         elif sort_by == "last_used_at":
             order_clause = "COALESCE(last_used_at, '') DESC, created_at DESC, id DESC"
         elif sort_by == "random":
@@ -915,8 +915,8 @@ class WardrobeDatabase:
                                 dynamic_level, action_style, shot_size, camera_angle,
                                 expression, color_tone, composition, background,
                                 description, user_tags, exposure_features, key_features, prop_objects, allure_features, body_focus,
-                                persona, image_path, created_at, updated_at, created_by, favorite, use_count, file_hash, ref_strength, ref_strength_reason
-                            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+                                persona, image_path, created_at, updated_at, created_by, favorite, use_count, file_hash, ref_strength, ref_strength_reason, daily_selfie_use_count
+                            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
                             (
                                 rec.get("id", str(uuid.uuid4())),
                                 rec.get("category", "人物"),
@@ -952,6 +952,7 @@ class WardrobeDatabase:
                                 rec.get("file_hash", ""),
                                 rec.get("ref_strength", "style"),
                                 rec.get("ref_strength_reason", ""),
+                                rec.get("daily_selfie_use_count", 0),
                             ),
                         )
                         imported += 1
@@ -983,6 +984,7 @@ class WardrobeDatabase:
         generated_prompt: str = "",
         persona: str = "",
         status: str = "pending",
+        video_url: str = "",
     ) -> str:
         now = datetime.now(timezone.utc).isoformat()
         video_id = str(uuid.uuid4())
@@ -991,10 +993,10 @@ class WardrobeDatabase:
                 await db.execute(
                     """INSERT INTO videos (
                         id, source_image_id, video_path, provider_id, tier,
-                        user_thoughts, generated_prompt, persona, status, created_at
-                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+                        user_thoughts, generated_prompt, persona, status, video_url, created_at
+                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
                     (video_id, source_image_id, video_path, provider_id, tier,
-                     user_thoughts, generated_prompt, persona, status, now),
+                     user_thoughts, generated_prompt, persona, status, video_url, now),
                 )
                 await db.commit()
         return video_id
@@ -1174,6 +1176,28 @@ class WardrobeDatabase:
             async with db.execute("SELECT * FROM videos WHERE created_at > ?", (since_ts,)) as cursor:
                 rows = await cursor.fetchall()
                 return [dict(row) for row in rows]
+
+    async def get_expired_auto_save_videos(self, max_age_days: int) -> list[dict[str, Any]]:
+        cutoff = (datetime.now(timezone.utc) - timedelta(days=max_age_days)).isoformat()
+        async with aiosqlite.connect(self.db_path) as db:
+            db.row_factory = aiosqlite.Row
+            async with db.execute(
+                "SELECT * FROM videos WHERE provider_id = ? AND created_at < ?",
+                ("auto_save", cutoff),
+            ) as cursor:
+                rows = await cursor.fetchall()
+                return [dict(row) for row in rows]
+
+    async def get_expired_meh_images(self, max_age_days: int) -> list[dict[str, Any]]:
+        cutoff = (datetime.now(timezone.utc) - timedelta(days=max_age_days)).isoformat()
+        async with aiosqlite.connect(self.db_path) as db:
+            db.row_factory = aiosqlite.Row
+            async with db.execute(
+                "SELECT * FROM images WHERE favorite = ? AND created_at < ?",
+                ("meh", cutoff),
+            ) as cursor:
+                rows = await cursor.fetchall()
+                return [self._row_to_dict(row) for row in rows]
 
     async def import_video_records(self, records: list[dict[str, Any]], skip_existing: bool = True) -> int:
         existing_ids = set()

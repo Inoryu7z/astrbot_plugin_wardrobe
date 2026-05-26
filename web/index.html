@@ -111,6 +111,7 @@
         <label class="filter-item"><input type="radio" name="favorite" value="" checked><span class="filter-label">全部</span></label>
         <label class="filter-item"><input type="radio" name="favorite" value="favorite"><span class="filter-label">❤️ 收藏</span></label>
         <label class="filter-item"><input type="radio" name="favorite" value="like"><span class="filter-label">👍 喜欢</span></label>
+        <label class="filter-item"><input type="radio" name="favorite" value="meh"><span class="filter-label">😐 无感</span></label>
       </div>
     </div>
     <div class="sidebar-section">
@@ -150,6 +151,15 @@
       <span class="batch-reanalyze-indicator hidden" id="batchReanalyzeIndicator"></span>
       <button class="btn btn-accent" id="batchReanalyzeBtn">重新分析</button>
       <button class="btn btn-secondary" id="batchReanalyzeFailedBtn">重分析失败图</button>
+      <div class="batch-fav-group" id="batchFavGroup">
+        <button class="btn btn-secondary" id="batchFavToggle">批量标签 ▾</button>
+        <div class="batch-fav-dropdown hidden" id="batchFavDropdown">
+          <button class="batch-fav-item" data-fav="favorite">❤️ 收藏</button>
+          <button class="batch-fav-item" data-fav="like">👍 喜欢</button>
+          <button class="batch-fav-item" data-fav="meh">😐 无感</button>
+          <button class="batch-fav-item" data-fav="none">取消标记</button>
+        </div>
+      </div>
       <button class="btn btn-danger" id="batchDeleteBtn">删除选中</button>
       <button class="btn btn-ghost" id="batchCancelBtn">取消</button>
     </div>
@@ -170,6 +180,7 @@
           <option value="">全部</option>
           <option value="favorite">仅收藏</option>
           <option value="like">仅喜欢</option>
+          <option value="meh">仅无感</option>
         </select>
         <button class="btn btn-ghost btn-sm" id="statsBackBtn">← 返回图库</button>
       </div>
@@ -283,6 +294,7 @@
             <div class="favorite-btns" id="favoriteBtns">
               <button class="btn btn-fav" id="favFavoriteBtn" title="收藏">🤍</button>
               <button class="btn btn-fav" id="favLikeBtn" title="喜欢">👍</button>
+              <button class="btn btn-fav" id="favMehBtn" title="无感">😐</button>
             </div>
             <button class="btn btn-accent btn-sm hidden" id="modalSaveBtn">保存修改</button>
             <button class="btn btn-secondary btn-sm" id="modalEditBtn">编辑</button>

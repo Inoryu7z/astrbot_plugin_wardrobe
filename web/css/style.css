@@ -1139,6 +1139,32 @@ html, body {
   background:#E4ECFF; border-color:var(--lavender);
 }
 
+.btn-fav.active-meh {
+  background:#F0F0F0; border-color:#999;
+}
+
+.batch-fav-group {
+  position:relative; display:inline-block;
+}
+
+.batch-fav-dropdown {
+  position:absolute; top:100%; left:0; z-index:100;
+  background:var(--card); border:1px solid var(--border);
+  border-radius:8px; box-shadow:0 4px 12px rgba(0,0,0,0.15);
+  margin-top:4px; min-width:120px; overflow:hidden;
+}
+
+.batch-fav-item {
+  display:block; width:100%; padding:8px 14px;
+  background:transparent; border:none; text-align:left;
+  cursor:pointer; font-size:13px; color:var(--text);
+  transition:background .1s;
+}
+
+.batch-fav-item:hover {
+  background:rgba(0,0,0,0.05);
+}
+
 .image-card-fav {
   position:absolute; top:32px; left:8px;
   font-size:14px; z-index:2;

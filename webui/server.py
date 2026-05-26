@@ -82,8 +82,8 @@ class WardrobeWebServer:
             static_url_path="/static",
         )
         app.secret_key = secrets.token_hex(32)
-        app.config["MAX_CONTENT_LENGTH"] = 512 * 1024 * 1024
-        app.config["BODY_TIMEOUT"] = 600
+        app.config["MAX_CONTENT_LENGTH"] = 1024 * 1024 * 1024
+        app.config["BODY_TIMEOUT"] = 1200
 
         @app.errorhandler(404)
         async def handle_404(e):
@@ -164,7 +164,7 @@ class WardrobeWebServer:
             dist = await self.plugin.db.get_tag_distribution(
                 category=category or None,
                 persona=persona or None,
-                favorite=favorite if favorite in ("favorite", "like") else None,
+                favorite=favorite if favorite in ("favorite", "like", "meh") else None,
             )
 
             try:
@@ -200,7 +200,7 @@ class WardrobeWebServer:
             timeline = await self.plugin.db.get_timeline(
                 category=category or None,
                 persona=persona or None,
-                favorite=favorite if favorite in ("favorite", "like") else None,
+                favorite=favorite if favorite in ("favorite", "like", "meh") else None,
             )
             return jsonify(timeline)
 
@@ -226,7 +226,7 @@ class WardrobeWebServer:
 
             offset = (page - 1) * per_page
 
-            needs_search = style or scene or atmosphere or shot_size or (persona is not None) or category or (favorite in ("favorite", "like")) or ref_strength
+            needs_search = style or scene or atmosphere or shot_size or (persona is not None) or category or (favorite in ("favorite", "like", "meh")) or ref_strength
             if needs_search:
                 style_list = [style] if style else None
                 scene_list = [scene] if scene else None
@@ -238,7 +238,7 @@ class WardrobeWebServer:
                     scene=scene_list,
                     atmosphere=atmosphere_list,
                     shot_size=shot_size or None,
-                    favorite=favorite if favorite in ("favorite", "like") else None,
+                    favorite=favorite if favorite in ("favorite", "like", "meh") else None,
                     ref_strength=ref_strength or None,
                     sort_by=sort_by,
                     limit=per_page,
@@ -251,7 +251,7 @@ class WardrobeWebServer:
                     scene=scene_list,
                     atmosphere=atmosphere_list,
                     shot_size=shot_size or None,
-                    favorite=favorite if favorite in ("favorite", "like") else None,
+                    favorite=favorite if favorite in ("favorite", "like", "meh") else None,
                     ref_strength=ref_strength or None,
                 )
             elif lightweight:
@@ -259,7 +259,7 @@ class WardrobeWebServer:
                     category=category or None,
                     shot_size=shot_size or None,
                     persona=persona,
-                    favorite=favorite if favorite in ("favorite", "like") else None,
+                    favorite=favorite if favorite in ("favorite", "like", "meh") else None,
                     ref_strength=ref_strength or None,
                     sort_by=sort_by,
                     limit=per_page,
@@ -269,13 +269,13 @@ class WardrobeWebServer:
                     category=category or None,
                     shot_size=shot_size or None,
                     persona=persona,
-                    favorite=favorite if favorite in ("favorite", "like") else None,
+                    favorite=favorite if favorite in ("favorite", "like", "meh") else None,
                     ref_strength=ref_strength or None,
                 )
             else:
                 images = await self.plugin.db.list_images(
                     category=category or None, shot_size=shot_size or None,
-                    favorite=favorite if favorite in ("favorite", "like") else None,
+                    favorite=favorite if favorite in ("favorite", "like", "meh") else None,
                     ref_strength=ref_strength or None,
                     sort_by=sort_by,
                     limit=per_page, offset=offset
@@ -283,7 +283,7 @@ class WardrobeWebServer:
                 total = await self.plugin.db.search_count(
                     category=category or None,
                     shot_size=shot_size or None,
-                    favorite=favorite if favorite in ("favorite", "like") else None,
+                    favorite=favorite if favorite in ("favorite", "like", "meh") else None,
                     ref_strength=ref_strength or None,
                 )
 
@@ -508,6 +508,23 @@ class WardrobeWebServer:
                         await self.plugin._cleanup_videos_for_image(image_id)
             return jsonify({"success": True, "deleted": deleted_count})
 
+        @app.route("/api/images/batch-favorite", methods=["POST"])
+        async def api_images_batch_favorite():
+            await self.plugin._ensure_db()
+            data = await request.get_json(silent=True) or {}
+            ids = data.get("ids", [])
+            fav = data.get("favorite", "none")
+            if not ids:
+                return jsonify({"error": "未指定图片"}), 400
+            if fav not in ("favorite", "like", "meh", "none"):
+                return jsonify({"error": "无效的收藏值，应为 favorite/like/meh/none"}), 400
+            updated = 0
+            for image_id in ids:
+                ok = await self.plugin.db.update_image(image_id, favorite=fav)
+                if ok:
+                    updated += 1
+            return jsonify({"success": True, "updated": updated, "favorite": fav})
+
         @app.route("/api/images/upload", methods=["POST"])
         async def api_image_upload():
             try:
@@ -563,8 +580,8 @@ class WardrobeWebServer:
 
             data = await request.get_json(silent=True) or {}
             fav = data.get("favorite", "none")
-            if fav not in ("favorite", "like", "none"):
-                return jsonify({"error": "无效的收藏值，应为 favorite/like/none"}), 400
+            if fav not in ("favorite", "like", "meh", "none"):
+                return jsonify({"error": "无效的收藏值，应为 favorite/like/meh/none"}), 400
 
             await self.plugin.db.update_image(image_id, favorite=fav)
             return jsonify({"success": True, "favorite": fav})
@@ -600,7 +617,7 @@ class WardrobeWebServer:
                             if img:
                                 if category and img.get("category") != category:
                                     continue
-                                if favorite in ("favorite", "like") and img.get("favorite") != favorite:
+                                if favorite in ("favorite", "like", "meh") and img.get("favorite") != favorite:
                                     continue
                                 img["_similarity"] = similarity
                                 vec_results.append(img)
