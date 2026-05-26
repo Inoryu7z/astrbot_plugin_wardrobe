@@ -44,7 +44,7 @@ _BACKUP_STATE_FILE = "backup_state.json"
     "astrbot_plugin_wardrobe",
     "Inoryu7z",
     "图片衣柜管理插件，支持智能分类、语义检索和参考图接口",
-    "2.8.0",
+    "2.8.1",
 )
 class WardrobePlugin(Star):
     def __init__(self, context: Context, config: AstrBotConfig = None):
@@ -598,6 +598,112 @@ class WardrobePlugin(Star):
         )
 
         return export_path, total_records, added_files
+
+    async def build_selected_backup_zip(self, image_ids: list[str]) -> tuple[Path, int, int]:
+        await self._ensure_db()
+        records = await self.db.get_records_by_ids(image_ids)
+        if not records:
+            return Path(""), 0, 0
+
+        backup_dir = self.data_dir / "backups"
+        backup_dir.mkdir(exist_ok=True)
+        export_path = backup_dir / "wardrobe_selected_export.zip"
+
+        images_dir = self.store.images_dir
+        total_records = len(records)
+
+        video_records = []
+        for rec in records:
+            vids = await self.db.get_videos_by_image_id(rec["id"])
+            video_records.extend(vids)
+        if video_records:
+            self.video_service._ensure_dirs()
+
+        video_settings = {}
+        umo_path = self.video_service._get_send_umo_path()
+        if umo_path.exists():
+            try:
+                video_settings["video_send_umo"] = umo_path.read_text(encoding="utf-8")
+            except Exception:
+                pass
+        prompt_path = self.video_service.get_system_prompt_path()
+        if prompt_path.exists():
+            try:
+                video_settings["video_system_prompt"] = prompt_path.read_text(encoding="utf-8")
+            except Exception:
+                pass
+
+        def _build():
+            export_path.parent.mkdir(parents=True, exist_ok=True)
+            with zipfile.ZipFile(str(export_path), "w", zipfile.ZIP_DEFLATED) as zf:
+                metadata = json.dumps({
+                    "version": "3.0",
+                    "type": "full",
+                    "export_time": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
+                    "total_records": total_records,
+                    "total_videos": len(video_records),
+                    "include_video_files": bool(video_records),
+                    "selected_export": True,
+                }, ensure_ascii=False)
+                zf.writestr("backup_metadata.json", metadata)
+                zf.writestr("records.json", json.dumps(records, ensure_ascii=False, indent=2))
+                if video_records:
+                    zf.writestr("videos.json", json.dumps(video_records, ensure_ascii=False, indent=2))
+                added_files = 0
+                for rec in records:
+                    img_filename = rec.get("image_path", "")
+                    if not img_filename:
+                        continue
+                    img_path = images_dir / img_filename
+                    if img_path.exists():
+                        zf.write(str(img_path), f"images/{img_filename}", compress_type=zipfile.ZIP_STORED)
+                        added_files += 1
+                added_videos = 0
+                if video_records:
+                    videos_dir = self.video_service.videos_dir
+                    for vrec in video_records:
+                        vfilename = vrec.get("video_path", "")
+                        if not vfilename:
+                            continue
+                        vpath = videos_dir / vfilename
+                        if vpath.exists():
+                            zf.write(str(vpath), f"videos/{vfilename}", compress_type=zipfile.ZIP_STORED)
+                            added_videos += 1
+                if video_settings:
+                    zf.writestr("video_settings.json", json.dumps(video_settings, ensure_ascii=False, indent=2))
+            return added_files, added_videos
+
+        added_files, _ = await asyncio.to_thread(_build)
+        return export_path, total_records, added_files
+
+    async def export_images_zip(self, image_ids: list[str]) -> tuple[Path, int]:
+        await self._ensure_db()
+        records = await self.db.get_records_by_ids(image_ids)
+        if not records:
+            return Path(""), 0
+
+        backup_dir = self.data_dir / "backups"
+        backup_dir.mkdir(exist_ok=True)
+        export_path = backup_dir / "wardrobe_images_export.zip"
+
+        images_dir = self.store.images_dir
+
+        def _build():
+            export_path.parent.mkdir(parents=True, exist_ok=True)
+            with zipfile.ZipFile(str(export_path), "w", zipfile.ZIP_DEFLATED) as zf:
+                added_files = 0
+                for rec in records:
+                    img_filename = rec.get("image_path", "")
+                    if not img_filename:
+                        continue
+                    img_path = images_dir / img_filename
+                    if img_path.exists():
+                        zf.write(str(img_path), img_filename, compress_type=zipfile.ZIP_STORED)
+                        added_files += 1
+            return added_files
+
+        added_files = await asyncio.to_thread(_build)
+        return export_path, added_files
 
     async def _auto_backup_loop(self):
         while True:

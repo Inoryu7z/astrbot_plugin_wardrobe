@@ -149,7 +149,8 @@
       <span id="batchCount">已选 0 张</span>
       <span class="batch-upload-indicator hidden" id="batchUploadIndicator"></span>
       <span class="batch-reanalyze-indicator hidden" id="batchReanalyzeIndicator"></span>
-      <button class="btn btn-accent" id="batchReanalyzeBtn">重新分析</button>
+      <button class="btn btn-accent" id="batchSelectAllBtn">全选</button>
+      <button class="btn btn-secondary" id="batchReanalyzeBtn">重新分析</button>
       <button class="btn btn-secondary" id="batchReanalyzeFailedBtn">重分析失败图</button>
       <div class="batch-fav-group" id="batchFavGroup">
         <button class="btn btn-secondary" id="batchFavToggle">批量标签 ▾</button>
@@ -158,6 +159,13 @@
           <button class="batch-fav-item" data-fav="like">👍 喜欢</button>
           <button class="batch-fav-item" data-fav="meh">😐 无感</button>
           <button class="batch-fav-item" data-fav="none">取消标记</button>
+        </div>
+      </div>
+      <div class="batch-export-group" id="batchExportGroup">
+        <button class="btn btn-secondary" id="batchExportToggle">导出 ▾</button>
+        <div class="batch-fav-dropdown hidden" id="batchExportDropdown">
+          <button class="batch-fav-item" id="batchExportImagesBtn">🖼️ 导出图片</button>
+          <button class="batch-fav-item" id="batchExportBackupBtn">📦 导出备份</button>
         </div>
       </div>
       <button class="btn btn-danger" id="batchDeleteBtn">删除选中</button>
