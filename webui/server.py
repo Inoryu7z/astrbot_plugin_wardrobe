@@ -525,6 +525,86 @@ class WardrobeWebServer:
                     updated += 1
             return jsonify({"success": True, "updated": updated, "favorite": fav})
 
+        @app.route("/api/images/ids")
+        async def api_images_ids():
+            await self.plugin._ensure_db()
+            category = request.args.get("category", "")
+            persona = request.args.get("persona", "")
+            if persona == "__none__":
+                persona = ""
+            else:
+                persona = persona or None
+            style = request.args.get("style", "")
+            scene = request.args.get("scene", "")
+            atmosphere = request.args.get("atmosphere", "")
+            shot_size = request.args.get("shot_size", "")
+            favorite = request.args.get("favorite", "")
+            ref_strength = request.args.get("ref_strength", "")
+
+            style_list = [style] if style else None
+            scene_list = [scene] if scene else None
+            atmosphere_list = [atmosphere] if atmosphere else None
+
+            ids = await self.plugin.db.get_ids_by_filter(
+                category=category or None,
+                persona=persona,
+                style=style_list,
+                scene=scene_list,
+                atmosphere=atmosphere_list,
+                shot_size=shot_size or None,
+                favorite=favorite if favorite in ("favorite", "like", "meh") else None,
+                ref_strength=ref_strength or None,
+            )
+            return jsonify({"ids": ids})
+
+        @app.route("/api/images/export", methods=["POST"])
+        async def api_images_export():
+            try:
+                await self.plugin._ensure_db()
+                data = await request.get_json(silent=True) or {}
+                ids = data.get("ids", [])
+                if not ids:
+                    return jsonify({"error": "未选择图片"}), 400
+
+                file_path, added_files = await self.plugin.export_images_zip(ids)
+                if not file_path or added_files == 0:
+                    return jsonify({"error": "没有可导出的图片"}), 400
+
+                logger.info("[Wardrobe] 图片导出: %d张图片", added_files)
+                return await send_file(
+                    str(file_path),
+                    mimetype="application/zip",
+                    as_attachment=True,
+                    download_name=f"wardrobe_images_{time.strftime('%Y%m%d_%H%M%S')}.zip",
+                )
+            except Exception as e:
+                logger.error("[Wardrobe] 图片导出失败: %s", e, exc_info=True)
+                return jsonify({"error": f"导出失败: {e}"}), 500
+
+        @app.route("/api/backup/export-selected", methods=["POST"])
+        async def api_backup_export_selected():
+            try:
+                await self.plugin._ensure_db()
+                data = await request.get_json(silent=True) or {}
+                ids = data.get("ids", [])
+                if not ids:
+                    return jsonify({"error": "未选择图片"}), 400
+
+                file_path, total_records, added_files = await self.plugin.build_selected_backup_zip(ids)
+                if not file_path or total_records == 0:
+                    return jsonify({"error": "没有可导出的数据"}), 400
+
+                logger.info("[Wardrobe] 选择备份导出: %d条记录, %d个图片文件", total_records, added_files)
+                return await send_file(
+                    str(file_path),
+                    mimetype="application/zip",
+                    as_attachment=True,
+                    download_name=f"wardrobe_backup_selected_{time.strftime('%Y%m%d_%H%M%S')}.zip",
+                )
+            except Exception as e:
+                logger.error("[Wardrobe] 选择备份导出失败: %s", e, exc_info=True)
+                return jsonify({"error": f"导出失败: {e}"}), 500
+
         @app.route("/api/images/upload", methods=["POST"])
         async def api_image_upload():
             try:

@@ -1147,6 +1147,10 @@ html, body {
   position:relative; display:inline-block;
 }
 
+.batch-export-group {
+  position:relative; display:inline-block;
+}
+
 .batch-fav-dropdown {
   position:absolute; top:100%; left:0; z-index:100;
   background:var(--card); border:1px solid var(--border);

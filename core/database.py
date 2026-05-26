@@ -893,6 +893,42 @@ class WardrobeDatabase:
                 rows = await cursor.fetchall()
                 return [row[0] for row in rows]
 
+    async def get_ids_by_filter(
+        self,
+        *,
+        category: Optional[str] = None,
+        persona: Optional[str] = None,
+        style: Optional[list[str]] = None,
+        scene: Optional[list[str]] = None,
+        atmosphere: Optional[list[str]] = None,
+        shot_size: Optional[str] = None,
+        favorite: Optional[str] = None,
+        ref_strength: Optional[str] = None,
+    ) -> list[str]:
+        conditions, params = self._build_search_conditions(
+            category=category, style=style, scene=scene, atmosphere=atmosphere,
+            persona=persona or "", shot_size=shot_size, favorite=favorite, ref_strength=ref_strength,
+        )
+        where_clause = ""
+        if conditions:
+            where_clause = "WHERE " + " AND ".join(conditions)
+        async with aiosqlite.connect(self.db_path) as db:
+            sql = f"SELECT id FROM images {where_clause}"
+            async with db.execute(sql, params) as cursor:
+                rows = await cursor.fetchall()
+                return [row[0] for row in rows]
+
+    async def get_records_by_ids(self, image_ids: list[str]) -> list[dict[str, Any]]:
+        if not image_ids:
+            return []
+        placeholders = ",".join("?" * len(image_ids))
+        async with aiosqlite.connect(self.db_path) as db:
+            db.row_factory = aiosqlite.Row
+            sql = f"SELECT * FROM images WHERE id IN ({placeholders})"
+            async with db.execute(sql, image_ids) as cursor:
+                rows = await cursor.fetchall()
+                return [self._row_to_dict(row) for row in rows]
+
     async def import_records(self, records: list[dict[str, Any]], skip_existing: bool = True) -> int:
         existing_ids = set()
         if skip_existing:

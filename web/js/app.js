@@ -953,6 +953,101 @@
     }
   }
 
+  async function batchSelectAll(){
+    const btn=$('#batchSelectAllBtn');
+    btn.disabled=true;
+    btn.textContent='加载中...';
+    try{
+      let url=`/api/images/ids?category=${encodeURIComponent(state.category)}&persona=${encodeURIComponent(state.persona)}&style=${encodeURIComponent(state.style)}&scene=${encodeURIComponent(state.scene)}&shot_size=${encodeURIComponent(state.shot_size)}&atmosphere=${encodeURIComponent(state.atmosphere)}&favorite=${encodeURIComponent(state.favorite)}&ref_strength=${encodeURIComponent(state.ref_strength)}`;
+      const resp=await api(url);
+      if(!resp){toast('获取图片列表失败','error');return;}
+      const data=await resp.json();
+      const ids=data.ids||[];
+      ids.forEach(id=>state.selectedIds.add(id));
+      updateBatchUI();
+      toast(`已全选 ${ids.length} 张图片`,'success');
+    }catch(e){
+      toast('全选失败: '+e.message,'error');
+    }finally{
+      btn.disabled=false;
+      btn.textContent='全选';
+    }
+  }
+
+  async function batchExportImages(){
+    if(state.selectedIds.size===0){
+      toast('请先选择图片','warning');
+      return;
+    }
+    const btn=$('#batchExportToggle');
+    btn.disabled=true;
+    btn.textContent='导出中...';
+    try{
+      const resp=await fetch('/api/images/export',{
+        method:'POST',
+        headers:{'Content-Type':'application/json','X-Wardrobe-Token':getToken()},
+        body:JSON.stringify({ids:[...state.selectedIds]})
+      });
+      if(resp.status===401){localStorage.removeItem('wardrobe_token');window.location.href='/login';return;}
+      if(!resp.ok){
+        toast('导出失败','error');
+        return;
+      }
+      const blob=await resp.blob();
+      const url=URL.createObjectURL(blob);
+      const a=document.createElement('a');
+      a.href=url;
+      a.download=`wardrobe_images_${new Date().toISOString().slice(0,10)}.zip`;
+      document.body.appendChild(a);
+      a.click();
+      document.body.removeChild(a);
+      URL.revokeObjectURL(url);
+      toast(`已导出 ${state.selectedIds.size} 张图片`,'success');
+    }catch(e){
+      toast('导出失败: '+e.message,'error');
+    }finally{
+      btn.disabled=false;
+      btn.textContent='导出 ▾';
+    }
+  }
+
+  async function batchExportBackup(){
+    if(state.selectedIds.size===0){
+      toast('请先选择图片','warning');
+      return;
+    }
+    const btn=$('#batchExportToggle');
+    btn.disabled=true;
+    btn.textContent='导出中...';
+    try{
+      const resp=await fetch('/api/backup/export-selected',{
+        method:'POST',
+        headers:{'Content-Type':'application/json','X-Wardrobe-Token':getToken()},
+        body:JSON.stringify({ids:[...state.selectedIds]})
+      });
+      if(resp.status===401){localStorage.removeItem('wardrobe_token');window.location.href='/login';return;}
+      if(!resp.ok){
+        toast('导出备份失败','error');
+        return;
+      }
+      const blob=await resp.blob();
+      const url=URL.createObjectURL(blob);
+      const a=document.createElement('a');
+      a.href=url;
+      a.download=`wardrobe_backup_selected_${new Date().toISOString().slice(0,10)}.zip`;
+      document.body.appendChild(a);
+      a.click();
+      document.body.removeChild(a);
+      URL.revokeObjectURL(url);
+      toast(`已导出 ${state.selectedIds.size} 张图片的备份`,'success');
+    }catch(e){
+      toast('导出备份失败: '+e.message,'error');
+    }finally{
+      btn.disabled=false;
+      btn.textContent='导出 ▾';
+    }
+  }
+
   async function batchReanalyze(){
     if(state.selectedIds.size===0){
       toast('请先选择图片','warning');
@@ -2143,21 +2238,37 @@
     });
 
     $('#batchDeleteBtn').addEventListener('click',batchDelete);
+    $('#batchSelectAllBtn').addEventListener('click',batchSelectAll);
     $('#batchReanalyzeBtn').addEventListener('click',batchReanalyze);
     $('#batchReanalyzeFailedBtn').addEventListener('click',batchReanalyzeFailed);
     $('#batchFavToggle').addEventListener('click',()=>{
       $('#batchFavDropdown').classList.toggle('hidden');
     });
-    document.querySelectorAll('.batch-fav-item').forEach(btn=>{
+    document.querySelectorAll('.batch-fav-item[data-fav]').forEach(btn=>{
       btn.addEventListener('click',()=>{
         const fav=btn.dataset.fav;
         $('#batchFavDropdown').classList.add('hidden');
         batchFavorite(fav);
       });
     });
+    $('#batchExportToggle').addEventListener('click',()=>{
+      $('#batchExportDropdown').classList.toggle('hidden');
+    });
+    $('#batchExportImagesBtn').addEventListener('click',()=>{
+      $('#batchExportDropdown').classList.add('hidden');
+      batchExportImages();
+    });
+    $('#batchExportBackupBtn').addEventListener('click',()=>{
+      $('#batchExportDropdown').classList.add('hidden');
+      batchExportBackup();
+    });
     document.addEventListener('click',e=>{
       if(!e.target.closest('#batchFavGroup')){
         const dd=$('#batchFavDropdown');
+        if(dd)dd.classList.add('hidden');
+      }
+      if(!e.target.closest('#batchExportGroup')){
+        const dd=$('#batchExportDropdown');
         if(dd)dd.classList.add('hidden');
       }
     });
