@@ -258,6 +258,11 @@ html, body {
   z-index:20;
 }
 
+.batch-mode .image-grid {
+  user-select:none;
+  -webkit-user-select:none;
+}
+
 .image-grid {
   display: grid;
   grid-template-columns: repeat(5, 1fr);
