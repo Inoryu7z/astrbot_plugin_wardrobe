@@ -575,7 +575,7 @@ class WardrobeWebServer:
                     str(file_path),
                     mimetype="application/zip",
                     as_attachment=True,
-                    download_name=f"wardrobe_images_{time.strftime('%Y%m%d_%H%M%S')}.zip",
+                    attachment_filename=f"wardrobe_images_{time.strftime('%Y%m%d_%H%M%S')}.zip",
                 )
             except Exception as e:
                 logger.error("[Wardrobe] 图片导出失败: %s", e, exc_info=True)
@@ -599,7 +599,7 @@ class WardrobeWebServer:
                     str(file_path),
                     mimetype="application/zip",
                     as_attachment=True,
-                    download_name=f"wardrobe_backup_selected_{time.strftime('%Y%m%d_%H%M%S')}.zip",
+                    attachment_filename=f"wardrobe_backup_selected_{time.strftime('%Y%m%d_%H%M%S')}.zip",
                 )
             except Exception as e:
                 logger.error("[Wardrobe] 选择备份导出失败: %s", e, exc_info=True)
@@ -826,7 +826,7 @@ class WardrobeWebServer:
                     str(file_path),
                     mimetype="application/zip",
                     as_attachment=True,
-                    download_name=f"wardrobe_backup_{time.strftime('%Y%m%d_%H%M%S')}.zip",
+                    attachment_filename=f"wardrobe_backup_{time.strftime('%Y%m%d_%H%M%S')}.zip",
                 )
             except Exception as e:
                 logger.error("[Wardrobe] 备份导出失败: %s", e, exc_info=True)
