@@ -960,7 +960,7 @@
     try{
       let url=`/api/images/ids?category=${encodeURIComponent(state.category)}&persona=${encodeURIComponent(state.persona)}&style=${encodeURIComponent(state.style)}&scene=${encodeURIComponent(state.scene)}&shot_size=${encodeURIComponent(state.shot_size)}&atmosphere=${encodeURIComponent(state.atmosphere)}&favorite=${encodeURIComponent(state.favorite)}&ref_strength=${encodeURIComponent(state.ref_strength)}`;
       const resp=await api(url);
-      if(!resp){toast('获取图片列表失败','error');return;}
+      if(!resp||!resp.ok){toast('获取图片列表失败','error');return;}
       const data=await resp.json();
       const ids=data.ids||[];
       ids.forEach(id=>state.selectedIds.add(id));
