@@ -82,7 +82,7 @@ class WardrobeWebServer:
             static_url_path="/static",
         )
         app.secret_key = secrets.token_hex(32)
-        app.config["MAX_CONTENT_LENGTH"] = 1024 * 1024 * 1024
+        app.config["MAX_CONTENT_LENGTH"] = 5 * 1024 * 1024 * 1024
         app.config["BODY_TIMEOUT"] = 1200
 
         @app.errorhandler(404)
