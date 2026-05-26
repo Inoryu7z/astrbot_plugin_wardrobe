@@ -1288,6 +1288,6 @@ class WardrobeWebServer:
         logger.info("[Wardrobe] WebUI 已停止")
 
 
-async def aiofiles_open(path, mode="r"):
+def aiofiles_open(path, mode="r"):
     import aiofiles
     return aiofiles.open(path, mode)
