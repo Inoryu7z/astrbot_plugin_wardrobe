@@ -1,4 +1,18 @@
-﻿﻿﻿﻿﻿### v2.8.1
+﻿### v2.9.0
+
+✨ 新增：人格级风格池（补拍专用）
+
+* 新增 `get_style_pool_for_persona(persona_name)` 接口：返回指定人格的自定义风格池，供 aiimg 补拍使用
+* 新增 `save_persona_style_pool(persona_name, styles)` / `delete_persona_style_pool(persona_name)` 方法
+* 新增 `persona_style_pools.json` 存储文件，独立于全局池子配置
+* WebUI 标签分类管理 modal 新增「人格风格池」区域：选择人格后可管理其专属风格列表
+* 支持从全局风格池点击快速添加到人格池
+* 人格池留空时自动回退到全局风格池，不影响现有行为
+* 新增 `GET /api/persona-style-pools` 和 `POST /api/persona-style-pools` API 端点
+
+---
+
+﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿### v2.8.1
 
 ✨ 新增：批量全选 + 筛选导出 + 选择备份导出
 

@@ -815,6 +815,42 @@ class WardrobeWebServer:
             await self.plugin.save_custom_pools(pools)
             return jsonify({"success": True, "pools": {k: list(v) for k, v in pools.items()}})
 
+        # ---------- 人格级风格池（供 aiimg 补拍使用） ----------
+
+        @app.route("/api/persona-style-pools", methods=["GET"])
+        async def api_get_persona_style_pools():
+            personas = self.plugin._get_personas_config()
+            persona_names = [p.get("name", "") for p in personas if p.get("name")]
+            pools = await self.plugin._load_persona_style_pools()
+            try:
+                global_pools = await self.plugin.get_merged_pools()
+                global_style_pool = list(global_pools.get("style", []))
+            except Exception:
+                global_style_pool = []
+            return jsonify({
+                "personas": persona_names,
+                "pools": {k: list(v) for k, v in pools.items()},
+                "global_style_pool": global_style_pool,
+            })
+
+        @app.route("/api/persona-style-pools", methods=["POST"])
+        async def api_save_persona_style_pool():
+            data = await request.get_json(silent=True) or {}
+            persona = str(data.get("persona", "") or "").strip()
+            action = str(data.get("action", "") or "").strip()
+            if not persona:
+                return jsonify({"error": "人格名不能为空"}), 400
+
+            if action == "delete":
+                await self.plugin.delete_persona_style_pool(persona)
+                return jsonify({"success": True})
+
+            styles = data.get("styles", [])
+            if not isinstance(styles, list):
+                return jsonify({"error": "styles 必须是列表"}), 400
+            await self.plugin.save_persona_style_pool(persona, styles)
+            return jsonify({"success": True, "persona": persona, "styles": [str(s) for s in styles]})
+
         @app.route("/api/backup/export")
         async def api_backup_export():
             try:

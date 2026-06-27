@@ -2188,14 +2188,116 @@
       state.ref_strength=e.target.value;state.page=1;state.allLoaded=false;loadImages(true);
     });
 
-    $('#poolsBtn').addEventListener('click',()=>{$('#poolsModal').classList.remove('hidden');loadPoolsModal();});
+    $('#poolsBtn').addEventListener('click',()=>{$('#poolsModal').classList.remove('hidden');loadPoolsModal();loadPersonaStylePools();});
     $('#poolsModalClose').addEventListener('click',()=>{$('#poolsModal').classList.add('hidden');});
+    $('#personaStyleSelect').addEventListener('change',()=>{renderPersonaStyleList();renderGlobalStyleQuickAdd();});
+    $('#personaStyleAddBtn').addEventListener('click',personaStyleAddCurrent);
+    $('#personaStyleInput').addEventListener('keydown',e=>{if(e.key==='Enter'){e.preventDefault();personaStyleAddCurrent();}});
+    $('#personaStyleResetBtn').addEventListener('click',async()=>{
+      const sel=$('#personaStyleSelect').value;
+      if(!sel)return;
+      if(!confirm('确定清空「'+sel+'」的人格风格池？该人格将回退到全局风格池。'))return;
+      const resp=await api('/api/persona-style-pools',{method:'POST',json:{persona:sel,action:'delete'}});
+      if(resp&&resp.ok){toast('已重置为全局池','success');loadPersonaStylePools();}
+    });
     $('#poolAddKeyBtn').addEventListener('click',async()=>{
       const val=$('#poolNewKey').value.trim();
       if(!val){toast('请输入分类名称','error');return;}
       const resp=await api('/api/pools',{method:'POST',json:{key:val,action:'add_pool',value:val}});
       if(resp&&resp.ok){toast('分类已创建，现在可以添加选项了','success');$('#poolNewKey').value='';loadPoolsModal();loadFilters();}
     });
+
+    // ---------- 人格风格池管理 ----------
+    let _personaStyleState={personas:[],pools:{},globalStylePool:[],currentStyles:[]};
+
+    async function loadPersonaStylePools(){
+      try{
+        const resp=await api('/api/persona-style-pools');
+        const data=await resp.json();
+        _personaStyleState.personas=data.personas||[];
+        _personaStyleState.pools=data.pools||{};
+        _personaStyleState.globalStylePool=data.global_style_pool||[];
+      }catch(e){console.error('loadPersonaStylePools',e);}
+      const sel=$('#personaStyleSelect');
+      const prev=sel.value;
+      sel.innerHTML='<option value="">选择人格...</option>';
+      _personaStyleState.personas.forEach(p=>{
+        const opt=document.createElement('option');
+        opt.value=p;opt.textContent=p;
+        sel.appendChild(opt);
+      });
+      if(prev&&_personaStyleState.personas.includes(prev))sel.value=prev;
+      renderPersonaStyleList();
+      renderGlobalStyleQuickAdd();
+    }
+
+    function renderPersonaStyleList(){
+      const sel=$('#personaStyleSelect');
+      const persona=sel.value;
+      const list=$('#personaStyleList');
+      const input=$('#personaStyleInput');
+      const addBtn=$('#personaStyleAddBtn');
+      if(!persona){
+        list.innerHTML='<span class="pools-hint" style="opacity:0.5;">请先选择人格</span>';
+        input.disabled=true;addBtn.disabled=true;
+        _personaStyleState.currentStyles=[];
+        return;
+      }
+      input.disabled=false;addBtn.disabled=false;
+      const styles=_personaStyleState.pools[persona]||[];
+      _personaStyleState.currentStyles=[...styles];
+      if(styles.length===0){
+        list.innerHTML='<span class="pools-hint" style="opacity:0.5;">该人格暂无自定义风格池，将使用全局风格池（'+_personaStyleState.globalStylePool.length+'项）</span>';
+        return;
+      }
+      list.innerHTML=styles.map(v=>'<span class="pool-tag">'+esc(v)+'<span class="pool-tag-remove" data-value="'+esc(v)+'">&times;</span></span>').join('');
+      list.querySelectorAll('.pool-tag-remove').forEach(btn=>{
+        btn.addEventListener('click',async()=>{
+          const val=btn.getAttribute('data-value');
+          const filtered=_personaStyleState.currentStyles.filter(s=>s!==val);
+          const resp=await api('/api/persona-style-pools',{method:'POST',json:{persona:persona,styles:filtered}});
+          if(resp&&resp.ok){toast('已移除','success');loadPersonaStylePools();}
+        });
+      });
+    }
+
+    async function personaStyleAddCurrent(){
+      const persona=$('#personaStyleSelect').value;
+      const input=$('#personaStyleInput');
+      const val=input.value.trim();
+      if(!persona||!val)return;
+      if(_personaStyleState.currentStyles.includes(val)){toast('已存在','info');return;}
+      const newStyles=[..._personaStyleState.currentStyles,val];
+      const resp=await api('/api/persona-style-pools',{method:'POST',json:{persona:persona,styles:newStyles}});
+      if(resp&&resp.ok){toast('已添加','success');input.value='';loadPersonaStylePools();}
+    }
+
+    function renderGlobalStyleQuickAdd(){
+      const container=$('#globalStyleQuickAdd');
+      const persona=$('#personaStyleSelect').value;
+      if(!persona){
+        container.innerHTML='';
+        return;
+      }
+      const current=_personaStyleState.currentStyles;
+      const available=_personaStyleState.globalStylePool.filter(s=>!current.includes(s));
+      if(available.length===0){
+        container.innerHTML='';
+        return;
+      }
+      container.innerHTML='<p class="pools-hint" style="font-size:0.8rem;margin-bottom:0.25rem;opacity:0.6;">点击从全局池快速添加：</p>'+
+        available.slice(0,40).map(v=>'<span class="pool-tag" style="cursor:pointer;opacity:0.7;" data-value="'+esc(v)+'">'+esc(v)+'</span>').join('')+
+        (available.length>40?'<span class="pools-hint" style="font-size:0.75rem;opacity:0.4;"> ...还有'+(available.length-40)+'项，请直接输入</span>':'');
+      container.querySelectorAll('.pool-tag').forEach(tag=>{
+        tag.addEventListener('click',async()=>{
+          const val=tag.getAttribute('data-value');
+          const newStyles=[..._personaStyleState.currentStyles,val];
+          const resp=await api('/api/persona-style-pools',{method:'POST',json:{persona:persona,styles:newStyles}});
+          if(resp&&resp.ok){toast('已添加','success');loadPersonaStylePools();}
+        });
+      });
+    }
+
 
     const mobileFilterBtn=$('#mobileFilterBtn');
     if(mobileFilterBtn){
