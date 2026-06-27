@@ -190,6 +190,77 @@ class WardrobePlugin(Star):
         with open(path, "w", encoding="utf-8") as f:
             f.write(content)
 
+    # ---------- 人格级风格池（供 aiimg 补拍使用） ----------
+
+    async def get_style_pool_for_persona(self, persona_name: str) -> list[str] | None:
+        """返回指定人格的自定义风格池。
+
+        返回 None 表示该人格未配置自定义风格池，调用方应回退到全局风格池。
+        返回空列表表示该人格显式配置为空池（极少见）。
+        """
+        persona_name = (persona_name or "").strip()
+        if not persona_name:
+            return None
+        pools = await self._load_persona_style_pools()
+        if persona_name in pools:
+            return list(pools[persona_name])
+        return None
+
+    async def _load_persona_style_pools(self) -> dict[str, list[str]]:
+        import json
+        path = self.data_dir / "persona_style_pools.json"
+        if path.exists():
+            try:
+                data = await asyncio.to_thread(self._read_persona_style_pools_file, path)
+                if not isinstance(data, dict):
+                    return {}
+                result = {}
+                for k, v in data.items():
+                    if isinstance(v, list):
+                        result[k] = [str(item) for item in v if str(item).strip()]
+                return result
+            except Exception:
+                pass
+        return {}
+
+    @staticmethod
+    def _read_persona_style_pools_file(path: Path):
+        import json
+        with open(path, "r", encoding="utf-8") as f:
+            return json.load(f)
+
+    async def save_persona_style_pool(self, persona_name: str, styles: list[str]):
+        """保存指定人格的自定义风格池。"""
+        import json
+        persona_name = (persona_name or "").strip()
+        if not persona_name:
+            return
+        pools = await self._load_persona_style_pools()
+        cleaned = [str(s).strip() for s in styles if str(s).strip()]
+        pools[persona_name] = cleaned
+        path = self.data_dir / "persona_style_pools.json"
+        path.parent.mkdir(parents=True, exist_ok=True)
+        content = json.dumps(pools, ensure_ascii=False, indent=2)
+        await asyncio.to_thread(self._write_persona_style_pools_file, path, content)
+        logger.info("[Wardrobe] 人格风格池已保存: %s (%d 项)", persona_name, len(cleaned))
+
+    async def delete_persona_style_pool(self, persona_name: str):
+        """删除指定人格的自定义风格池，使其回退到全局池。"""
+        import json
+        persona_name = (persona_name or "").strip()
+        pools = await self._load_persona_style_pools()
+        if persona_name in pools:
+            del pools[persona_name]
+            path = self.data_dir / "persona_style_pools.json"
+            content = json.dumps(pools, ensure_ascii=False, indent=2)
+            await asyncio.to_thread(self._write_persona_style_pools_file, path, content)
+            logger.info("[Wardrobe] 人格风格池已删除: %s", persona_name)
+
+    @staticmethod
+    def _write_persona_style_pools_file(path: Path, content: str):
+        with open(path, "w", encoding="utf-8") as f:
+            f.write(content)
+
     async def _ensure_db(self):
         if self._db_initialized:
             return

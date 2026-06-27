@@ -469,6 +469,24 @@
         <button class="btn btn-accent btn-sm" id="poolAddKeyBtn">创建</button>
       </div>
     </div>
+    <div class="pools-create-section" style="margin-top:1.5rem;border-top:1px solid rgba(255,255,255,0.08);padding-top:1.5rem;">
+      <h3 class="pools-create-title">人格风格池（补拍专用）</h3>
+      <p class="pools-create-desc">为每个人格定制 aiimg 补拍使用的风格池。选择人格后管理其专属风格列表；留空（删除所有项）则该人格回退到全局风格池。</p>
+      <div class="pools-create-row" style="margin-bottom:0.75rem;">
+        <select id="personaStyleSelect" class="login-input" style="flex:0 0 auto;min-width:160px;">
+          <option value="">选择人格...</option>
+        </select>
+        <button class="btn btn-ghost btn-sm" id="personaStyleResetBtn" title="清空该人格的风格池，回退到全局池">重置为全局</button>
+      </div>
+      <div id="personaStyleList" class="pool-group-body" style="min-height:40px;border:1px dashed rgba(255,255,255,0.1);border-radius:8px;padding:0.5rem;margin-bottom:0.5rem;">
+        <span class="pools-hint" style="opacity:0.5;">请先选择人格</span>
+      </div>
+      <div class="pools-create-row">
+        <input type="text" id="personaStyleInput" class="login-input pools-create-input" placeholder="输入风格名称，回车添加（也可从下方全局池点击快速添加）" disabled>
+        <button class="btn btn-accent btn-sm" id="personaStyleAddBtn" disabled>添加</button>
+      </div>
+      <div id="globalStyleQuickAdd" style="margin-top:0.5rem;"></div>
+    </div>
   </div>
 </div>
 
