@@ -464,7 +464,9 @@
       if(resp&&resp.ok){
         const data=await resp.json();
         const images=data.images||[];
-        if(images.length<state.perPage)state.allLoaded=true;
+        // 不在此处提前设 allLoaded：否则 loadImages(false) 会因 allLoaded 直接 return，
+        // 导致 preloadedPage2 里最后一批图（< perPage 张）永远不会被渲染。
+        // allLoaded 由 loadImages 在真正把预加载页渲染进网格后再判断。
         state.preloadedPage2=images;
       }
     }catch(e){
