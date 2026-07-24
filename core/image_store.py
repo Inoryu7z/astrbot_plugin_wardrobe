@@ -23,7 +23,7 @@ class ImageStore:
         filepath = self.images_dir / filename
         async with aiofiles.open(filepath, "wb") as f:
             await f.write(image_bytes)
-        logger.info("[Wardrobe] 图片已保存: %s (format=%s)", filename, ext)
+        logger.debug("[Wardrobe] 图片已保存: %s (format=%s)", filename, ext)
         await self.ensure_thumbnail(filename)
         return filename
 
@@ -33,7 +33,7 @@ class ImageStore:
         filename = f"{uuid.uuid4().hex}.{ext}"
         filepath = self.images_dir / filename
         await asyncio.to_thread(self._copy_file, str(source), str(filepath))
-        logger.info("[Wardrobe] 图片已从路径保存: %s -> %s", source_path, filename)
+        logger.debug("[Wardrobe] 图片已从路径保存: %s -> %s", source_path, filename)
         await self.ensure_thumbnail(filename)
         return filename
 
@@ -45,7 +45,7 @@ class ImageStore:
         deleted = False
         if filepath.exists():
             await asyncio.to_thread(filepath.unlink)
-            logger.info("[Wardrobe] 图片已删除: %s", filename)
+            logger.debug("[Wardrobe] 图片已删除: %s", filename)
             deleted = True
         thumb_path = self.get_thumbnail_path(filename)
         if thumb_path.exists():

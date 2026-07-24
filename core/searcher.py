@@ -150,7 +150,7 @@ class ImageSearcher:
         if self.vector_searcher and self.vector_searcher.available and exclude_current_persona and current_persona:
             if persona_mode == "no_persona_only":
                 candidates = await self._vector_search(user_query, k=candidate_limit, persona="", min_similarity=min_similarity)
-                logger.info(
+                logger.debug(
                     "[Wardrobe] 向量检索（no_persona_only）: %d张 persona=无人格",
                     len(candidates),
                 )
@@ -158,11 +158,11 @@ class ImageSearcher:
                     candidates = self._sort_by_favorite(candidates)
                     meta["searched_persona"] = ""
                 else:
-                    logger.info("[Wardrobe] 无人格池无结果，no_persona_only模式不回退其他人格")
+                    logger.debug("[Wardrobe] 无人格池无结果，no_persona_only模式不回退其他人格")
                     return [], meta
             else:
                 candidates = await self._vector_search(user_query, k=candidate_limit, persona="", min_similarity=min_similarity)
-                logger.info(
+                logger.debug(
                     "[Wardrobe] 向量检索（fallback_other优先无人格）: %d张 persona=无人格",
                     len(candidates),
                 )
@@ -171,7 +171,7 @@ class ImageSearcher:
                     meta["searched_persona"] = ""
                 else:
                     candidates = await self._vector_search(user_query, k=candidate_limit, exclude_persona=current_persona, min_similarity=min_similarity)
-                    logger.info(
+                    logger.debug(
                         "[Wardrobe] 向量检索（fallback_other回退）: %d张 exclude=%s",
                         len(candidates), current_persona,
                     )
@@ -195,7 +195,7 @@ class ImageSearcher:
             # 直接传给 _vector_search 即可按人格池过滤。
             # ================================================================
             candidates = await self._vector_search(user_query, k=candidate_limit, persona=persona, min_similarity=min_similarity)
-            logger.info(
+            logger.debug(
                 "[Wardrobe] 向量检索（用户搜图-跳过意图解析）: %d张 persona=%s",
                 len(candidates), "无人格" if persona == "" else (persona or "全局"),
             )
@@ -204,7 +204,7 @@ class ImageSearcher:
                 meta["searched_persona"] = persona or "全局"
                 meta["persona_scope"] = "vector"
             else:
-                logger.info("[Wardrobe] 向量检索无结果，回退 LEGACY 意图解析+LIKE")
+                logger.debug("[Wardrobe] 向量检索无结果，回退 LEGACY 意图解析+LIKE")
                 candidates = await self._legacy_parse_and_search(
                     user_query, primary_provider_id, secondary_provider_id,
                     timeout_seconds, candidate_limit, current_persona, persona_names,
@@ -231,7 +231,7 @@ class ImageSearcher:
             )
 
         if not candidates:
-            logger.info("[Wardrobe] 未找到候选图片")
+            logger.debug("[Wardrobe] 未找到候选图片")
             return [], meta
 
         if prioritize_unused:
@@ -258,19 +258,14 @@ class ImageSearcher:
                 weight = _DECAY_FACTOR ** dsuc
                 if weight >= _EXCLUDE_THRESHOLD:
                     filtered.append(c)
-                else:
-                    logger.info(
-                        "[Wardrobe] 补拍衰减排除: id=%s daily_selfie_use_count=%d weight=%.4f",
-                        c.get("id", "?"), dsuc, weight,
-                    )
             candidates = filtered
-            logger.info(
+            logger.debug(
                 "[Wardrobe] 补拍衰减过滤: %d -> %d (排除%d张, factor=%.1f, threshold=%.2f)",
                 before_count, len(candidates), before_count - len(candidates),
                 _DECAY_FACTOR, _EXCLUDE_THRESHOLD,
             )
             if not candidates:
-                logger.info("[Wardrobe] 补拍衰减过滤后无候选图片")
+                logger.debug("[Wardrobe] 补拍衰减过滤后无候选图片")
                 return [], meta
 
         if len(candidates) <= max_select:
@@ -304,14 +299,14 @@ class ImageSearcher:
         user_query: str = "",
         min_similarity: float | None = None,
     ) -> list[dict[str, Any]]:
-        logger.info(
+        logger.debug(
             "[Wardrobe] 搜索策略: scope=%s current_persona=%s named_persona=%s",
             persona_scope, current_persona or "无", named_persona or "无",
         )
 
         if persona_scope == "self" and current_persona:
             candidates = await self._query_candidates(conditions, limit=limit, persona=current_persona, user_query=user_query, min_similarity=min_similarity)
-            logger.info("[Wardrobe] 当前人格池搜索结果: %d张 persona=%s", len(candidates), current_persona)
+            logger.debug("[Wardrobe] 当前人格池搜索结果: %d张 persona=%s", len(candidates), current_persona)
             if candidates:
                 meta["searched_persona"] = current_persona
                 return candidates
@@ -319,7 +314,7 @@ class ImageSearcher:
 
         if persona_scope == "other" and current_persona:
             candidates = await self._query_candidates_excluding_persona(conditions, limit=limit, exclude_persona=current_persona, user_query=user_query, min_similarity=min_similarity)
-            logger.info("[Wardrobe] 排除人格搜索结果: %d张 exclude=%s", len(candidates), current_persona)
+            logger.debug("[Wardrobe] 排除人格搜索结果: %d张 exclude=%s", len(candidates), current_persona)
             if candidates:
                 meta["searched_persona"] = f"非{current_persona}"
                 return candidates
@@ -327,13 +322,12 @@ class ImageSearcher:
 
         if persona_scope == "named" and named_persona:
             candidates = await self._query_candidates(conditions, limit=limit, persona=named_persona, user_query=user_query, min_similarity=min_similarity)
-            logger.info("[Wardrobe] 指定人格搜索结果: %d张 persona=%s", len(candidates), named_persona)
+            logger.debug("[Wardrobe] 指定人格搜索结果: %d张 persona=%s", len(candidates), named_persona)
             if candidates:
                 meta["searched_persona"] = named_persona
                 return candidates
             return []
 
-        logger.info("[Wardrobe] 全局搜索")
         return await self._query_candidates(conditions, limit=limit, persona=None, user_query=user_query, min_similarity=min_similarity)
 
     async def _legacy_parse_and_search(
@@ -390,12 +384,12 @@ class ImageSearcher:
 
     async def _vector_search(self, user_query: str, k: int, persona: Optional[str] = None, exclude_persona: str = "", min_similarity: float | None = None) -> list[dict[str, Any]]:
         if not self.vector_searcher or not self.vector_searcher.available:
-            logger.info("[Wardrobe] 向量检索不可用: vector_searcher=%s available=%s",
+            logger.debug("[Wardrobe] 向量检索不可用: vector_searcher=%s available=%s",
                         self.vector_searcher is not None,
                         self.vector_searcher.available if self.vector_searcher else False)
             return []
 
-        logger.info("[Wardrobe] 向量检索开始: query=%s k=%d persona=%s exclude_persona=%s",
+        logger.debug("[Wardrobe] 向量检索开始: query=%s k=%d persona=%s exclude_persona=%s",
                     user_query[:100], k, "无人格" if persona == "" else (persona or "全局"), exclude_persona or "无")
         wardrobe_results = await self.vector_searcher.search(
             query=user_query,
@@ -405,7 +399,7 @@ class ImageSearcher:
             min_similarity=min_similarity,
         )
         if not wardrobe_results:
-            logger.info("[Wardrobe] 向量检索无结果: query=%s", user_query[:100])
+            logger.debug("[Wardrobe] 向量检索无结果: query=%s", user_query[:100])
             return []
 
         results = []
@@ -414,8 +408,7 @@ class ImageSearcher:
             if img:
                 img["_similarity"] = similarity
                 results.append(img)
-        logger.info("[Wardrobe] 向量检索命中: %d张 (原始返回%d个ID, 数据库匹配%d张)",
-                    len(results), len(wardrobe_results), len(results))
+        logger.debug("[Wardrobe] 向量检索命中: %d张", len(results))
         return results
 
     async def _query_candidates_excluding_persona(
@@ -434,10 +427,10 @@ class ImageSearcher:
 
         vec_results = await self._vector_search(user_query or " ".join(keywords or []), k=limit, exclude_persona=exclude_persona, min_similarity=min_similarity)
         if vec_results:
-            logger.info("[Wardrobe] 向量检索命中（排除人格）: %d张 exclude=%s", len(vec_results), exclude_persona)
+            logger.debug("[Wardrobe] 向量检索命中（排除人格）: %d张 exclude=%s", len(vec_results), exclude_persona)
             return self._sort_by_favorite(vec_results)
 
-        logger.info("[Wardrobe] 向量检索无结果（排除人格），回退LIKE检索 exclude=%s", exclude_persona)
+        logger.debug("[Wardrobe] 向量检索无结果（排除人格），回退LIKE检索 exclude=%s", exclude_persona)
         results = await self.db.search_images(
             category=category,
             exposure_level=exposure_level,
@@ -529,10 +522,10 @@ class ImageSearcher:
 
         vec_results = await self._vector_search(user_query or " ".join(keywords or []), k=limit, persona=persona, min_similarity=min_similarity)
         if vec_results:
-            logger.info("[Wardrobe] 向量检索命中: %d张 persona=%s", len(vec_results), "无人格" if persona == "" else (persona or "全局"))
+            logger.debug("[Wardrobe] 向量检索命中: %d张 persona=%s", len(vec_results), "无人格" if persona == "" else (persona or "全局"))
             return self._sort_by_favorite(vec_results)
 
-        logger.info("[Wardrobe] 向量检索无结果，回退LIKE检索 persona=%s", "无人格" if persona == "" else (persona or "全局"))
+        logger.debug("[Wardrobe] 向量检索无结果，回退LIKE检索 persona=%s", "无人格" if persona == "" else (persona or "全局"))
         results = await self.db.search_images(
             category=category,
             exposure_level=exposure_level,
