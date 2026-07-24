@@ -93,13 +93,13 @@ class WardrobePlugin(Star):
                 provider = self.context.get_provider_by_id(emb_id)
                 if provider and isinstance(provider, EmbeddingProvider):
                     embedding_provider = provider
-                    logger.info("[Wardrobe] 使用配置的 Embedding Provider: %s", emb_id)
+                    logger.debug("[Wardrobe] 使用配置的 Embedding Provider: %s", emb_id)
             if not embedding_provider:
                 try:
                     embedding_providers = self.context.get_all_embedding_providers()
                     if embedding_providers:
                         embedding_provider = embedding_providers[0]
-                        logger.info("[Wardrobe] 使用默认 Embedding Provider")
+                        logger.debug("[Wardrobe] 使用默认 Embedding Provider")
                 except Exception:
                     pass
             if not embedding_provider:
@@ -120,7 +120,7 @@ class WardrobePlugin(Star):
                 return None
             provider = self.context.get_provider_by_id(rerank_id)
             if provider and isinstance(provider, RerankProvider):
-                logger.info("[Wardrobe] 使用配置的 Rerank Provider: %s", rerank_id)
+                logger.debug("[Wardrobe] 使用配置的 Rerank Provider: %s", rerank_id)
                 return provider
             logger.warning("[Wardrobe] Rerank Provider '%s' 未找到或类型不匹配", rerank_id)
             return None
@@ -183,7 +183,7 @@ class WardrobePlugin(Star):
         path.parent.mkdir(parents=True, exist_ok=True)
         content = json.dumps(custom, ensure_ascii=False, indent=2)
         await asyncio.to_thread(self._write_custom_pools_file, path, content)
-        logger.info("[Wardrobe] 自定义池子已保存")
+        logger.debug("[Wardrobe] 自定义池子已保存")
 
     @staticmethod
     def _write_custom_pools_file(path: Path, content: str):
@@ -242,7 +242,7 @@ class WardrobePlugin(Star):
         path.parent.mkdir(parents=True, exist_ok=True)
         content = json.dumps(pools, ensure_ascii=False, indent=2)
         await asyncio.to_thread(self._write_persona_style_pools_file, path, content)
-        logger.info("[Wardrobe] 人格风格池已保存: %s (%d 项)", persona_name, len(cleaned))
+        logger.debug("[Wardrobe] 人格风格池已保存: %s (%d 项)", persona_name, len(cleaned))
 
     async def delete_persona_style_pool(self, persona_name: str):
         """删除指定人格的自定义风格池，使其回退到全局池。"""
@@ -254,7 +254,7 @@ class WardrobePlugin(Star):
             path = self.data_dir / "persona_style_pools.json"
             content = json.dumps(pools, ensure_ascii=False, indent=2)
             await asyncio.to_thread(self._write_persona_style_pools_file, path, content)
-            logger.info("[Wardrobe] 人格风格池已删除: %s", persona_name)
+            logger.debug("[Wardrobe] 人格风格池已删除: %s", persona_name)
 
     @staticmethod
     def _write_persona_style_pools_file(path: Path, content: str):
@@ -277,9 +277,9 @@ class WardrobePlugin(Star):
                 if self.vector_searcher:
                     self.searcher.vector_searcher = self.vector_searcher
                     if not old_vs:
-                        logger.info("[Wardrobe] 向量检索器延迟初始化成功")
+                        logger.debug("[Wardrobe] 向量检索器延迟初始化成功")
                     else:
-                        logger.info("[Wardrobe] 向量检索器重新初始化成功")
+                        logger.debug("[Wardrobe] 向量检索器重新初始化成功")
             if not self.rerank_provider:
                 self.rerank_provider = self._init_rerank_provider()
                 if self.vector_searcher and self.rerank_provider:
@@ -316,18 +316,14 @@ class WardrobePlugin(Star):
             if not need_reanalyze and not need_ref_strength_backfill:
                 return
 
-            if need_reanalyze:
-                logger.info("[Wardrobe] 发现 %d 张旧图需要补充分析新字段，开始逐张重分析...", len(need_reanalyze))
-
-            if need_ref_strength_backfill:
-                logger.info("[Wardrobe] 发现 %d 张人物图需要回填 ref_strength，开始逐张重分析...", len(need_ref_strength_backfill))
+            logger.info("[Wardrobe] 发现需重分析: 新字段%d张, ref_strength回填%d张", len(need_reanalyze), len(need_ref_strength_backfill))
 
             primary = str(self._cfg("save_provider_id", "") or "").strip()
             secondary = str(self._cfg("save_secondary_provider_id", "") or "").strip()
             timeout = float(self._cfg("save_timeout_seconds", 60.0) or 60.0)
 
             if not primary and not secondary:
-                logger.info("[Wardrobe] 未配置存图模型，跳过旧图重分析")
+                logger.debug("[Wardrobe] 未配置存图模型，跳过旧图重分析")
                 return
 
             success = 0
@@ -340,7 +336,6 @@ class WardrobePlugin(Star):
 
                 path = self.store.get_image_path(image_path_str)
                 if not path.exists():
-                    logger.debug("[Wardrobe] 旧图重分析跳过：文件不存在 id=%s", image_id)
                     continue
 
                 try:
@@ -360,7 +355,6 @@ class WardrobePlugin(Star):
 
                     if not attrs:
                         failed += 1
-                        logger.warning("[Wardrobe] 旧图重分析失败 id=%s", image_id)
                         continue
 
                     update_data = {}
@@ -399,14 +393,12 @@ class WardrobePlugin(Star):
                         )
 
                     success += 1
-                    logger.info("[Wardrobe] 旧图重分析进度: %d/%d (成功%d 失败%d)", i + 1, len(need_reanalyze), success, failed)
 
                     if i < len(need_reanalyze) - 1:
                         await asyncio.sleep(30)
 
-                except Exception as e:
+                except Exception:
                     failed += 1
-                    logger.warning("[Wardrobe] 旧图重分析异常 id=%s error=%s", image_id, e)
 
             logger.info("[Wardrobe] 旧图重分析完成: 成功%d 失败%d 共%d张", success, failed, len(need_reanalyze))
 
@@ -453,9 +445,8 @@ class WardrobePlugin(Star):
                         if i < len(need_ref_strength_backfill) - 1:
                             await asyncio.sleep(30)
 
-                    except Exception as e:
+                    except Exception:
                         rs_failed += 1
-                        logger.warning("[Wardrobe] ref_strength 回填异常 id=%s error=%s", image_id, e)
 
                 logger.info("[Wardrobe] ref_strength 回填完成: 成功%d 失败%d 共%d张", rs_success, rs_failed, len(need_ref_strength_backfill))
         except Exception as e:
@@ -472,7 +463,7 @@ class WardrobePlugin(Star):
             if not need_backfill:
                 return
 
-            logger.info("[Wardrobe] 发现 %d 张图片缺少文件哈希，开始回填...", len(need_backfill))
+            logger.debug("[Wardrobe] 发现 %d 张图片缺少文件哈希，开始回填...", len(need_backfill))
 
             backfilled = 0
             for rec in need_backfill:
@@ -496,10 +487,10 @@ class WardrobePlugin(Star):
                     file_hash = hashlib.md5(image_bytes).hexdigest()
                     await self.db.update_image(image_id, file_hash=file_hash)
                     backfilled += 1
-                except Exception as e:
-                    logger.debug("[Wardrobe] 回填哈希失败 id=%s error=%s", image_id, e)
+                except Exception:
+                    pass
 
-            logger.info("[Wardrobe] 文件哈希回填完成: %d/%d", backfilled, len(need_backfill))
+            logger.debug("[Wardrobe] 文件哈希回填完成: %d/%d", backfilled, len(need_backfill))
         except Exception as e:
             logger.error("[Wardrobe] 文件哈希回填任务异常: %s", e, exc_info=True)
 
@@ -638,7 +629,7 @@ class WardrobePlugin(Star):
             wait_seconds = (next_monday - now).total_seconds()
             if wait_seconds <= 0:
                 wait_seconds = 7 * 86400
-            logger.info(
+            logger.debug(
                 "[Wardrobe] 补拍衰减: 下次执行在 %.1f 小时后",
                 wait_seconds / 3600,
             )
@@ -646,7 +637,7 @@ class WardrobePlugin(Star):
             try:
                 await self._ensure_db()
                 affected = await self.db.decay_daily_selfie_use_counts(amount=1)
-                logger.info(
+                logger.debug(
                     "[Wardrobe] 补拍衰减完成: %d 张图片的 daily_selfie_use_count 减1",
                     affected,
                 )
@@ -788,7 +779,7 @@ class WardrobePlugin(Star):
                 if target <= now:
                     target += timedelta(days=1)
                 wait_seconds = (target - now).total_seconds()
-                logger.info("[Wardrobe] 下次备份在 %.1f 小时后", wait_seconds / 3600)
+                logger.debug("[Wardrobe] 下次备份在 %.1f 小时后", wait_seconds / 3600)
                 await asyncio.sleep(wait_seconds)
 
                 if not self._cfg("auto_backup_enabled", True):
@@ -870,7 +861,7 @@ class WardrobePlugin(Star):
             for f in to_delete:
                 try:
                     f.unlink()
-                    logger.info("[Wardrobe] 清理旧备份: %s", f.name)
+                    logger.debug("[Wardrobe] 清理旧备份: %s", f.name)
                 except Exception:
                     pass
         except Exception as e:
@@ -884,7 +875,7 @@ class WardrobePlugin(Star):
                 if target <= now:
                     target += timedelta(days=1)
                 wait_seconds = (target - now).total_seconds()
-                logger.info("[Wardrobe] 视频保留策略: 下次清理在 %.1f 小时后", wait_seconds / 3600)
+                logger.debug("[Wardrobe] 视频保留策略: 下次清理在 %.1f 小时后", wait_seconds / 3600)
                 await asyncio.sleep(wait_seconds)
 
                 await self._ensure_db()
@@ -906,7 +897,7 @@ class WardrobePlugin(Star):
                     await self.db.delete_video(v["id"])
                     deleted += 1
 
-                logger.info("[Wardrobe] 视频保留策略: 清理了 %d 个超过7天的自动保存视频", deleted)
+                logger.debug("[Wardrobe] 视频保留策略: 清理了 %d 个超过7天的自动保存视频", deleted)
             except asyncio.CancelledError:
                 return
             except Exception as e:
@@ -921,7 +912,7 @@ class WardrobePlugin(Star):
                 if target <= now:
                     target += timedelta(days=1)
                 wait_seconds = (target - now).total_seconds()
-                logger.info("[Wardrobe] 无感清理: 下次清理在 %.1f 小时后", wait_seconds / 3600)
+                logger.debug("[Wardrobe] 无感清理: 下次清理在 %.1f 小时后", wait_seconds / 3600)
                 await asyncio.sleep(wait_seconds)
 
                 await self._ensure_db()
@@ -951,7 +942,7 @@ class WardrobePlugin(Star):
                     await self._cleanup_videos_for_image(image_id)
                     deleted += 1
 
-                logger.info("[Wardrobe] 无感清理: 删除了 %d 张超过30天的无感图片", deleted)
+                logger.debug("[Wardrobe] 无感清理: 删除了 %d 张超过30天的无感图片", deleted)
             except asyncio.CancelledError:
                 return
             except Exception as e:
@@ -972,7 +963,7 @@ class WardrobePlugin(Star):
                 except Exception:
                     pass
             if generated > 0:
-                logger.info("[Wardrobe] 批量缩略图生成完成: 新生成 %d 张", generated)
+                logger.debug("[Wardrobe] 批量缩略图生成完成: 新生成 %d 张", generated)
         except asyncio.CancelledError:
             return
         except Exception as e:
@@ -1060,8 +1051,8 @@ class WardrobePlugin(Star):
         if self._cfg("webui_enabled", False) and not self._webui:
             try:
                 await self._start_webui()
-            except Exception as e:
-                logger.error("[Wardrobe] WebUI 启动失败: %s", e)
+            except Exception:
+                pass
 
         self._spawn_bg_task(self._auto_backup_loop())
         self._spawn_bg_task(self._ensure_all_thumbnails())
@@ -1117,7 +1108,7 @@ class WardrobePlugin(Star):
             return "未检测到图片，请发送图片后再保存"
 
         persona = self._resolve_persona(persona)
-        logger.info("[Wardrobe] 开始存图，图片大小=%.2fKB 人格=%s 用户描述=%s", len(image_bytes) / 1024, persona or "无", user_description or "无")
+        logger.debug("[Wardrobe] 开始存图，图片大小=%.2fKB 人格=%s 用户描述=%s", len(image_bytes) / 1024, persona or "无", user_description or "无")
 
         created_by = str(event.get_sender_id() or "")
         image_id, attrs, duplicate = await self._save_image_from_bytes(
@@ -1140,33 +1131,11 @@ class WardrobePlugin(Star):
         if not attrs:
             return f"图片已保存（ID: {image_id}），但模型分析失败，仅保存了原始图片"
 
-        logger.info(
-            "[Wardrobe] 分析结果:\n  分类: %s\n  风格: %s\n  服装: %s\n  暴露: %s\n  场景: %s\n  氛围: %s\n  姿势: %s\n  朝向: %s\n  动态: %s\n  动作风格: %s\n  景别: %s\n  角度: %s\n  表情: %s\n  色调: %s\n  构图: %s\n  背景: %s\n  描述: %s\n  用户标签: %s\n  暴露特征: %s\n  关键特征: %s\n  道具: %s\n  魅力特征: %s\n  身体焦点: %s\n  参考强度: %s\n  评级理由: %s",
+        logger.debug(
+            "[Wardrobe] 分析结果: 分类=%s 暴露=%s 描述=%s",
             attrs.get("category", "人物"),
-            ", ".join(attrs.get("style", [])),
-            attrs.get("clothing_type", ""),
             attrs.get("exposure_level", ""),
-            ", ".join(attrs.get("scene", [])),
-            ", ".join(attrs.get("atmosphere", [])),
-            attrs.get("pose_type", ""),
-            attrs.get("body_orientation", ""),
-            attrs.get("dynamic_level", ""),
-            ", ".join(attrs.get("action_style", [])),
-            attrs.get("shot_size", ""),
-            attrs.get("camera_angle", ""),
-            attrs.get("expression", ""),
-            attrs.get("color_tone", ""),
-            attrs.get("composition", ""),
-            attrs.get("background", ""),
             attrs.get("description", ""),
-            user_description or "无",
-            ", ".join(attrs.get("exposure_features", [])),
-            ", ".join(attrs.get("key_features", [])),
-            ", ".join(attrs.get("prop_objects", [])),
-            ", ".join(attrs.get("allure_features", [])),
-            ", ".join(attrs.get("body_focus", [])),
-            attrs.get("ref_strength", "style"),
-            attrs.get("ref_strength_reason", ""),
         )
 
         feedback_enabled = bool(self._cfg("save_feedback_enabled", False))
@@ -1193,7 +1162,7 @@ class WardrobePlugin(Star):
         file_hash = hashlib.md5(image_bytes).hexdigest()
         existing = await self.db.get_image_by_hash(file_hash)
         if existing:
-            logger.info("[Wardrobe] 图片重复，跳过保存: hash=%s 已存在ID=%s 人格=%s", file_hash, existing["id"], existing.get("persona", ""))
+            logger.debug("[Wardrobe] 图片重复，跳过保存: hash=%s 已存在ID=%s 人格=%s", file_hash, existing["id"], existing.get("persona", ""))
             return None, None, existing
 
         if user_description and len(user_description) > _MAX_DESCRIPTION_LEN:
@@ -1347,9 +1316,6 @@ class WardrobePlugin(Star):
             return
 
         if image_mode != "selfie":
-            logger.debug(
-                "[Wardrobe] AiImg 自动存图跳过：非自拍模式 (mode=%s)", image_mode or "unknown"
-            )
             return
 
         str_path = str(image_path)
@@ -1371,7 +1337,7 @@ class WardrobePlugin(Star):
             if not image_bytes:
                 return
 
-            logger.info(
+            logger.debug(
                 "[Wardrobe] AiImg 自动存图开始，图片大小=%.2fKB 人格=%s tool=%s",
                 len(image_bytes) / 1024, persona or "无", tool_name or "command",
             )
@@ -1384,7 +1350,7 @@ class WardrobePlugin(Star):
             )
 
             if duplicate:
-                logger.info(
+                logger.debug(
                     "[Wardrobe] AiImg 自动存图跳过：图片重复，已存在ID=%s",
                     duplicate.get("id", ""),
                 )
@@ -1392,13 +1358,13 @@ class WardrobePlugin(Star):
 
             if image_id:
                 if attrs:
-                    logger.info(
+                    logger.debug(
                         "[Wardrobe] AiImg 自动存图完成 ID=%s 分类=%s 描述=%s",
                         image_id, attrs.get("category", ""),
                         attrs.get("description", ""),
                     )
                 else:
-                    logger.info("[Wardrobe] AiImg 自动存图完成（分析失败）ID=%s", image_id)
+                    logger.debug("[Wardrobe] AiImg 自动存图完成（分析失败）ID=%s", image_id)
             else:
                 logger.warning("[Wardrobe] AiImg 自动存图失败")
 
@@ -1453,13 +1419,12 @@ class WardrobePlugin(Star):
                                     if first_chunk is None:
                                         first_chunk = chunk
                                         if len(chunk) < 12 or chunk[4:8] != b'ftyp':
-                                            logger.debug("[Wardrobe] 自动存视频跳过：非有效 MP4 格式 src=%s", video_src[:80])
                                             tmp_path.unlink(missing_ok=True)
                                             return
                                     file_hash.update(chunk)
                                     await f.write(chunk)
                             if first_chunk is None:
-                                logger.warning("[Wardrobe] 自动存视频失败：下载为空 src=%s", video_src[:80])
+                                logger.warning("[Wardrobe] 自动存视频下载失败: src=%s", video_src[:80])
                                 tmp_path.unlink(missing_ok=True)
                                 return
 
@@ -1467,7 +1432,7 @@ class WardrobePlugin(Star):
                     video_filename = f"auto_{final_hash}.mp4"
                     video_path = self.video_service.videos_dir / video_filename
                     if video_path.exists():
-                        logger.info("[Wardrobe] 自动存视频跳过：文件已存在 hash=%s", final_hash)
+                        logger.debug("[Wardrobe] 自动存视频跳过：文件已存在 hash=%s", final_hash)
                         tmp_path.unlink(missing_ok=True)
                         return
                     tmp_path.rename(video_path)
@@ -1479,16 +1444,14 @@ class WardrobePlugin(Star):
             else:
                 video_bytes = await self._download_or_read_image(video_src)
                 if not video_bytes:
-                    logger.warning("[Wardrobe] 自动存视频失败：无法获取视频数据 src=%s", video_src[:80])
+                    logger.warning("[Wardrobe] 自动存视频下载失败: src=%s", video_src[:80])
                     return
                 if len(video_bytes) < 12 or video_bytes[4:8] != b'ftyp':
-                    logger.debug("[Wardrobe] 自动存视频跳过：非有效 MP4 格式 src=%s", video_src[:80])
                     return
                 file_hash_val = hashlib.md5(video_bytes).hexdigest()
                 video_filename = f"auto_{file_hash_val}.mp4"
                 video_path = self.video_service.videos_dir / video_filename
                 if video_path.exists():
-                    logger.info("[Wardrobe] 自动存视频跳过：文件已存在 hash=%s", file_hash_val)
                     return
                 import aiofiles
                 async with aiofiles.open(video_path, "wb") as f:
@@ -1510,7 +1473,7 @@ class WardrobePlugin(Star):
                 status="done",
             )
 
-            logger.info(
+            logger.debug(
                 "[Wardrobe] 自动存视频完成 source_image=%s persona=%s",
                 source_image_id or "无", persona or "无",
             )
@@ -1529,7 +1492,6 @@ class WardrobePlugin(Star):
         await self._ensure_db()
 
         if len(video_bytes) < 12 or video_bytes[4:8] != b'ftyp':
-            logger.debug("[Wardrobe] _save_video_from_bytes 跳过：非有效 MP4 格式")
             return ""
 
         file_hash = hashlib.md5(video_bytes).hexdigest()
@@ -1538,7 +1500,7 @@ class WardrobePlugin(Star):
         video_filename = f"auto_{file_hash}.mp4"
         video_path = self.video_service.videos_dir / video_filename
         if video_path.exists():
-            logger.info("[Wardrobe] _save_video_from_bytes 跳过：文件已存在 hash=%s", file_hash)
+            logger.debug("[Wardrobe] _save_video_from_bytes 跳过：文件已存在 hash=%s", file_hash)
             return ""
 
         import aiofiles
@@ -1560,7 +1522,7 @@ class WardrobePlugin(Star):
             status="done",
         )
 
-        logger.info(
+        logger.debug(
             "[Wardrobe] _save_video_from_bytes 完成 hash=%s size=%dKB source_image=%s persona=%s",
             file_hash, len(video_bytes) // 1024, source_image_id or "无", persona or "无",
         )
@@ -1645,8 +1607,8 @@ class WardrobePlugin(Star):
                         conversation = await conv_mgr.get_conversation(umo, curr_cid)
                         if conversation:
                             persona_id = getattr(conversation, "persona_id", None)
-                except Exception as e:
-                    logger.debug("[Wardrobe] 从 conversation_manager 获取 persona_id 失败: %s", e)
+                except Exception:
+                    pass
 
             if persona_id:
                 return str(persona_id).strip() or None
@@ -1662,10 +1624,10 @@ class WardrobePlugin(Star):
                         name = self._extract_persona_name(persona_obj)
                         if name:
                             return name
-                except Exception as e:
-                    logger.debug("[Wardrobe] 从 persona_manager 获取默认人格失败: %s", e)
-        except Exception as e:
-            logger.debug("[Wardrobe] 获取当前人格失败: %s", e)
+                except Exception:
+                    pass
+        except Exception:
+            pass
         return None
 
     @staticmethod
@@ -1725,7 +1687,7 @@ class WardrobePlugin(Star):
                     except Exception:
                         pass
             await self.db.delete_videos_by_image_id(image_id)
-            logger.info("[Wardrobe] 已清理图片 %s 关联的 %d 个视频", image_id, len(videos))
+            logger.debug("[Wardrobe] 已清理图片 %s 关联的 %d 个视频", image_id, len(videos))
         except Exception as e:
             logger.warning("[Wardrobe] 清理关联视频失败 image_id=%s error=%s", image_id, e)
 
@@ -1768,7 +1730,7 @@ class WardrobePlugin(Star):
         resolved_persona = self._resolve_persona(current_persona)
         persona_names = self._get_persona_names_str()
 
-        logger.info(
+        logger.debug(
             "[Wardrobe] 参考图搜索: query=%s exclude_persona=%s min_similarity=%s",
             query, resolved_persona or "无", min_similarity,
         )
@@ -1791,7 +1753,7 @@ class WardrobePlugin(Star):
         )
 
         if not results:
-            logger.info("[Wardrobe] 参考图搜索：未找到匹配图片（已排除当前人格）")
+            logger.debug("[Wardrobe] 参考图搜索：未找到匹配图片（已排除当前人格）")
             return None
 
         best = results[0]
@@ -1800,7 +1762,7 @@ class WardrobePlugin(Star):
             logger.warning("[Wardrobe] 参考图搜索：图片文件不存在 %s", best["image_path"])
             return None
 
-        logger.info(
+        logger.debug(
             "[Wardrobe] 参考图搜索完成: ID=%s 描述=%s",
             best["id"], best.get("description", ""),
         )
@@ -1813,7 +1775,7 @@ class WardrobePlugin(Star):
         if daily_selfie_mode:
             try:
                 await self.db.increment_daily_selfie_use_count(best["id"])
-                logger.info(
+                logger.debug(
                     "[Wardrobe] 补拍参考图计数+1: id=%s daily_selfie_use_count=%s",
                     best["id"], best.get("daily_selfie_use_count", 0),
                 )
@@ -1839,7 +1801,7 @@ class WardrobePlugin(Star):
                 await new_vs.initialize()
             if new_vs.available:
                 await new_vs.index_existing_images()
-                logger.info("[Wardrobe] 向量检索器延迟初始化成功（搜索时触发）")
+                logger.debug("[Wardrobe] 向量检索器延迟初始化成功（搜索时触发）")
             if not self.rerank_provider:
                 self.rerank_provider = self._init_rerank_provider()
                 if self.rerank_provider:
@@ -1865,7 +1827,7 @@ class WardrobePlugin(Star):
         if not primary and not secondary:
             return "未配置取图模型，请在插件设置中配置"
 
-        logger.info(
+        logger.debug(
             "[Wardrobe] 取图请求: query=%s current_persona=%s resolved=%s",
             query, current_persona or "无", resolved_persona or "无",
         )
@@ -1884,7 +1846,7 @@ class WardrobePlugin(Star):
             prioritize_unused=bool(self._cfg("search_prioritize_unused", False)),
         )
 
-        logger.info(
+        logger.debug(
             "[Wardrobe] 取图结果: %d张 scope=%s mismatch=%s searched_persona=%s",
             len(results),
             search_meta.get("persona_scope", "?"),

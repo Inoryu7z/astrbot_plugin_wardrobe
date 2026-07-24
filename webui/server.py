@@ -389,7 +389,7 @@ class WardrobeWebServer:
         @app.route("/api/images/<image_id>/reanalyze", methods=["POST"])
         async def api_image_reanalyze(image_id):
             await self.plugin._ensure_db()
-            logger.info("[Wardrobe] WebUI重新分析请求: id=%s", image_id)
+            logger.debug("[Wardrobe] WebUI重新分析请求: id=%s", image_id)
             image = await self.plugin.db.get_image(image_id)
             if not image:
                 return jsonify({"error": "未找到图片"}), 404
@@ -454,9 +454,8 @@ class WardrobeWebServer:
                     update_data["user_tags"] = user_description
 
                 await self.plugin.db.update_image(image_id, **update_data)
-                logger.info("[Wardrobe] WebUI重新分析完成: id=%s category=%s exposure=%s description=%s",
-                            image_id, attrs.get("category", ""), attrs.get("exposure_level", ""),
-                            attrs.get("description", ""))
+                logger.debug("[Wardrobe] 重新分析完成: id=%s 分类=%s",
+                            image_id, attrs.get("category", ""))
 
                 if self.plugin.vector_searcher and self.plugin.vector_searcher.available:
                     try:
@@ -570,7 +569,7 @@ class WardrobeWebServer:
                 if not file_path or added_files == 0:
                     return jsonify({"error": "没有可导出的图片"}), 400
 
-                logger.info("[Wardrobe] 图片导出: %d张图片", added_files)
+                logger.debug("[Wardrobe] 图片导出: %d张图片", added_files)
                 return await send_file(
                     str(file_path),
                     mimetype="application/zip",
@@ -594,7 +593,7 @@ class WardrobeWebServer:
                 if not file_path or total_records == 0:
                     return jsonify({"error": "没有可导出的数据"}), 400
 
-                logger.info("[Wardrobe] 选择备份导出: %d条记录, %d个图片文件", total_records, added_files)
+                logger.debug("[Wardrobe] 选择备份导出: %d条记录, %d个图片文件", total_records, added_files)
                 return await send_file(
                     str(file_path),
                     mimetype="application/zip",
@@ -627,24 +626,22 @@ class WardrobeWebServer:
                 if len(image_bytes) > max_size * 1024 * 1024:
                     return jsonify({"error": f"图片过大，限制{max_size}MB"}), 400
 
-                logger.info("[Wardrobe] WebUI上传图片: 大小=%.2fKB 人格=%s 描述=%s", len(image_bytes) / 1024, persona or "无", description or "无")
+                logger.debug("[Wardrobe] WebUI上传图片: 大小=%.2fKB 人格=%s 描述=%s", len(image_bytes) / 1024, persona or "无", description or "无")
                 image_id, attrs, duplicate = await self.plugin._save_image_from_bytes(
                     image_bytes, persona=persona, created_by="webui", user_description=description
                 )
 
                 if duplicate:
-                    logger.info("[Wardrobe] WebUI上传跳过: 图片重复 existing_id=%s", duplicate.get("id", ""))
+                    logger.debug("[Wardrobe] WebUI上传跳过: 图片重复 existing_id=%s", duplicate.get("id", ""))
                     return jsonify({"duplicate": True, "existing_id": duplicate.get("id", ""), "existing_persona": duplicate.get("persona", "")})
 
                 if not image_id:
-                    logger.warning("[Wardrobe] WebUI上传失败: 保存失败")
+                    logger.warning("[Wardrobe] 上传保存失败: id缺失")
                     return jsonify({"error": "保存失败，请检查存图模型是否已配置"}), 500
 
-                logger.info("[Wardrobe] WebUI上传完成: id=%s category=%s exposure=%s description=%s",
+                logger.debug("[Wardrobe] 上传完成: id=%s 分类=%s",
                             image_id,
-                            attrs.get("category", "") if attrs else "",
-                            attrs.get("exposure_level", "") if attrs else "",
-                            attrs.get("description", "") if attrs else "")
+                            attrs.get("category", "") if attrs else "")
 
                 return jsonify({"success": True, "image_id": image_id})
             except Exception as e:
@@ -701,7 +698,7 @@ class WardrobeWebServer:
                                     continue
                                 img["_similarity"] = similarity
                                 vec_results.append(img)
-                        logger.info("[Wardrobe] WebUI搜索向量检索命中: %d张 query=%s", len(vec_results), query[:50])
+                        logger.debug("[Wardrobe] WebUI搜索向量检索命中: %d张 query=%s", len(vec_results), query[:50])
                 except Exception as e:
                     logger.warning("[Wardrobe] WebUI搜索向量检索失败: %s", e)
 
@@ -716,7 +713,7 @@ class WardrobeWebServer:
                 exclude_persona=exclude_persona or None,
                 limit=limit,
             )
-            logger.info("[Wardrobe] WebUI搜索LIKE检索: %d张 query=%s", len(results), query[:50])
+            logger.debug("[Wardrobe] WebUI搜索LIKE检索: %d张 query=%s", len(results), query[:50])
             return jsonify({"images": results})
 
         @app.route("/api/filters")
@@ -856,7 +853,7 @@ class WardrobeWebServer:
             try:
                 include_videos = request.args.get("include_videos", "") == "1"
                 file_path, total_records, added_files = await self.plugin.build_backup_zip(include_videos=include_videos)
-                logger.info("[Wardrobe] 备份导出: %d条记录, %d个图片文件, 包含视频=%s", total_records, added_files, include_videos)
+                logger.debug("[Wardrobe] 备份导出: %d条记录, %d个图片文件, 包含视频=%s", total_records, added_files, include_videos)
 
                 return await send_file(
                     str(file_path),
@@ -1022,7 +1019,7 @@ class WardrobeWebServer:
                 if total_imported > 0 and self.plugin.vector_searcher and self.plugin.vector_searcher.available:
                     try:
                         await self.plugin.vector_searcher.index_existing_images()
-                        logger.info("[Wardrobe] 备份恢复后向量索引重建完成")
+                        logger.debug("[Wardrobe] 备份恢复后向量索引重建完成")
                     except Exception as e:
                         logger.warning("[Wardrobe] 备份恢复后向量索引重建失败: %s", e)
 
@@ -1080,11 +1077,8 @@ class WardrobeWebServer:
 
             elapsed = time.perf_counter() - t0
             if elapsed > 1.0:
-                logger.warning("[Wardrobe] /api/videos 耗时 %.2fs (videos=%d total=%d filters: persona=%s tier=%s status=%s)",
-                               elapsed, len(videos), total, persona, tier or "-", status or "-")
-            else:
-                logger.debug("[Wardrobe] /api/videos OK %.2fs (videos=%d total=%d)",
-                             elapsed, len(videos), total)
+                logger.debug("[Wardrobe] /api/videos 耗时 %.2fs (videos=%d total=%d filters: persona=%s tier=%s status=%s)",
+                             elapsed, len(videos), total, persona, tier or "-", status or "-")
 
             return jsonify({"videos": videos, "total": total, "page": page, "per_page": per_page})
 
@@ -1123,7 +1117,7 @@ class WardrobeWebServer:
                     backend_override=backend_override,
                     auto_send=auto_send,
                 )
-                logger.info("[Wardrobe] WebUI 触发视频生成: image_id=%s tier=%s video_id=%s auto_send=%s", image_id, tier, video_id, auto_send)
+                logger.debug("[Wardrobe] WebUI 触发视频生成: image_id=%s tier=%s video_id=%s auto_send=%s", image_id, tier, video_id, auto_send)
                 return jsonify({"success": True, "video_id": video_id, "status": "generating"})
             except ValueError as e:
                 return jsonify({"error": str(e)}), 400
@@ -1197,7 +1191,7 @@ class WardrobeWebServer:
                     auto_send=auto_send,
                 )
             )
-            logger.info("[Wardrobe] WebUI 重试视频生成: video_id=%s tier=%s", video_id, tier)
+            logger.debug("[Wardrobe] WebUI 重试视频生成: video_id=%s tier=%s", video_id, tier)
             return jsonify({"success": True, "video_id": video_id})
 
         @app.route("/api/videos/<video_id>/file")
@@ -1235,7 +1229,7 @@ class WardrobeWebServer:
             text = data.get("prompt", "")
             try:
                 await self.plugin.video_service.save_system_prompt(text)
-                logger.info("[Wardrobe] 视频系统提示词已保存 len=%d", len(text))
+                logger.debug("[Wardrobe] 视频系统提示词已保存 len=%d", len(text))
                 return jsonify({"success": True})
             except Exception as e:
                 return jsonify({"error": str(e)}), 500
@@ -1255,7 +1249,7 @@ class WardrobeWebServer:
             auto_send = bool(data.get("auto_send", False))
             try:
                 await self.plugin.video_service.save_send_umo(umo, auto_send)
-                logger.info("[Wardrobe] 视频发送会话已保存 umo=%s auto_send=%s", umo[:30] if umo else "(空)", auto_send)
+                logger.debug("[Wardrobe] 视频发送会话已保存 umo=%s auto_send=%s", umo[:30] if umo else "(空)", auto_send)
                 return jsonify({"success": True})
             except Exception as e:
                 return jsonify({"error": str(e)}), 500

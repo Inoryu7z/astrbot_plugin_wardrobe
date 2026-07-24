@@ -146,7 +146,7 @@ class ImageAnalyzer:
                         timeout=timeout_seconds,
                     )
                     elapsed = time.perf_counter() - t0
-                    logger.info("[Wardrobe] 图片分析完成 provider=%s 耗时=%.2fs", provider_id, elapsed)
+                    logger.debug("[Wardrobe] 图片分析完成 provider=%s 耗时=%.2fs", provider_id, elapsed)
                     if result:
                         return result
                     logger.warning("[Wardrobe] 模型返回结果解析失败 provider=%s，尝试下一个模型", provider_id)

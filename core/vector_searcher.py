@@ -89,8 +89,8 @@ class WardrobeVectorSearcher:
                 db_path = os.path.join(self.data_dir, "wardrobe_vec.db")
                 if os.path.exists(db_path):
                     os.remove(db_path)
-        except Exception as e:
-            logger.debug("[Wardrobe] 维度检查跳过: %s", e)
+        except Exception:
+            pass
 
     async def _rebuild_id_map(self):
         if not self._faiss_db:
@@ -128,16 +128,15 @@ class WardrobeVectorSearcher:
                 self._reverse_map.pop(dup_doc_id, None)
                 try:
                     await self._faiss_db.delete(dup_doc_id)
-                    logger.debug("[Wardrobe] 清理重复向量索引: doc_id=%s", dup_doc_id)
-                except Exception as e:
-                    logger.debug("[Wardrobe] 清理重复向量索引失败: doc_id=%s error=%s", dup_doc_id, e)
+                except Exception:
+                    pass
 
             if duplicate_doc_ids:
-                logger.info("[Wardrobe] 清理重复向量索引: %d条", len(duplicate_doc_ids))
+                logger.debug("[Wardrobe] 清理重复向量索引: %d条", len(duplicate_doc_ids))
 
-            logger.info("[Wardrobe] 向量索引ID映射重建完成: %d条记录", len(self._id_map))
-        except Exception as e:
-            logger.debug("[Wardrobe] 向量索引ID映射重建跳过: %s", e)
+            logger.debug("[Wardrobe] 向量索引ID映射重建完成: %d条记录", len(self._id_map))
+        except Exception:
+            pass
 
     async def add_image(self, wardrobe_id: str, text: str, category: str = "", persona: str = ""):
         if not self.available:
@@ -164,7 +163,6 @@ class WardrobeVectorSearcher:
             doc_id = await self._faiss_db.insert(content=content, metadata=metadata)
             self._id_map[wardrobe_id] = str(doc_id)
             self._reverse_map[str(doc_id)] = wardrobe_id
-            logger.debug("[Wardrobe] 向量索引已添加: wardrobe_id=%s doc_id=%s", wardrobe_id, doc_id)
         except Exception as e:
             logger.warning("[Wardrobe] 向量索引添加失败: wardrobe_id=%s error=%s", wardrobe_id, e)
 
@@ -275,7 +273,6 @@ class WardrobeVectorSearcher:
 
         rerank_min = int(self.plugin._cfg("rerank_min_candidates", 3) or 3) if self.plugin else 3
         if len(candidates) < rerank_min:
-            logger.debug("[Wardrobe] 候选数(%d)不足重排序最低要求(%d)，跳过", len(candidates), rerank_min)
             return None
 
         rerank_top_k = int(self.plugin._cfg("rerank_top_k", 0) or 0) if self.plugin else 0
@@ -296,7 +293,6 @@ class WardrobeVectorSearcher:
             rerank_results = await self.rerank_provider.rerank(query, documents, top_n=top_n)
 
             if not rerank_results:
-                logger.debug("[Wardrobe] 重排序返回空结果，使用原始排序")
                 return None
 
             output: list[tuple[str, float]] = []
@@ -305,7 +301,7 @@ class WardrobeVectorSearcher:
                 if 0 <= idx < len(candidates):
                     output.append((candidates[idx][0], rr.relevance_score))
 
-            logger.info(
+            logger.debug(
                 "[Wardrobe] 重排序完成: 候选%d张 → 保留%d张",
                 len(candidates), len(output),
             )

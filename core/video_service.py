@@ -163,27 +163,27 @@ class VideoService:
 
             if reuse_prompt.strip():
                 generated_prompt = reuse_prompt.strip()
-                logger.info("[VideoService] 重试复用已有提示词 video_id=%s len=%d", video_id, len(generated_prompt))
+                logger.debug("[VideoService] 重试复用已有提示词 video_id=%s len=%d", video_id, len(generated_prompt))
             else:
                 prompt_provider_id = str(self.plugin._cfg("video_prompt_provider_id", "") or "").strip()
                 if not prompt_provider_id:
                     raise ValueError("未配置视频提示词生成模型")
 
-                logger.info("[VideoService] 开始生成视频提示词 video_id=%s tier=%s", video_id, tier_label)
+                logger.debug("[VideoService] 开始生成视频提示词 video_id=%s tier=%s", video_id, tier_label)
 
                 generated_prompt = await self._generate_prompt(
                     prompt_provider_id, image_bytes, tier, tier_label, user_thoughts, image_description
                 )
 
-                logger.info("[VideoService] 提示词生成完成 video_id=%s len=%d", video_id, len(generated_prompt))
+                logger.debug("[VideoService] 提示词生成完成 video_id=%s len=%d", video_id, len(generated_prompt))
 
                 await self.plugin.db.update_video(video_id, generated_prompt=generated_prompt)
 
-            logger.info("[VideoService] 开始调用视频后端 video_id=%s backend=%s", video_id, provider_id)
+            logger.debug("[VideoService] 开始调用视频后端 video_id=%s backend=%s", video_id, provider_id)
 
             video_url = await self._call_video_backend(provider_id, generated_prompt, image_bytes)
 
-            logger.info("[VideoService] 视频生成完成 video_id=%s url=%s", video_id, video_url[:80])
+            logger.info("[VideoService] 视频生成完成: video_id=%s url=%s", video_id, video_url)
 
             video_filename = f"{video_id}.mp4"
             video_path = self.videos_dir / video_filename
@@ -196,8 +196,6 @@ class VideoService:
                 provider_id=provider_id,
                 status="done",
             )
-
-            logger.info("[VideoService] 视频处理完成 video_id=%s", video_id)
 
             if auto_send:
                 try:
@@ -249,13 +247,13 @@ class VideoService:
         use_direct_api = api_base and api_key and api_model
 
         if use_direct_api:
-            logger.info("[VideoService] 使用直连 API 生成提示词 model=%s image_size=%d", api_model, len(image_bytes))
+            logger.debug("[VideoService] 使用直连 API 生成提示词 model=%s image_size=%d", api_model, len(image_bytes))
             raw_text = await self._call_direct_vision_api(
                 api_base, api_key, api_model, system_prompt, user_prompt,
                 image_bytes, mime
             )
         else:
-            logger.info("[VideoService] 回退 AstrBot Provider 生成提示词 provider=%s image_size=%d",
+            logger.debug("[VideoService] 回退 AstrBot Provider 生成提示词 provider=%s image_size=%d",
                         prompt_provider_id, len(image_bytes))
             raw_text = await self._call_astrbot_llm_generate(
                 prompt_provider_id, system_prompt, user_prompt,
@@ -267,7 +265,7 @@ class VideoService:
 
         prompt_text, reasoning_text = self._parse_json_prompt(raw_text)
         if reasoning_text:
-            logger.info("[VideoService] 模型推理依据: %s", reasoning_text)
+            logger.debug("[VideoService] 模型推理依据: %s", reasoning_text)
 
         if not prompt_text:
             raise ValueError("提示词生成模型返回了空提示词")
@@ -322,7 +320,7 @@ class VideoService:
             )
             elapsed = _time.perf_counter() - t0
             status = resp.status_code
-            logger.info("[VideoService] 直连 API 完成 耗时=%.2fs status=%d", elapsed, status)
+            logger.debug("[VideoService] 直连 API 完成 耗时=%.2fs status=%d", elapsed, status)
 
             if status != 200:
                 raise ValueError(f"直连 API 返回 {status}: {resp.text[:500]}")
@@ -334,7 +332,6 @@ class VideoService:
 
             msg = choices[0].get("message", {})
             text = msg.get("content", "") or ""
-            logger.info("[VideoService] 直连 API 原始返回: %s", text if text else "(空)")
             return text.strip()
 
     async def _call_astrbot_llm_generate(
@@ -360,7 +357,6 @@ class VideoService:
             _os_module.close(temp_fd)
 
         resolved_path = str(Path(temp_path).resolve())
-        logger.info("[VideoService] 临时图片路径: %s", resolved_path)
 
         try:
             t0 = _time.perf_counter()
@@ -382,8 +378,7 @@ class VideoService:
 
             elapsed = _time.perf_counter() - t0
             raw_text = (getattr(llm_resp, "completion_text", "") or "").strip()
-            logger.info("[VideoService] AstrBot模型返回 耗时=%.2fs len=%d", elapsed, len(raw_text))
-            logger.info("[VideoService] AstrBot原始返回: %s", raw_text if raw_text else "(空)")
+            logger.debug("[VideoService] AstrBot模型返回 耗时=%.2fs len=%d", elapsed, len(raw_text))
             return raw_text
         finally:
             try:
@@ -452,19 +447,18 @@ class VideoService:
         try:
             needs = await asyncio.to_thread(self._check_moov_position, video_path)
             if not needs:
-                logger.info("[VideoService] moov 已在文件开头，无需 faststart")
                 return
         except Exception as e:
             logger.warning("[VideoService] moov 位置检测失败，尝试直接 faststart: %s", e)
 
         try:
             await asyncio.to_thread(self._run_ffmpeg_faststart, video_path)
-            logger.info("[VideoService] ffmpeg faststart 完成: %s", video_path.name)
+            logger.debug("[VideoService] ffmpeg faststart 完成: %s", video_path.name)
         except FileNotFoundError:
             logger.warning("[VideoService] ffmpeg 不可用，尝试纯 Python faststart")
             try:
                 await asyncio.to_thread(self._python_faststart, video_path)
-                logger.info("[VideoService] 纯 Python faststart 完成: %s", video_path.name)
+                logger.debug("[VideoService] 纯 Python faststart 完成: %s", video_path.name)
             except Exception as e2:
                 logger.warning("[VideoService] 纯 Python faststart 也失败，视频 moov 仍在末尾: %s", e2)
         except Exception as e:
@@ -767,11 +761,11 @@ class VideoService:
         config = await self.load_send_umo()
         umo = config.get("umo", "").strip()
         if not umo:
-            logger.info("[VideoService] 未配置发送会话，跳过自动发送 video_id=%s", video_id)
+            logger.debug("[VideoService] 未配置发送会话，跳过自动发送 video_id=%s", video_id)
             return
         result = await self._send_video_to_conversation(umo, video_path, video_id, video_url)
         if result.terminated:
-            logger.info("[VideoService] 自动发送：上传被终止，可能仍在后台进行 video_id=%s", video_id)
+            logger.debug("[VideoService] 自动发送：上传被终止，可能仍在后台进行 video_id=%s", video_id)
 
     async def send_video_by_id(self, video_id: str) -> VideoSendResult:
         self._ensure_dirs()
@@ -813,7 +807,7 @@ class VideoService:
         send_error = None
         is_terminated = False
         try:
-            logger.info(
+            logger.debug(
                 "[VideoService] 尝试文件路径发送 video_id=%s path=%s size=%.1fMB",
                 video_id, video_path.name, file_size_mb,
             )
@@ -846,14 +840,14 @@ class VideoService:
             success = False
 
         if not success and is_terminated:
-            logger.info(
+            logger.debug(
                 "[VideoService] 等待 %d 秒（NapCat 可能仍在后台上传）video_id=%s",
                 _TERMINATED_GRACE_PERIOD, video_id,
             )
             await asyncio.sleep(_TERMINATED_GRACE_PERIOD)
 
         if not success and video_url:
-            logger.info(
+            logger.debug(
                 "[VideoService] %s，尝试 URL 发送 video_id=%s",
                 "文件路径发送被终止" if is_terminated else f"文件路径发送失败（{type(send_error).__name__}）",
                 video_id,
@@ -880,12 +874,12 @@ class VideoService:
         if not success:
             callback_base = self._get_callback_api_base()
             if callback_base:
-                logger.info(
+                logger.debug(
                     "[VideoService] callback_api_base 已配置，跳过 base64 发送（该模式下 base64 不可用）video_id=%s",
                     video_id,
                 )
             else:
-                logger.info("[VideoService] 尝试 base64 发送 video_id=%s", video_id)
+                logger.debug("[VideoService] 尝试 base64 发送 video_id=%s", video_id)
                 try:
                     success = await asyncio.wait_for(
                         self._send_video_as_base64(umo, video_path, video_id),
@@ -897,7 +891,7 @@ class VideoService:
                     logger.warning("[VideoService] base64 发送失败 video_id=%s error=%s", video_id, e2)
 
         if not success and video_url:
-            logger.info("[VideoService] 尝试纯文本 URL 兜底 video_id=%s", video_id)
+            logger.debug("[VideoService] 尝试纯文本 URL 兜底 video_id=%s", video_id)
             try:
                 from astrbot.api.message_components import Plain
                 plain_chain = MessageChain(chain=[Plain(text=video_url)])
@@ -905,7 +899,7 @@ class VideoService:
                     self.plugin.context.send_message(umo, plain_chain),
                     timeout=30,
                 )
-                logger.info("[VideoService] 纯文本 URL 已发送 video_id=%s", video_id)
+                logger.debug("[VideoService] 纯文本 URL 已发送 video_id=%s", video_id)
             except Exception as e_plain:
                 logger.warning("[VideoService] 纯文本 URL 发送也失败 video_id=%s error=%s", video_id, e_plain)
 
@@ -967,7 +961,7 @@ class VideoService:
             return base64.b64encode(data).decode("ascii")
 
         b64_data = await asyncio.to_thread(_read_and_encode)
-        logger.info(
+        logger.debug(
             "[VideoService] base64 编码完成 video_id=%s size=%.1fMB b64_len=%d",
             video_id, file_size / 1024 / 1024, len(b64_data),
         )

@@ -993,7 +993,7 @@ class WardrobeDatabase:
                         )
                         imported += 1
                     except Exception as e:
-                        logger.warning("[Wardrobe] 导入记录跳过: id=%s error=%s", rec.get("id"), e)
+                        logger.debug("[Wardrobe] 导入记录跳过: id=%s error=%s", rec.get("id"), e)
                 await db.commit()
         return imported
 
@@ -1271,6 +1271,6 @@ class WardrobeDatabase:
                         )
                         imported += 1
                     except Exception as e:
-                        logger.warning("[Wardrobe] 导入视频记录跳过: id=%s error=%s", rec.get("id"), e)
+                        logger.debug("[Wardrobe] 导入视频记录跳过: id=%s error=%s", rec.get("id"), e)
                 await db.commit()
         return imported
