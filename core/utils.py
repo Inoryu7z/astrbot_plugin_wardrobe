@@ -93,3 +93,22 @@ def ensure_str(v) -> str:
     if isinstance(v, list) and v:
         return v[0]
     return ""
+
+
+# aiimg 自拍模式生成的提示词固定首尾，存入衣柜库时剥离以仅保留中间描述部分。
+_AI_PROMPT_PREFIX = "以前三张参考图中同一少女为基准，完整保留少女五官、身材等全部人体身份特征，绝对禁止任何拼图，使用少女的面部特征为她本人生成一张新的写真：她有着白皙细腻的皮肤，纤细的身姿与格外饱满的曲线形成鲜明对比，"
+_AI_PROMPT_SUFFIX = "完全保留少女的面部特征与丰满的身材。"
+
+
+def strip_ai_prompt_affixes(text: str) -> str:
+    """剥离 ai_prompt 的固定前缀与后缀，只保留中间部分。
+
+    仅当文本以指定前缀/后缀开头/结尾时才移除，未匹配时原样返回。
+    """
+    if not isinstance(text, str) or not text:
+        return text
+    if text.startswith(_AI_PROMPT_PREFIX):
+        text = text[len(_AI_PROMPT_PREFIX):]
+    if text.endswith(_AI_PROMPT_SUFFIX):
+        text = text[: -len(_AI_PROMPT_SUFFIX)]
+    return text.strip()
