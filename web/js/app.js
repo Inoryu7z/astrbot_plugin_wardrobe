@@ -35,13 +35,13 @@
     {key:'body_focus',label:'身体焦点',type:'tags',hint:'画面刻意突出的部位，如：胸部特写、腿部特写'},
     {key:'scene',label:'场景',type:'tags'},
     {key:'atmosphere',label:'氛围',type:'tags'},
-    {key:'pose_type',label:'姿势',type:'text'},
-    {key:'body_orientation',label:'朝向',type:'text'},
-    {key:'dynamic_level',label:'动态程度',type:'text'},
+    {key:'pose_type',label:'姿势',type:'badge'},
+    {key:'body_orientation',label:'朝向',type:'badge'},
+    {key:'dynamic_level',label:'动态程度',type:'badge'},
     {key:'action_style',label:'动作风格',type:'tags'},
-    {key:'shot_size',label:'景别',type:'text'},
-    {key:'camera_angle',label:'角度',type:'text'},
-    {key:'expression',label:'表情',type:'text'},
+    {key:'shot_size',label:'景别',type:'badge'},
+    {key:'camera_angle',label:'角度',type:'badge'},
+    {key:'expression',label:'表情',type:'badge'},
     {key:'color_tone',label:'色调',type:'text'},
     {key:'composition',label:'构图',type:'text'},
     {key:'background',label:'背景',type:'text'},
@@ -817,6 +817,16 @@
           tag.textContent=val;
           valWrap.appendChild(tag);
           colorIdx++;
+        }else if(def.type==='badge'){
+          if(val){
+            const tag=document.createElement('span');
+            tag.className='tag tag-single '+tagColors[colorIdx%4];
+            tag.textContent=val;
+            valWrap.appendChild(tag);
+            colorIdx++;
+          }else{
+            valWrap.innerHTML='<span class="field-empty">-</span>';
+          }
         }else if(def.type==='number' && def.key==='use_count'){
           const fav=img.favorite||'none';
           let hint='';
