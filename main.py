@@ -44,7 +44,7 @@ _BACKUP_STATE_FILE = "backup_state.json"
     "astrbot_plugin_wardrobe",
     "Inoryu7z",
     "图片衣柜管理插件，支持智能分类、语义检索和参考图接口",
-    "2.9.1",
+    "2.10.0",
 )
 class WardrobePlugin(Star):
     def __init__(self, context: Context, config: AstrBotConfig = None):
@@ -1151,6 +1151,7 @@ class WardrobePlugin(Star):
         persona: str = "",
         created_by: str = "",
         user_description: str = "",
+        ai_prompt: str = "",
     ) -> tuple:
         await self._ensure_db()
 
@@ -1216,6 +1217,7 @@ class WardrobePlugin(Star):
                 file_hash=file_hash,
                 ref_strength="style",
                 ref_strength_reason="",
+                ai_prompt=ai_prompt,
             )
             await self._index_to_vector(image_id, user_description or "模型分析失败，无描述", user_description,
                                          category="人物", persona=persona,
@@ -1258,6 +1260,7 @@ class WardrobePlugin(Star):
             file_hash=file_hash,
             ref_strength=ensure_str(attrs.get("ref_strength", "style")),
             ref_strength_reason=ensure_str(attrs.get("ref_strength_reason", "")),
+            ai_prompt=ai_prompt,
         )
 
         desc_text = ensure_str(attrs.get("description"))
@@ -1303,14 +1306,16 @@ class WardrobePlugin(Star):
         if not entry:
             return
 
-        # _last_image_by_user 的值格式：{"path": Path, "mode": str}
+        # _last_image_by_user 的值格式：{"path": Path, "mode": str, "prompt": str}
         # 仅保存自拍模式 (mode="selfie") 的图片
         if isinstance(entry, dict):
             image_path = entry.get("path")
             image_mode = entry.get("mode", "")
+            ai_prompt = entry.get("prompt", "") or ""
         else:
             image_path = entry
             image_mode = ""
+            ai_prompt = ""
 
         if not image_path:
             return
@@ -1345,8 +1350,9 @@ class WardrobePlugin(Star):
             # 自动存图不传 user_description：此时没有用户主动提供的描述，
             # AI 分析模型会根据图片内容自动生成描述，无需额外文本。
             # 仅 /存图 命令路径才会传入用户描述。
+            # ai_prompt 来自 aiimg 插件记录的生成提示词，原样透传入库。
             image_id, attrs, duplicate = await self._save_image_from_bytes(
-                image_bytes, persona=persona, created_by=user_id,
+                image_bytes, persona=persona, created_by=user_id, ai_prompt=ai_prompt,
             )
 
             if duplicate:

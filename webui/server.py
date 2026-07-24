@@ -350,7 +350,8 @@ class WardrobeWebServer:
                 elif key in ("category", "clothing_type", "exposure_level", "pose_type",
                              "body_orientation", "dynamic_level", "shot_size", "camera_angle",
                              "expression", "color_tone", "composition", "background",
-                             "description", "user_tags", "persona", "favorite", "ref_strength"):
+                             "description", "user_tags", "persona", "favorite", "ref_strength",
+                             "ai_prompt"):
                     update_data[key] = str(val) if val is not None else ""
                 elif key == "use_count":
                     try:

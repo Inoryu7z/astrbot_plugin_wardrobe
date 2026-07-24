@@ -47,6 +47,7 @@
     {key:'background',label:'背景',type:'text'},
     {key:'description',label:'描述',type:'textarea'},
     {key:'user_tags',label:'用户标签',type:'text'},
+    {key:'ai_prompt',label:'AI提示词',type:'textarea',hideIfEmpty:true,hint:'由 aiimg 插件生成该图时所用的提示词'},
     {key:'persona',label:'人格',type:'text'},
     {key:'favorite',label:'收藏',type:'select',options:['none','favorite','like','meh']},
     {key:'use_count',label:'热度',type:'number',min:0},
@@ -700,6 +701,7 @@
 
     FIELD_DEFS.forEach(def=>{
       const val=img[def.key];
+      if(def.hideIfEmpty && (val===null||val===undefined||val===''))return;
       const row=document.createElement('div');
       row.className='field-row';
       row.dataset.fieldKey=def.key;
