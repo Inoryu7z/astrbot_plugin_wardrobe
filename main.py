@@ -19,7 +19,7 @@ from .core.analyzer import ImageAnalyzer
 from .core.database import WardrobeDatabase
 from .core.image_store import ImageStore
 from .core.searcher import ImageSearcher
-from .core.utils import detect_image_mime, ensure_list, ensure_str, mime_to_ext
+from .core.utils import detect_image_mime, ensure_list, ensure_str, mime_to_ext, strip_ai_prompt_affixes
 from .core.video_service import VideoService
 from .webui import WardrobeWebServer
 
@@ -1154,6 +1154,9 @@ class WardrobePlugin(Star):
         ai_prompt: str = "",
     ) -> tuple:
         await self._ensure_db()
+
+        # 剥离 aiimg 自拍模式固定首尾，仅保留中间描述部分入库。
+        ai_prompt = strip_ai_prompt_affixes(ai_prompt)
 
         max_size = int(self._cfg("max_image_size_mb", _MAX_IMAGE_SIZE_MB) or _MAX_IMAGE_SIZE_MB)
         if len(image_bytes) > max_size * 1024 * 1024:
