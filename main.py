@@ -44,7 +44,7 @@ _BACKUP_STATE_FILE = "backup_state.json"
     "astrbot_plugin_wardrobe",
     "Inoryu7z",
     "图片衣柜管理插件，支持智能分类、语义检索和参考图接口",
-    "2.9.2",
+    "2.9.3",
 )
 class WardrobePlugin(Star):
     def __init__(self, context: Context, config: AstrBotConfig = None):
@@ -1777,7 +1777,7 @@ class WardrobePlugin(Star):
         )
 
         try:
-            await self.db.increment_use_count(best["id"])
+            await self.db.increment_use_count_by_persona(best["id"], resolved_persona)
         except Exception:
             pass
 
@@ -1872,7 +1872,7 @@ class WardrobePlugin(Star):
             if path.exists():
                 image_paths.append(str(path))
             try:
-                await self.db.increment_use_count(r["id"])
+                await self.db.increment_use_count_by_persona(r["id"], current_persona)
             except Exception:
                 pass
 
