@@ -1,3 +1,21 @@
+### v2.9.4
+
+🐛 修复：按人格热度同步与备份/恢复完善
+
+* 修复 v2.9.3 引入的 `images.use_count` / `last_used_at` 与 `image_usage` 表不同步问题：按人格递增热度时同步镜像到 images 表，WebUI 显示与排序（热度优先 / 最近调用）恢复正常
+* 迁移改为幂等：新增 `schema_version` 表记录已执行的迁移，避免每次启动重复执行（v2.9.3 旧迁移每次启动都会把 use_count 归零）
+* 新增 v2.9.4 迁移：将 images.use_count 重新同步为 image_usage 各人格热度之和，last_used_at 同步为最近使用时间
+* 删除图片时同步清理 image_usage 记录，避免孤儿数据
+* 备份导出/导入支持 image_usage 记录：全量备份与选中导出均包含热度数据，恢复时通过 `skip_existing` 保留使用期间新产生的热度
+* WebUI 详情页 use_count 字段改为只读（由系统自动维护），编辑模式不再收集该字段
+* 编辑模式下原本为空的字段（如 ai_prompt）现在显示输入框，允许补充内容
+* 修复 searcher `_get_pools_text` 中 `plugin` 变量在 import 失败时未定义导致 NameError 的潜在 bug
+* WebUI 重新分析接口现在传入图片 persona，与命令行重新分析行为一致（使用人格级风格池）
+* WebUI 启动失败时记录错误日志，便于排查
+* ai_prompt 前缀剥离兼容旧版 aiimg 默认配置（多前缀匹配）
+
+---
+
 ### v2.9.3
 
 🔄 重构：图片取用热度改为按人格独立计算

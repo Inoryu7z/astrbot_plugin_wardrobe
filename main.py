@@ -44,7 +44,7 @@ _BACKUP_STATE_FILE = "backup_state.json"
     "astrbot_plugin_wardrobe",
     "Inoryu7z",
     "图片衣柜管理插件，支持智能分类、语义检索和参考图接口",
-    "2.9.3",
+    "2.9.4",
 )
 class WardrobePlugin(Star):
     def __init__(self, context: Context, config: AstrBotConfig = None):
@@ -351,6 +351,7 @@ class WardrobePlugin(Star):
                         primary_provider_id=primary,
                         secondary_provider_id=secondary,
                         timeout_seconds=timeout,
+                        persona=rec.get("persona", ""),
                     )
 
                     if not attrs:
@@ -428,6 +429,7 @@ class WardrobePlugin(Star):
                             primary_provider_id=primary,
                             secondary_provider_id=secondary,
                             timeout_seconds=timeout,
+                            persona=rec.get("persona", ""),
                         )
 
                         if not attrs:
@@ -556,6 +558,13 @@ class WardrobePlugin(Star):
             self.video_service._ensure_dirs()
             videos_dir = self.video_service.videos_dir
 
+        # image_usage（按人格热度）仅在全量备份时导出。
+        # 增量备份的 since_ts 基于 images.created_at，与 image_usage 的变更时间不对应，
+        # 增量导出会漏掉已存在图片的新热度记录，所以增量备份不包含 image_usage。
+        image_usage_records = []
+        if not incremental:
+            image_usage_records = await self.db.get_all_image_usage_records()
+
         video_settings = {}
         umo_path = self.video_service._get_send_umo_path()
         if umo_path.exists():
@@ -588,6 +597,8 @@ class WardrobePlugin(Star):
                 zf.writestr("records.json", json.dumps(records, ensure_ascii=False, indent=2))
                 if video_records:
                     zf.writestr("videos.json", json.dumps(video_records, ensure_ascii=False, indent=2))
+                if image_usage_records:
+                    zf.writestr("image_usage.json", json.dumps(image_usage_records, ensure_ascii=False, indent=2))
                 added_files = 0
                 for rec in records:
                     img_filename = rec.get("image_path", "")
@@ -681,6 +692,9 @@ class WardrobePlugin(Star):
         if video_records:
             self.video_service._ensure_dirs()
 
+        # 导出选中图片的按人格热度记录
+        image_usage_records = await self.db.get_image_usage_by_ids(image_ids)
+
         video_settings = {}
         umo_path = self.video_service._get_send_umo_path()
         if umo_path.exists():
@@ -711,6 +725,8 @@ class WardrobePlugin(Star):
                 zf.writestr("records.json", json.dumps(records, ensure_ascii=False, indent=2))
                 if video_records:
                     zf.writestr("videos.json", json.dumps(video_records, ensure_ascii=False, indent=2))
+                if image_usage_records:
+                    zf.writestr("image_usage.json", json.dumps(image_usage_records, ensure_ascii=False, indent=2))
                 added_files = 0
                 for rec in records:
                     img_filename = rec.get("image_path", "")
@@ -1051,8 +1067,8 @@ class WardrobePlugin(Star):
         if self._cfg("webui_enabled", False) and not self._webui:
             try:
                 await self._start_webui()
-            except Exception:
-                pass
+            except Exception as e:
+                logger.error("[Wardrobe] WebUI 启动失败: %s", e, exc_info=True)
 
         self._spawn_bg_task(self._auto_backup_loop())
         self._spawn_bg_task(self._ensure_all_thumbnails())
@@ -1185,6 +1201,7 @@ class WardrobePlugin(Star):
             primary_provider_id=primary,
             secondary_provider_id=secondary,
             timeout_seconds=timeout,
+            persona=persona,
         )
 
         if not attrs:

@@ -353,11 +353,7 @@ class WardrobeWebServer:
                              "description", "user_tags", "persona", "favorite", "ref_strength",
                              "ai_prompt"):
                     update_data[key] = str(val) if val is not None else ""
-                elif key == "use_count":
-                    try:
-                        update_data[key] = max(0, int(val))
-                    except (ValueError, TypeError):
-                        pass
+                # use_count 字段已改为只读（由系统自动维护），不允许 WebUI 编辑
 
             if not update_data:
                 return jsonify({"error": "无有效更新字段"}), 400
@@ -427,6 +423,7 @@ class WardrobeWebServer:
                     primary_provider_id=primary,
                     secondary_provider_id=secondary,
                     timeout_seconds=timeout,
+                    persona=image.get("persona", ""),
                 )
 
                 if not attrs:
@@ -1002,6 +999,22 @@ class WardrobeWebServer:
                                 total_imported_videos += imported_videos
                         except Exception as e:
                             logger.warning("[Wardrobe] 备份恢复视频数据失败: %s", e)
+
+                    # 恢复按人格热度记录（image_usage 表）
+                    image_usage_path = Path(tmp_dir) / "image_usage.json"
+                    if image_usage_path.exists():
+                        try:
+                            def _read_image_usage(iup):
+                                with open(str(iup), "r", encoding="utf-8") as f:
+                                    return json.load(f)
+                            usage_records = await asyncio.to_thread(_read_image_usage, image_usage_path)
+                            if isinstance(usage_records, list):
+                                imported_usage = await self.plugin.db.import_image_usage_records(
+                                    usage_records, skip_existing=True
+                                )
+                                logger.debug("[Wardrobe] 备份恢复热度记录: %d 条", imported_usage)
+                        except Exception as e:
+                            logger.warning("[Wardrobe] 备份恢复热度数据失败: %s", e)
 
                     video_settings_path = Path(tmp_dir) / "video_settings.json"
                     if video_settings_path.exists():
