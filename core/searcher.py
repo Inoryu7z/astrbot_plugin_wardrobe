@@ -102,19 +102,37 @@ class ImageSearcher:
         self.vector_searcher = vector_searcher
         self._pools_text_cache = None
         self._pools_text_ts = 0
+        self._pools_text_persona = ""
 
-    async def _get_pools_text(self) -> str:
+    async def _get_pools_text(self, persona: str = "") -> str:
+        persona_key = (persona or "").strip()
         now = time.time()
-        if self._pools_text_cache and now - self._pools_text_ts < 300:
+        # 缓存键包含 persona，避免不同人格命中同一份缓存
+        if (
+            self._pools_text_cache
+            and now - self._pools_text_ts < 300
+            and self._pools_text_persona == persona_key
+        ):
             return self._pools_text_cache
 
+        plugin = getattr(self.context, '_wardrobe_plugin', None)
         try:
             from .pools import ALL_POOLS
-            plugin = getattr(self.context, '_wardrobe_plugin', None)
             pools = await plugin.get_merged_pools() if plugin else ALL_POOLS
+            pools = {k: list(v) for k, v in pools.items()}
         except Exception:
             from .pools import ALL_POOLS
-            pools = ALL_POOLS
+            pools = {k: list(v) for k, v in ALL_POOLS.items()}
+
+        # 人格级风格池覆盖：若该人格配置了自定义 style 池，则替换全局 style 池
+        # get_style_pool_for_persona 返回 None 表示未配置（回退全局），返回 list 则覆盖
+        if persona_key and plugin:
+            try:
+                persona_styles = await plugin.get_style_pool_for_persona(persona_key)
+                if persona_styles is not None:
+                    pools["style"] = list(persona_styles)
+            except Exception as exc:
+                logger.warning("[Wardrobe] 获取人格风格池失败 persona=%s error=%s", persona_key, exc)
 
         search_pools = {k: v for k, v in pools.items() if k in ("style", "scene", "atmosphere", "clothing_type")}
         lines = []
@@ -126,6 +144,7 @@ class ImageSearcher:
 
         self._pools_text_cache = "\n".join(lines)
         self._pools_text_ts = now
+        self._pools_text_persona = persona_key
         return self._pools_text_cache
 
     @staticmethod
@@ -500,7 +519,7 @@ class ImageSearcher:
         if not providers:
             return None
 
-        pools_text = await self._get_pools_text()
+        pools_text = await self._get_pools_text(persona=current_persona)
         system_prompt = SEARCH_PARSE_SYSTEM_PROMPT.format(
             current_persona=current_persona or "未设置",
             persona_names=persona_names or "无",

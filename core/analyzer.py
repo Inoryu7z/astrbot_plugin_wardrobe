@@ -89,8 +89,20 @@ class ImageAnalyzer:
         self.context = context
         self.plugin = plugin
 
-    async def _build_pools_text(self) -> str:
+    async def _build_pools_text(self, persona: str = "") -> str:
         pools = await self.plugin.get_merged_pools() if self.plugin else ALL_POOLS
+        pools = {k: list(v) for k, v in pools.items()}
+
+        # 人格级风格池覆盖：若该人格配置了自定义 style 池，则替换全局 style 池
+        persona_key = (persona or "").strip()
+        if persona_key and self.plugin:
+            try:
+                persona_styles = await self.plugin.get_style_pool_for_persona(persona_key)
+                if persona_styles is not None:
+                    pools["style"] = list(persona_styles)
+            except Exception as exc:
+                logger.warning("[Wardrobe] 分析时获取人格风格池失败 persona=%s error=%s", persona_key, exc)
+
         lines = []
         for key, values in pools.items():
             lines.append(f"## {key}")
@@ -107,8 +119,9 @@ class ImageAnalyzer:
         primary_provider_id: str,
         secondary_provider_id: str = "",
         timeout_seconds: float = 60.0,
+        persona: str = "",
     ) -> Optional[dict[str, Any]]:
-        pools_text = await self._build_pools_text()
+        pools_text = await self._build_pools_text(persona=persona)
         system_prompt = ANALYZE_SYSTEM_PROMPT.format(pools_text=pools_text)
 
         mime = detect_image_mime(image_bytes)

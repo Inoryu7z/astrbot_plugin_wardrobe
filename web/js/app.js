@@ -50,7 +50,7 @@
     {key:'ai_prompt',label:'AI提示词',type:'textarea',hideIfEmpty:true,hint:'由 aiimg 插件生成该图时所用的提示词'},
     {key:'persona',label:'人格',type:'text'},
     {key:'favorite',label:'收藏',type:'select',options:['none','favorite','like','meh']},
-    {key:'use_count',label:'热度',type:'number',min:0},
+    {key:'use_count',label:'热度',type:'number',min:0,readonly:true},
   ];
 
   let state={
@@ -701,7 +701,8 @@
 
     FIELD_DEFS.forEach(def=>{
       const val=img[def.key];
-      if(def.hideIfEmpty && (val===null||val===undefined||val===''))return;
+      // 编辑模式下不应用 hideIfEmpty：允许为原本为空的字段（如 ai_prompt）添加内容
+      if(!editMode && def.hideIfEmpty && (val===null||val===undefined||val===''))return;
       const row=document.createElement('div');
       row.className='field-row';
       row.dataset.fieldKey=def.key;
@@ -711,7 +712,7 @@
       label.textContent=def.label;
       row.appendChild(label);
 
-      if(editMode){
+      if(editMode && !def.readonly){
         const inputWrap=document.createElement('div');
         inputWrap.className='field-input-wrap';
 
@@ -866,6 +867,8 @@
     const data={};
     const container=$('#modalFields');
     FIELD_DEFS.forEach(def=>{
+      // 只读字段不收集，避免提交时覆盖系统维护的值
+      if(def.readonly)return;
       const row=container.querySelector(`[data-field-key="${def.key}"]`);
       if(!row)return;
 
