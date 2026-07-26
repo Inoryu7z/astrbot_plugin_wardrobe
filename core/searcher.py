@@ -81,6 +81,12 @@ SEARCH_SELECT_SYSTEM_PROMPT = """# 角色
 3. **低优先级**：composition（构图）
 4. style（风格）和 atmosphere（氛围）仅作为辅助参考，不作为主要匹配依据
 
+# 热度平衡（use_count）
+每个候选图片都有 use_count 字段，表示该图片被当前人格取用的次数。当多张图片内容匹配度**相近**时，优先选择 use_count 较低的图片，让每张图片都有被使用的机会。
+- **内容匹配度始终优先于热度平衡**：例如用户要"粉色水手服"，100热度的粉色图优先于0热度的黑色图
+- **只有内容匹配度相近时才考虑热度**：例如两张都是粉色水手服，选0热度的那张
+- **没有合适匹配时返回空列表**：不要为了低热度而选择不匹配的图片
+
 # 规则
 1. 最多选择 {max_select} 张图片
 2. 匹配标准宽松：完全匹配、大部分匹配、语义可能相关的图片都应返回；只有完全不匹配才排除
@@ -233,6 +239,22 @@ class ImageSearcher:
         if not candidates:
             logger.debug("[Wardrobe] 未找到候选图片")
             return [], meta
+
+        # 按当前人格注入 use_count（按人格独立热度）
+        # current_persona 为空时（空人格）不记热度，use_count 保持 0
+        if current_persona and current_persona.strip():
+            try:
+                use_counts = await self.db.get_use_counts_by_persona(
+                    [c["id"] for c in candidates], current_persona.strip()
+                )
+                for c in candidates:
+                    c["use_count"] = use_counts.get(c["id"], 0)
+                    c["_heat_persona"] = current_persona.strip()
+            except Exception as exc:
+                logger.warning("[Wardrobe] 获取按人格热度失败: %s", exc)
+        else:
+            for c in candidates:
+                c["use_count"] = 0
 
         if prioritize_unused:
             def _effective_use_count(r):
@@ -586,6 +608,7 @@ class ImageSearcher:
                 "scene": c.get("scene", []),
                 "atmosphere": c.get("atmosphere", []),
                 "description": c.get("description", ""),
+                "use_count": c.get("use_count", 0),
             }
             if c.get("category") == "人物":
                 info.update({

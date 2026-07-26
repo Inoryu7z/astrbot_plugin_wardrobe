@@ -982,6 +982,28 @@
     }
   }
 
+  async function batchClearUseCount(){
+    if(state.selectedIds.size===0){
+      toast('请先选择图片','warning');
+      return;
+    }
+    if(!confirm(`确定将选中的 ${state.selectedIds.size} 张图片的取用热度（所有人格）清零？`))return;
+    const resp=await api('/api/images/batch-clear-use-count',{
+      method:'POST',
+      json:{ids:[...state.selectedIds]}
+    });
+    if(!resp)return;
+    const data=await resp.json();
+    if(data.success){
+      toast(`已清除 ${data.cleared} 张图片的热度`,'success');
+      state.selectedIds.clear();
+      updateBatchUI();
+      state.page=1;state.allLoaded=false;loadImages(true);loadStats();
+    }else{
+      toast(data.error||'操作失败','error');
+    }
+  }
+
   async function batchSelectAll(){
     const btn=$('#batchSelectAllBtn');
     btn.disabled=true;
@@ -2369,6 +2391,7 @@
     });
 
     $('#batchDeleteBtn').addEventListener('click',batchDelete);
+    $('#batchClearUseCountBtn').addEventListener('click',batchClearUseCount);
     $('#batchSelectAllBtn').addEventListener('click',batchSelectAll);
     $('#batchReanalyzeBtn').addEventListener('click',batchReanalyze);
     $('#batchReanalyzeFailedBtn').addEventListener('click',batchReanalyzeFailed);

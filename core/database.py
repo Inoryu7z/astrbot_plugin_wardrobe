@@ -59,6 +59,18 @@ CREATE INDEX IF NOT EXISTS idx_favorite ON images(favorite);
 CREATE INDEX IF NOT EXISTS idx_file_hash ON images(file_hash);
 """
 
+_CREATE_IMAGE_USAGE_TABLE_SQL = """
+CREATE TABLE IF NOT EXISTS image_usage (
+    image_id TEXT NOT NULL,
+    persona TEXT NOT NULL,
+    use_count INTEGER DEFAULT 0,
+    last_used_at TEXT DEFAULT '',
+    PRIMARY KEY (image_id, persona)
+);
+CREATE INDEX IF NOT EXISTS idx_image_usage_persona ON image_usage(persona);
+CREATE INDEX IF NOT EXISTS idx_image_usage_image ON image_usage(image_id);
+"""
+
 _CREATE_VIDEOS_TABLE_SQL = """
 CREATE TABLE IF NOT EXISTS videos (
     id TEXT PRIMARY KEY,
@@ -131,6 +143,7 @@ class WardrobeDatabase:
                     except Exception:
                         pass
                 await db.executescript(_CREATE_INDEX_SQL)
+                await db.executescript(_CREATE_IMAGE_USAGE_TABLE_SQL)
                 await db.executescript(_CREATE_VIDEOS_TABLE_SQL)
                 for col, default in [
                     ("video_url", "TEXT DEFAULT ''"),
@@ -139,6 +152,20 @@ class WardrobeDatabase:
                         await db.execute(f"ALTER TABLE videos ADD COLUMN {col} {default}")
                     except Exception:
                         pass
+
+                # v2.9.3 迁移：按人格独立热度，旧 use_count 全部归零
+                try:
+                    cursor = await db.execute(
+                        "UPDATE images SET use_count = 0 WHERE COALESCE(use_count, 0) != 0"
+                    )
+                    if cursor.rowcount > 0:
+                        logger.info(
+                            "[Wardrobe] 迁移：已将 %d 张图片的旧 use_count 归零（按人格独立热度上线）",
+                            cursor.rowcount,
+                        )
+                except Exception as exc:
+                    logger.warning("[Wardrobe] 迁移 use_count 归零失败: %s", exc)
+
                 await db.commit()
         logger.info("[Wardrobe] 数据库初始化完成")
 
@@ -297,6 +324,73 @@ class WardrobeDatabase:
                     (now, now, image_id),
                 )
                 await db.commit()
+
+    async def increment_use_count_by_persona(
+        self, image_id: str, persona: str
+    ) -> None:
+        """按人格独立记录热度。persona 为空时不记录（空人格不记热度）。"""
+        if not persona or not persona.strip():
+            return
+        persona = persona.strip()
+        now = datetime.now(timezone.utc).isoformat()
+        async with self._lock:
+            async with aiosqlite.connect(self.db_path) as db:
+                await db.execute(
+                    """
+                    INSERT INTO image_usage (image_id, persona, use_count, last_used_at)
+                    VALUES (?, ?, 1, ?)
+                    ON CONFLICT(image_id, persona) DO UPDATE SET
+                        use_count = COALESCE(image_usage.use_count, 0) + 1,
+                        last_used_at = ?
+                    """,
+                    (image_id, persona, now, now),
+                )
+                await db.commit()
+
+    async def get_use_counts_by_persona(
+        self, image_ids: list[str], persona: str
+    ) -> dict[str, int]:
+        """批量查某人格下多个图片的 use_count。persona 为空时返回空 dict。"""
+        if not persona or not persona.strip() or not image_ids:
+            return {}
+        persona = persona.strip()
+        placeholders = ",".join("?" for _ in image_ids)
+        params = [persona] + image_ids
+        async with self._lock:
+            async with aiosqlite.connect(self.db_path) as db:
+                cursor = await db.execute(
+                    f"SELECT image_id, use_count FROM image_usage WHERE persona = ? AND image_id IN ({placeholders})",
+                    params,
+                )
+                rows = await cursor.fetchall()
+        return {row[0]: int(row[1] or 0) for row in rows}
+
+    async def batch_clear_use_counts(self, image_ids: list[str]) -> int:
+        """批量清除指定图片的热度（所有人格）。返回删除行数。"""
+        if not image_ids:
+            return 0
+        placeholders = ",".join("?" for _ in image_ids)
+        async with self._lock:
+            async with aiosqlite.connect(self.db_path) as db:
+                cursor = await db.execute(
+                    f"DELETE FROM image_usage WHERE image_id IN ({placeholders})",
+                    image_ids,
+                )
+                await db.execute(
+                    "UPDATE images SET use_count = 0, last_used_at = '' WHERE id IN ({placeholders})".format(placeholders=placeholders),
+                    image_ids,
+                )
+                await db.commit()
+                return cursor.rowcount
+
+    async def clear_all_use_counts(self) -> int:
+        """清空所有图片热度（迁移/重置用）。返回删除行数。"""
+        async with self._lock:
+            async with aiosqlite.connect(self.db_path) as db:
+                cursor = await db.execute("DELETE FROM image_usage")
+                await db.execute("UPDATE images SET use_count = 0, last_used_at = ''")
+                await db.commit()
+                return cursor.rowcount
 
     async def increment_daily_selfie_use_count(self, image_id: str) -> None:
         async with self._lock:

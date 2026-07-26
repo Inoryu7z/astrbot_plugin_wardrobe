@@ -203,9 +203,12 @@ class WardrobeVectorSearcher:
             if persona and not filter_no_persona:
                 metadata_filters["persona_id"] = persona
 
-            fetch_k = k * 3 if metadata_filters else k * 2
+            # 扩大候选池：让 LLM 选择阶段有足够多的候选图片可选，
+            # 避免"好图被相似度筛掉、候选池太小导致热度平衡机制用不上"的问题。
+            # 有 metadata_filters 时按人格池过滤，命中率更低，需要更大的 fetch_k。
+            fetch_k = k * 5 if metadata_filters else k * 3
             if filter_no_persona or exclude_persona:
-                fetch_k = max(fetch_k, k * 3)
+                fetch_k = max(fetch_k, k * 5)
             results = await self._faiss_db.retrieve(
                 query=processed_query,
                 k=k,

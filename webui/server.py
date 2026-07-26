@@ -525,6 +525,16 @@ class WardrobeWebServer:
                     updated += 1
             return jsonify({"success": True, "updated": updated, "favorite": fav})
 
+        @app.route("/api/images/batch-clear-use-count", methods=["POST"])
+        async def api_images_batch_clear_use_count():
+            await self.plugin._ensure_db()
+            data = await request.get_json(silent=True) or {}
+            ids = data.get("ids", [])
+            if not ids:
+                return jsonify({"error": "未指定图片"}), 400
+            cleared = await self.plugin.db.batch_clear_use_counts(ids)
+            return jsonify({"success": True, "cleared": cleared})
+
         @app.route("/api/images/ids")
         async def api_images_ids():
             await self.plugin._ensure_db()
