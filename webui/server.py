@@ -559,6 +559,23 @@ class WardrobeWebServer:
                     updated += 1
             return jsonify({"success": True, "updated": updated, "style_name": style_name})
 
+        @app.route("/api/images/batch-ref-strength", methods=["POST"])
+        async def api_images_batch_ref_strength():
+            await self.plugin._ensure_db()
+            data = await request.get_json(silent=True) or {}
+            ids = data.get("ids", [])
+            rs = data.get("ref_strength", "style")
+            if not ids:
+                return jsonify({"error": "未指定图片"}), 400
+            if rs not in ("full", "style", "reimagine"):
+                return jsonify({"error": "无效的参考强度值"}), 400
+            updated = 0
+            for image_id in ids:
+                ok = await self.plugin.db.update_image(image_id, ref_strength=rs)
+                if ok:
+                    updated += 1
+            return jsonify({"success": True, "updated": updated, "ref_strength": rs})
+
         @app.route("/api/images/ids")
         async def api_images_ids():
             await self.plugin._ensure_db()
