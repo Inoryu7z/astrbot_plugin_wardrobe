@@ -1,5 +1,6 @@
 import asyncio
 import json
+import os
 import secrets
 import shutil
 import tempfile
@@ -81,14 +82,111 @@ class WardrobeWebServer:
             del self._download_tokens[t]
 
     def _register_download(self, file_path, download_name: str) -> str:
-        """注册一次性下载令牌，返回 token。30 分钟有效。"""
+        """注册持久下载令牌，返回 token。文件存在期间均可重试下载（支持断点续传）。"""
         token = secrets.token_hex(32)
         self._download_tokens[token] = {
             "path": str(file_path),
             "filename": download_name,
-            "expires": time.time() + 1800,
+            "expires": time.time() + 86400 * 7,  # 7天有效，与备份保留期一致
         }
         return token
+
+    def _resolve_download_token(self, token: str) -> dict | None:
+        """解析下载令牌，返回信息或 None。不删除 token，支持多次重试。"""
+        info = self._download_tokens.get(token)
+        if not info:
+            return None
+        if time.time() > info["expires"]:
+            del self._download_tokens[token]
+            return None
+        # 文件已被删除（清理或手动删除），移除失效 token
+        if not os.path.exists(info["path"]):
+            del self._download_tokens[token]
+            return None
+        return info
+
+    async def _stream_file_response(self, file_path: str, download_name: str):
+        """流式文件响应，支持 HTTP Range 续传。不依赖 send_file，内存友好。
+
+        - 浏览器原生支持断点续传（Range 请求）
+        - 1MB 分块读取，避免大文件 OOM
+        - 下载失败可重试（token 不删除）
+        """
+        try:
+            file_size = os.path.getsize(file_path)
+        except OSError as e:
+            return jsonify({"error": f"文件不存在: {e}"}), 404
+
+        range_header = request.headers.get("Range", "")
+        chunk_size = 1024 * 1024  # 1MB
+
+        disposition = f'attachment; filename="{download_name}"'
+
+        if range_header:
+            # 解析 Range: bytes=0-1023 或 bytes=0-
+            try:
+                range_spec = range_header.replace("bytes=", "").split("-", 1)
+                start = int(range_spec[0]) if range_spec[0] else 0
+                end = int(range_spec[1]) if range_spec[1] else file_size - 1
+                end = min(end, file_size - 1)
+                if start > end or start >= file_size or start < 0:
+                    return Response(
+                        "Invalid Range",
+                        status=416,
+                        headers={"Content-Range": f"bytes */{file_size}"},
+                    )
+                length = end - start + 1
+
+                async def range_gen():
+                    f = await asyncio.to_thread(open, file_path, "rb")
+                    try:
+                        await asyncio.to_thread(f.seek, start)
+                        remaining = length
+                        while remaining > 0:
+                            chunk = await asyncio.to_thread(f.read, min(chunk_size, remaining))
+                            if not chunk:
+                                break
+                            yield chunk
+                            remaining -= len(chunk)
+                    finally:
+                        await asyncio.to_thread(f.close)
+
+                return Response(
+                    range_gen(),
+                    status=206,
+                    mimetype="application/zip",
+                    headers={
+                        "Content-Disposition": disposition,
+                        "Accept-Ranges": "bytes",
+                        "Content-Range": f"bytes {start}-{end}/{file_size}",
+                        "Content-Length": str(length),
+                    },
+                )
+            except (ValueError, IndexError):
+                pass  # 解析失败则走全量
+
+        # 全量下载
+        async def full_gen():
+            f = await asyncio.to_thread(open, file_path, "rb")
+            try:
+                while True:
+                    chunk = await asyncio.to_thread(f.read, chunk_size)
+                    if not chunk:
+                        break
+                    yield chunk
+            finally:
+                await asyncio.to_thread(f.close)
+
+        return Response(
+            full_gen(),
+            status=200,
+            mimetype="application/zip",
+            headers={
+                "Content-Disposition": disposition,
+                "Accept-Ranges": "bytes",
+                "Content-Length": str(file_size),
+            },
+        )
 
     def _create_app(self) -> Quart:
         app = Quart(
@@ -637,12 +735,13 @@ class WardrobeWebServer:
                     return jsonify({"error": "没有可导出的图片"}), 400
 
                 logger.debug("[Wardrobe] 图片导出: %d张图片", added_files)
-                return await send_file(
-                    str(file_path),
-                    mimetype="application/zip",
-                    as_attachment=True,
-                    attachment_filename=f"wardrobe_images_{time.strftime('%Y%m%d_%H%M%S')}.zip",
-                )
+                download_name = f"wardrobe_images_{time.strftime('%Y%m%d_%H%M%S')}.zip"
+                token = self._register_download(file_path, download_name)
+                return jsonify({
+                    "token": token,
+                    "files": added_files,
+                    "download_name": download_name,
+                })
             except Exception as e:
                 logger.error("[Wardrobe] 图片导出失败: %s", e, exc_info=True)
                 return jsonify({"error": f"导出失败: {e}"}), 500
@@ -701,25 +800,69 @@ class WardrobeWebServer:
         @app.route("/api/backup/download")
         async def api_backup_download():
             token = request.args.get("token", "")
-            info = self._download_tokens.get(token)
-            if not info or time.time() > info["expires"]:
-                if token in self._download_tokens:
-                    del self._download_tokens[token]
-                return jsonify({"error": "下载链接已过期或无效"}), 410
-            file_path = info["path"]
-            download_name = info["filename"]
-            # 一次性令牌，下载即失效
-            del self._download_tokens[token]
+            info = self._resolve_download_token(token)
+            if not info:
+                return jsonify({"error": "下载链接已过期或文件已删除"}), 410
+            # 持久 token：不删除，支持断点续传和多次重试
             try:
-                return await send_file(
-                    file_path,
-                    mimetype="application/zip",
-                    as_attachment=True,
-                    attachment_filename=download_name,
-                )
+                return await self._stream_file_response(info["path"], info["filename"])
             except Exception as e:
                 logger.error("[Wardrobe] 下载文件失败: %s", e, exc_info=True)
                 return jsonify({"error": f"下载失败: {e}"}), 500
+
+        @app.route("/api/backup/download-by-name")
+        async def api_backup_download_by_name():
+            """按文件名下载历史备份（防路径穿越，仅限 backups 目录）。"""
+            filename = request.args.get("filename", "")
+            safe_name = Path(filename).name
+            if not safe_name.endswith(".zip"):
+                return jsonify({"error": "无效的文件名"}), 400
+            backup_dir = self.plugin.data_dir / "backups"
+            target = (backup_dir / safe_name).resolve()
+            try:
+                target.relative_to(backup_dir.resolve())
+            except ValueError:
+                return jsonify({"error": "无效的路径"}), 400
+            if not target.exists() or not target.is_file():
+                return jsonify({"error": "文件不存在"}), 404
+            try:
+                return await self._stream_file_response(str(target), safe_name)
+            except Exception as e:
+                logger.error("[Wardrobe] 下载历史备份失败: %s", e, exc_info=True)
+                return jsonify({"error": f"下载失败: {e}"}), 500
+
+        @app.route("/api/backup/list")
+        async def api_backup_list():
+            try:
+                await self.plugin._ensure_db()
+                backups = await self.plugin.list_backups()
+                return jsonify({"backups": backups})
+            except Exception as e:
+                logger.error("[Wardrobe] 获取备份列表失败: %s", e, exc_info=True)
+                return jsonify({"error": f"获取列表失败: {e}"}), 500
+
+        @app.route("/api/backup/delete", methods=["POST"])
+        async def api_backup_delete():
+            try:
+                data = await request.get_json(silent=True) or {}
+                filename = data.get("filename", "")
+                if not filename:
+                    return jsonify({"error": "缺少文件名"}), 400
+                ok = await self.plugin.delete_backup(filename)
+                if not ok:
+                    return jsonify({"error": "删除失败，文件不存在或无权限"}), 404
+                # 同时移除该文件对应的下载 token
+                safe_name = Path(filename).name
+                stale_tokens = [
+                    t for t, info in self._download_tokens.items()
+                    if Path(info["path"]).name == safe_name
+                ]
+                for t in stale_tokens:
+                    del self._download_tokens[t]
+                return jsonify({"success": True})
+            except Exception as e:
+                logger.error("[Wardrobe] 删除备份失败: %s", e, exc_info=True)
+                return jsonify({"error": f"删除失败: {e}"}), 500
 
         @app.route("/api/images/upload", methods=["POST"])
         async def api_image_upload():

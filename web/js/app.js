@@ -1600,6 +1600,65 @@
       importBtn.disabled=true;
       $('#backupStatus').textContent='';
     });
+
+    // 备份历史列表
+    const refreshBtn=$('#backupListRefreshBtn');
+    const historyList=$('#backupHistoryList');
+
+    async function loadBackupHistory(){
+      historyList.innerHTML='<div class="backup-history-empty">加载中...</div>';
+      try{
+        const resp=await api('/api/backup/list');
+        if(!resp){historyList.innerHTML='<div class="backup-history-empty">加载失败</div>';return;}
+        const data=await resp.json();
+        const backups=data.backups||[];
+        if(!backups.length){
+          historyList.innerHTML='<div class="backup-history-empty">暂无备份文件</div>';
+          return;
+        }
+        historyList.innerHTML=backups.map(b=>{
+          const sizeMB=(b.size/1024/1024).toFixed(2);
+          const date=new Date(b.mtime*1000);
+          const dateStr=`${date.getMonth()+1}/${date.getDate()} ${String(date.getHours()).padStart(2,'0')}:${String(date.getMinutes()).padStart(2,'0')}`;
+          return `<div class="backup-history-item">
+            <div class="backup-history-info">
+              <span class="backup-history-type">${esc(b.type)}</span>
+              <span class="backup-history-size">${sizeMB} MB</span>
+              <span class="backup-history-date">${dateStr}</span>
+            </div>
+            <div class="backup-history-actions">
+              <a class="btn btn-text btn-sm" href="/api/backup/download-by-name?filename=${encodeURIComponent(b.filename)}" download>下载</a>
+              <button class="btn btn-text btn-sm backup-history-del" data-filename="${esc(b.filename)}">删除</button>
+            </div>
+          </div>`;
+        }).join('');
+        historyList.querySelectorAll('.backup-history-del').forEach(btn=>{
+          btn.addEventListener('click',async()=>{
+            const fn=btn.dataset.filename;
+            if(!confirm(`确定删除 ${fn} ？`))return;
+            try{
+              const resp=await api('/api/backup/delete',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({filename:fn})});
+              if(!resp)return;
+              const data=await resp.json();
+              if(data.success){
+                toast('已删除','success');
+                loadBackupHistory();
+              }else{
+                toast(data.error||'删除失败','error');
+              }
+            }catch(e){
+              toast('删除失败: '+e.message,'error');
+            }
+          });
+        });
+      }catch(e){
+        historyList.innerHTML='<div class="backup-history-empty">加载失败: '+esc(e.message)+'</div>';
+      }
+    }
+
+    refreshBtn.addEventListener('click',loadBackupHistory);
+    // 打开备份模态框时自动加载历史
+    $('#backupBtn').addEventListener('click',()=>loadBackupHistory());
   }
 
   function esc(s){
