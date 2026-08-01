@@ -1995,6 +1995,7 @@
 
   function showContextMenu(e,id){
     hideContextMenu();
+    hideUserTagsPopover();
     state.contextMenuTargetId=id;
 
     const menu=document.createElement('div');
@@ -2008,6 +2009,7 @@
       {icon:'👍',label:'喜欢',action:()=>quickFavorite(id,'like')},
       {icon:'😐',label:'无感',action:()=>quickFavorite(id,'meh')},
       {icon:'🎨',label:'切换参考强度',action:()=>quickRefStrength(id)},
+      {icon:'🏷️',label:'编辑用户标签',action:()=>quickEditUserTags(id,e.clientX,e.clientY)},
       {type:'divider'},
       {icon:'🔄',label:'重新分析',action:()=>quickReanalyze(id)},
       {type:'divider'},
@@ -2024,7 +2026,8 @@
       const btn=document.createElement('button');
       btn.className='context-menu-item'+(item.danger?' danger':'');
       btn.innerHTML=`<span class="context-menu-icon">${item.icon}</span><span>${item.label}</span>`;
-      btn.addEventListener('click',()=>{
+      btn.addEventListener('click',(ev)=>{
+        ev.stopPropagation();
         hideContextMenu();
         item.action();
       });
@@ -2042,6 +2045,80 @@
     const existing=document.getElementById('contextMenu');
     if(existing)existing.remove();
     state.contextMenuTargetId=null;
+  }
+
+  function hideUserTagsPopover(){
+    const existing=document.getElementById('userTagsPopover');
+    if(existing)existing.remove();
+  }
+
+  async function quickEditUserTags(id,anchorX,anchorY){
+    hideContextMenu();
+    hideUserTagsPopover();
+
+    const popover=document.createElement('div');
+    popover.className='user-tags-popover';
+    popover.id='userTagsPopover';
+    popover.innerHTML=`
+      <div class="user-tags-popover-title">编辑用户标签</div>
+      <input type="text" class="login-input user-tags-popover-input" placeholder="输入备注..." autocomplete="off">
+      <div class="user-tags-popover-actions">
+        <button class="btn btn-ghost btn-sm" data-act="cancel">取消</button>
+        <button class="btn btn-accent btn-sm" data-act="save">保存</button>
+      </div>
+    `;
+    document.body.appendChild(popover);
+
+    popover.style.left=anchorX+'px';
+    popover.style.top=anchorY+'px';
+    const rect=popover.getBoundingClientRect();
+    if(rect.right>window.innerWidth)popover.style.left=Math.max(8,anchorX-rect.width)+'px';
+    if(rect.bottom>window.innerHeight)popover.style.top=Math.max(8,anchorY-rect.height)+'px';
+
+    const input=popover.querySelector('.user-tags-popover-input');
+    const cached=state.detailCache.get(id);
+    if(cached){
+      input.value=cached.user_tags||'';
+    }
+    // 默认聚焦并全选，呼出即可直接输入
+    requestAnimationFrame(()=>{input.focus();input.select();});
+    if(!cached){
+      api(`/api/images/${id}`).then(async r=>{
+        if(!r||!r.ok)return;
+        const data=await r.json();
+        state.detailCache.set(id,data);
+        // 仅在用户尚未输入时回填初始值，避免覆盖正在编辑的内容
+        if(input.value==='')input.value=data.user_tags||'';
+      });
+    }
+
+    const close=()=>hideUserTagsPopover();
+
+    const save=async ()=>{
+      const val=input.value.trim();
+      const resp=await api(`/api/images/${id}`,{method:'PUT',json:{user_tags:val}});
+      if(!resp){toast('保存失败','error');return;}
+      const result=await resp.json();
+      if(result.success){
+        toast('已保存','success');
+        if(state.detailCache.has(id))state.detailCache.get(id).user_tags=val;
+        if(state.currentImageId===id&&state.currentImageData){
+          state.currentImageData.user_tags=val;
+          if(!state.editing)renderDetailFields(state.currentImageData,false);
+        }
+        close();
+      }else{
+        toast(result.error||'保存失败','error');
+      }
+    };
+
+    popover.querySelector('[data-act="cancel"]').addEventListener('click',close);
+    popover.querySelector('[data-act="save"]').addEventListener('click',save);
+    input.addEventListener('keydown',e=>{
+      e.stopPropagation();
+      if(e.key==='Enter'){e.preventDefault();save();}
+      else if(e.key==='Escape'){e.preventDefault();close();}
+    });
   }
 
   async function quickFavorite(id,value){
@@ -2202,9 +2279,10 @@
 
     document.addEventListener('click',e=>{
       if(!e.target.closest('.context-menu'))hideContextMenu();
+      if(!e.target.closest('.user-tags-popover'))hideUserTagsPopover();
     });
     document.addEventListener('keydown',e=>{
-      if(e.key==='Escape')hideContextMenu();
+      if(e.key==='Escape'){hideContextMenu();hideUserTagsPopover();}
     });
 
     $$('input[name="category"]').forEach(inp=>{
@@ -2462,6 +2540,9 @@
         return;
       }
       if($('#detailModal').classList.contains('hidden'))return;
+      // 编辑模式下焦点在输入框/文本域/下拉框时，方向键用于移动光标，不切换卡片
+      const _t=e.target;
+      if(_t&&(_t.isContentEditable||_t.tagName==='INPUT'||_t.tagName==='TEXTAREA'||_t.tagName==='SELECT'))return;
       if(e.key==='ArrowLeft')navigateDetail(-1);
       else if(e.key==='ArrowRight')navigateDetail(1);
       else if(e.key==='Escape')closeDetail();
