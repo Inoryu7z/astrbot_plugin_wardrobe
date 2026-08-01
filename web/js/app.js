@@ -1007,6 +1007,30 @@
     }
   }
 
+  async function batchRefStrength(value){
+    if(state.selectedIds.size===0){
+      toast('请先选择图片','warning');
+      return;
+    }
+    const opt=RS_OPTIONS.find(o=>o.value===value);
+    if(!opt)return;
+    if(!confirm(`确定将选中的 ${state.selectedIds.size} 张图片参考强度设为「${opt.label}」？`))return;
+    const resp=await api('/api/images/batch-ref-strength',{
+      method:'POST',
+      json:{ids:[...state.selectedIds],ref_strength:value}
+    });
+    if(!resp)return;
+    const data=await resp.json();
+    if(data.success){
+      toast(`已将 ${data.updated} 张图片参考强度设为「${opt.label}」`,'success');
+      state.selectedIds.clear();
+      updateBatchUI();
+      state.page=1;state.allLoaded=false;loadImages(true);loadStats();
+    }else{
+      toast(data.error||'操作失败','error');
+    }
+  }
+
   async function batchClearUseCount(){
     if(state.selectedIds.size===0){
       toast('请先选择图片','warning');
@@ -2531,6 +2555,13 @@
         const styleName=btn.dataset.addStyle;
         $('#batchFavDropdown').classList.add('hidden');
         batchAddStyle(styleName);
+      });
+    });
+    document.querySelectorAll('.batch-fav-item[data-rs]').forEach(btn=>{
+      btn.addEventListener('click',()=>{
+        const rs=btn.dataset.rs;
+        $('#batchFavDropdown').classList.add('hidden');
+        batchRefStrength(rs);
       });
     });
     $('#batchExportToggle').addEventListener('click',()=>{

@@ -1174,6 +1174,11 @@ html, body {
   background:rgba(0,0,0,0.05);
 }
 
+.batch-fav-divider {
+  height:1px; margin:4px 0;
+  background:var(--border);
+}
+
 .image-card-fav {
   position:absolute; top:32px; left:8px;
   font-size:14px; z-index:2;
