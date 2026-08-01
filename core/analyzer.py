@@ -320,6 +320,17 @@ class ImageAnalyzer:
         img_b64 = base64.b64encode(image_bytes).decode("ascii")
         image_data_uri = f"data:{mime};base64,{img_b64}"
 
+        # 追加联网搜索引导：cosplay 等场景必须调用 web_search
+        search_guidance = (
+            "\n\n# 联网搜索指引（已启用 web_search 工具）\n"
+            "本次已启用联网搜索。请按以下规则使用：\n"
+            "1. 如果图片是 cosplay（角色扮演），必须调用 web_search 搜索该角色的出处（作品名、角色名）。"
+            "在 key_features 中记录\"cosplay: 作品名/角色名\"，在 description 开头提及角色出处。\n"
+            "2. 如果图片涉及可识别的品牌 logo、IP 角色、特定作品元素，也应搜索确认。\n"
+            "3. 日常穿搭、纯风景等不涉及上述内容的图片无需搜索。"
+        )
+        final_prompt = prompt_text + search_guidance
+
         body: dict[str, Any] = {
             "model": model,
             "stream": False,
@@ -331,7 +342,7 @@ class ImageAnalyzer:
                 {
                     "role": "user",
                     "content": [
-                        {"type": "input_text", "text": prompt_text},
+                        {"type": "input_text", "text": final_prompt},
                         {"type": "input_image", "image_url": image_data_uri},
                     ],
                 },
