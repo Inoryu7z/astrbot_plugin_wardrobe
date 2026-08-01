@@ -159,52 +159,40 @@ class ImageAnalyzer:
 
             # 读取 Responses API 配置
             use_responses = False
-            resp_providers: list[dict[str, str]] = []
-            primary_limit = 1500000
-            secondary_limit = 1500000
+            resp_providers: list[dict] = []
             if self.plugin:
                 use_responses = bool(self.plugin._cfg("save_use_responses_api", False))
                 resp_providers = self._parse_responses_providers()
-                primary_limit = int(self.plugin._cfg("save_primary_daily_limit", 1500000) or 1500000)
-                secondary_limit = int(self.plugin._cfg("save_secondary_daily_limit", 1500000) or 1500000)
 
-            # Responses 模式：主/副模型从 resp_providers 列表按顺序取
-            # 非 Responses 模式：用框架 provider_id
-            if use_responses and resp_providers:
-                primary_id = resp_providers[0]["id"]
-                secondary_id = resp_providers[1]["id"] if len(resp_providers) > 1 else ""
-                primary_is_responses = True
-                secondary_is_responses = len(resp_providers) > 1
-            else:
-                primary_id = primary_provider_id
-                secondary_id = secondary_provider_id
-                primary_is_responses = False
-                secondary_is_responses = False
-
-            if not primary_id and not secondary_id:
-                logger.warning("[Wardrobe] 未配置存图模型，无法分析图片")
-                return None
-
-            # 查找 token_router 插件，获取当日用量决策
+            # 查找 token_router 插件
             token_router = self._find_token_router()
-            if token_router:
-                active_id = token_router.get_active_storage_provider(
-                    primary_id, secondary_id, primary_limit, secondary_limit
-                )
-            else:
-                active_id = primary_id
 
-            # 构建尝试顺序：active 优先，另一个作为 per-call 错误回退
-            # 每项: (provider_id, is_responses)
+            # 构建尝试链路
+            # Responses 模式：从 resp_providers 列表按顺序，配合 token_router 按日用量选择 active
+            # 非 Responses 模式：用框架 provider_id（primary + secondary），无日用量路由
             attempts: list[tuple[str, bool]] = []
-            if active_id == primary_id:
-                attempts.append((primary_id, primary_is_responses))
-                if secondary_id and secondary_id != primary_id:
-                    attempts.append((secondary_id, secondary_is_responses))
+            if use_responses and resp_providers:
+                # 优先用 token_router 决策的 active_id，其余按列表顺序作为 per-call 错误回退
+                if token_router:
+                    providers_for_router = [
+                        {"id": p["id"], "daily_limit": p["daily_limit"]} for p in resp_providers
+                    ]
+                    active_id = token_router.get_active_storage_provider(providers_for_router)
+                else:
+                    active_id = resp_providers[0]["id"]
+                attempts.append((active_id, True))
+                for p in resp_providers:
+                    if p["id"] != active_id:
+                        attempts.append((p["id"], True))
             else:
-                attempts.append((secondary_id, secondary_is_responses))
-                if primary_id and primary_id != secondary_id:
-                    attempts.append((primary_id, primary_is_responses))
+                # 非 Responses 模式：框架 provider，无日用量路由
+                if not primary_provider_id and not secondary_provider_id:
+                    logger.warning("[Wardrobe] 未配置存图模型，无法分析图片")
+                    return None
+                if primary_provider_id:
+                    attempts.append((primary_provider_id, False))
+                if secondary_provider_id and secondary_provider_id != primary_provider_id:
+                    attempts.append((secondary_provider_id, False))
 
             for provider_id, is_responses in attempts:
                 if not provider_id:
@@ -272,10 +260,10 @@ class ImageAnalyzer:
                     return candidate
         return None
 
-    def _parse_responses_providers(self) -> list[dict[str, str]]:
+    def _parse_responses_providers(self) -> list[dict]:
         """解析 save_responses_providers 配置，返回有效的 Responses API 提供商列表。
 
-        每项: {"id", "base_url", "api_key", "model"}
+        每项: {"id", "base_url", "api_key", "model", "daily_limit"}
         跳过 id/api_key/model 为空的项。
         """
         if not self.plugin:
@@ -283,7 +271,7 @@ class ImageAnalyzer:
         raw = self.plugin._cfg("save_responses_providers", [])
         if not isinstance(raw, list):
             return []
-        result: list[dict[str, str]] = []
+        result: list[dict] = []
         for item in raw:
             if not isinstance(item, dict):
                 continue
@@ -293,16 +281,18 @@ class ImageAnalyzer:
             if not pid or not api_key or not model:
                 continue
             base_url = str(item.get("base_url", "https://ark.cn-beijing.volces.com") or "").strip()
+            daily_limit = int(item.get("daily_limit", 1500000) or 1500000)
             result.append({
                 "id": pid,
                 "base_url": base_url,
                 "api_key": api_key,
                 "model": model,
+                "daily_limit": daily_limit,
             })
         return result
 
     @staticmethod
-    def _get_responses_provider_cfg(provider_id: str, providers: list[dict[str, str]]) -> Optional[dict[str, str]]:
+    def _get_responses_provider_cfg(provider_id: str, providers: list[dict]) -> Optional[dict]:
         """从 providers 列表中按 id 查找配置。"""
         for p in providers:
             if p["id"] == provider_id:
