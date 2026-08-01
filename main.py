@@ -47,7 +47,7 @@ _MIGRATION_STATE_FILE = "migration_state.json"
     "astrbot_plugin_wardrobe",
     "Inoryu7z",
     "图片衣柜管理插件，支持智能分类、语义检索和参考图接口",
-    "3.0.0",
+    "3.1.0",
 )
 class WardrobePlugin(Star):
     def __init__(self, context: Context, config: AstrBotConfig = None):
@@ -900,6 +900,64 @@ class WardrobePlugin(Star):
                 logger.error("[Wardrobe] 自动备份失败: %s", e, exc_info=True)
                 await asyncio.sleep(3600)
 
+    async def list_backups(self) -> list[dict]:
+        """列出 backups 目录下所有备份文件，返回按时间倒序的元信息列表。"""
+        backup_dir = self.data_dir / "backups"
+        if not backup_dir.exists():
+            return []
+        result: list[dict] = []
+        for f in backup_dir.iterdir():
+            if not f.is_file() or not f.name.endswith(".zip"):
+                continue
+            try:
+                stat = f.stat()
+            except OSError:
+                continue
+            # 文件名前缀推断类型
+            name = f.name
+            if name.startswith("full_"):
+                btype = "全量备份"
+            elif name.startswith("incr_"):
+                btype = "增量备份"
+            elif name.startswith("wardrobe_images_export_"):
+                btype = "图片导出"
+            elif name.startswith("wardrobe_selected_export_"):
+                btype = "选择备份"
+            elif name.startswith("wardrobe_manual_export_"):
+                btype = "手动备份"
+            else:
+                btype = "备份"
+            result.append({
+                "filename": name,
+                "size": stat.st_size,
+                "mtime": stat.st_mtime,
+                "type": btype,
+            })
+        result.sort(key=lambda x: x["mtime"], reverse=True)
+        return result
+
+    async def delete_backup(self, filename: str) -> bool:
+        """删除指定备份文件（仅限 backups 目录内的 .zip）。"""
+        backup_dir = self.data_dir / "backups"
+        # 防路径穿越：只取文件名部分
+        safe_name = Path(filename).name
+        if not safe_name.endswith(".zip"):
+            return False
+        target = (backup_dir / safe_name).resolve()
+        try:
+            target.relative_to(backup_dir.resolve())
+        except ValueError:
+            return False
+        if not target.exists() or not target.is_file():
+            return False
+        try:
+            target.unlink()
+            logger.info("[Wardrobe] 已删除备份: %s", safe_name)
+            return True
+        except Exception as e:
+            logger.warning("[Wardrobe] 删除备份失败 %s: %s", safe_name, e)
+            return False
+
     async def _cleanup_old_backups(self):
         try:
             backup_dir = self.data_dir / "backups"
@@ -907,7 +965,7 @@ class WardrobePlugin(Star):
                 return
 
             now = datetime.now()
-            cutoff = now - timedelta(days=30)
+            cutoff = now - timedelta(days=7)
 
             latest_full = None
             to_delete = []
@@ -915,7 +973,7 @@ class WardrobePlugin(Star):
             for f in backup_dir.iterdir():
                 if not f.is_file():
                     continue
-                if f.name == _BACKUP_STATE_FILE or f.name == "wardrobe_manual_export.zip":
+                if f.name == _BACKUP_STATE_FILE:
                     continue
                 if not f.name.endswith(".zip"):
                     continue

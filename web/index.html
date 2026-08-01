@@ -6,7 +6,7 @@
 <title>衣橱图鉴</title>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link href="https://fonts.googleapis.com/css2?family=Fredoka:wght@400;500;600;700&family=Nunito:wght@300;400;500;600;700&display=swap" rel="stylesheet">
-<link rel="stylesheet" href="/static/css/style.css?v=3.0.0">
+<link rel="stylesheet" href="/static/css/style.css?v=3.1.0">
 <script src="https://cdn.jsdelivr.net/npm/echarts@5.5.1/dist/echarts.min.js"></script>
 </head>
 <body>
@@ -448,6 +448,12 @@
     </div>
     <div class="backup-divider"></div>
     <div class="backup-section">
+      <h3 class="backup-section-title">备份历史 <button class="btn btn-text btn-sm" id="backupListRefreshBtn">刷新</button></h3>
+      <p class="backup-section-desc">服务器保留最近7天的备份，可重复下载或删除。支持断点续传，下载失败可重试。</p>
+      <div id="backupHistoryList" class="backup-history-list"></div>
+    </div>
+    <div class="backup-divider"></div>
+    <div class="backup-section">
       <h3 class="backup-section-title">恢复备份</h3>
       <p class="backup-section-desc">上传 zip 备份文件（支持多选），已有数据不会被覆盖（按 ID 跳过重复）。系统会自动识别全量/增量备份并按时间顺序恢复。</p>
       <div class="backup-upload-zone" id="backupUploadZone">
@@ -579,6 +585,6 @@
     </div>
   </div>
 
-<script src="/static/js/app.js?v=3.0.0"></script>
+<script src="/static/js/app.js?v=3.1.0"></script>
 </body>
 </html>
