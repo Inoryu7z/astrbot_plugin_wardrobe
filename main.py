@@ -38,13 +38,16 @@ _MAX_DESCRIPTION_LEN = 2000
 # 命令路径（/自拍 /aiimg 等）则由 on_after_message_sent 钩子兜底。
 _AIIMG_GENERATE_TOOLS = frozenset({"aiimg_generate"})
 _BACKUP_STATE_FILE = "backup_state.json"
+# 数据文件迁移标识。本次：将人格级自定义风格池重置为默认版本。
+_STYLE_POOL_RESET_MIGRATION = "style_pool_reset_2026_08"
+_MIGRATION_STATE_FILE = "migration_state.json"
 
 
 @register(
     "astrbot_plugin_wardrobe",
     "Inoryu7z",
     "图片衣柜管理插件，支持智能分类、语义检索和参考图接口",
-    "2.9.4",
+    "2.9.5",
 )
 class WardrobePlugin(Star):
     def __init__(self, context: Context, config: AstrBotConfig = None):
@@ -72,6 +75,8 @@ class WardrobePlugin(Star):
         self._bg_tasks: set[asyncio.Task] = set()
 
         self.context._wardrobe_plugin = self
+
+        self._run_data_migrations()
 
         logger.info("[Wardrobe] 插件初始化完成")
 
@@ -526,6 +531,55 @@ class WardrobePlugin(Star):
     def _write_text_file(path: Path, content: str):
         with open(str(path), "w", encoding="utf-8") as f:
             f.write(content)
+
+    def _run_data_migrations(self):
+        """运行数据文件迁移。
+
+        本次迁移（style_pool_reset_2026_08）：默认风格池已更新，需将人格级自定义
+        风格池（persona_style_pools.json）清除，使其回退为新的默认 STYLE_POOL。
+        迁移幂等：通过 migration_state.json 记录已应用的迁移，避免重复执行。
+        """
+        state_path = self.data_dir / _MIGRATION_STATE_FILE
+        state: dict = {}
+        try:
+            if state_path.exists():
+                raw = state_path.read_text(encoding="utf-8")
+                state = json.loads(raw) if raw.strip() else {}
+                if not isinstance(state, dict):
+                    state = {}
+        except Exception:
+            state = {}
+
+        applied = set(state.get("applied_migrations", []) or [])
+        if _STYLE_POOL_RESET_MIGRATION in applied:
+            return
+
+        persona_pool_path = self.data_dir / "persona_style_pools.json"
+        if persona_pool_path.exists():
+            try:
+                persona_pool_path.unlink()
+                logger.info(
+                    "[Wardrobe] 迁移 %s：已清除人格级自定义风格池，回退为默认风格池",
+                    _STYLE_POOL_RESET_MIGRATION,
+                )
+            except Exception as e:
+                logger.warning(
+                    "[Wardrobe] 迁移 %s：清除 persona_style_pools.json 失败: %s",
+                    _STYLE_POOL_RESET_MIGRATION, e,
+                )
+
+        applied.add(_STYLE_POOL_RESET_MIGRATION)
+        state["applied_migrations"] = sorted(applied)
+        try:
+            state_path.parent.mkdir(parents=True, exist_ok=True)
+            state_path.write_text(
+                json.dumps(state, ensure_ascii=False, indent=2), encoding="utf-8"
+            )
+        except Exception as e:
+            logger.warning(
+                "[Wardrobe] 迁移 %s：写入迁移状态失败: %s",
+                _STYLE_POOL_RESET_MIGRATION, e,
+            )
 
     async def _build_backup_to_file(
         self,
