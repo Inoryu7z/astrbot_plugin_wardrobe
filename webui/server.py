@@ -637,13 +637,11 @@ class WardrobeWebServer:
                     return jsonify({"error": "没有可导出的图片"}), 400
 
                 logger.debug("[Wardrobe] 图片导出: %d张图片", added_files)
-                download_name = f"wardrobe_images_{time.strftime('%Y%m%d_%H%M%S')}.zip"
                 return await send_file(
                     str(file_path),
                     mimetype="application/zip",
                     as_attachment=True,
-                    download_name=download_name,
-                    conditional=True,
+                    attachment_filename=f"wardrobe_images_{time.strftime('%Y%m%d_%H%M%S')}.zip",
                 )
             except Exception as e:
                 logger.error("[Wardrobe] 图片导出失败: %s", e, exc_info=True)
@@ -717,8 +715,7 @@ class WardrobeWebServer:
                     file_path,
                     mimetype="application/zip",
                     as_attachment=True,
-                    download_name=download_name,
-                    conditional=True,
+                    attachment_filename=download_name,
                 )
             except Exception as e:
                 logger.error("[Wardrobe] 下载文件失败: %s", e, exc_info=True)
