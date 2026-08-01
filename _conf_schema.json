@@ -15,27 +15,46 @@
   },
   "save_use_responses_api": {
     "description": "存图联网搜索",
-    "hint": "开启后存图分析走豆包 Responses API（带 web_search 工具），模型可联网查证图片内容（如识别 cosplay 角色、品牌等）。需配置下方 API 密钥和模型。关闭时走上方视觉模型。",
+    "hint": "开启后存图分析走豆包 Responses API（带 web_search 工具），模型可联网查证图片内容（如识别 cosplay 角色、品牌等）。需在下方配置至少1个提供商。关闭时走上方视觉模型。",
     "type": "bool",
     "default": false
   },
-  "save_responses_api_key": {
-    "description": "Responses API 密钥",
-    "hint": "豆包 Responses API 的 API Key（火山方舟控制台获取）。仅在「存图联网搜索」开启时使用",
-    "type": "string",
-    "default": ""
-  },
-  "save_responses_base_url": {
-    "description": "Responses API 端点",
-    "hint": "火山方舟 API 端点，默认 https://ark.cn-beijing.volces.com",
-    "type": "string",
-    "default": "https://ark.cn-beijing.volces.com"
-  },
-  "save_responses_model": {
-    "description": "Responses API 模型",
-    "hint": "豆包模型名，如 doubao-seed-2-0-pro-260215。需支持 Responses API 和 web_search 工具",
-    "type": "string",
-    "default": "doubao-seed-2-0-pro-260215"
+  "save_responses_providers": {
+    "type": "template_list",
+    "description": "存图联网搜索提供商列表",
+    "hint": "仅在「存图联网搜索」开启时使用。按列表顺序作为主/副模型（第一个为主模型，第二个为副模型），配合 token_router 插件实现按日用量自动切换。需至少配置1个提供商，推荐2个。",
+    "default": [],
+    "templates": {
+      "responses_provider": {
+        "name": "Responses API 提供商",
+        "items": {
+          "id": {
+            "type": "string",
+            "description": "提供商唯一标识",
+            "hint": "用于 token_router 用量追踪，需全局唯一。如 doubao-pro、doubao-backup 等",
+            "default": ""
+          },
+          "base_url": {
+            "type": "string",
+            "description": "API 端点 URL",
+            "hint": "火山方舟 API 端点，默认 https://ark.cn-beijing.volces.com",
+            "default": "https://ark.cn-beijing.volces.com"
+          },
+          "api_key": {
+            "type": "string",
+            "description": "API 密钥",
+            "hint": "火山方舟控制台获取的 API Key",
+            "default": ""
+          },
+          "model": {
+            "type": "string",
+            "description": "模型名称",
+            "hint": "豆包模型名，如 doubao-seed-2-0-pro-260215。需支持 Responses API 和 web_search 工具",
+            "default": "doubao-seed-2-0-pro-260215"
+          }
+        }
+      }
+    }
   },
   "save_primary_daily_limit": {
     "description": "存图主模型日限额",

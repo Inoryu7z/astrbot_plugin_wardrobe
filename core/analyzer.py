@@ -159,23 +159,29 @@ class ImageAnalyzer:
 
             # 读取 Responses API 配置
             use_responses = False
-            resp_key = resp_url = resp_model = ""
+            resp_providers: list[dict[str, str]] = []
             primary_limit = 1500000
             secondary_limit = 1500000
             if self.plugin:
                 use_responses = bool(self.plugin._cfg("save_use_responses_api", False))
-                resp_key = str(self.plugin._cfg("save_responses_api_key", "") or "").strip()
-                resp_url = str(self.plugin._cfg("save_responses_base_url", "https://ark.cn-beijing.volces.com") or "").strip()
-                resp_model = str(self.plugin._cfg("save_responses_model", "doubao-seed-2-0-pro-260215") or "").strip()
+                resp_providers = self._parse_responses_providers()
                 primary_limit = int(self.plugin._cfg("save_primary_daily_limit", 1500000) or 1500000)
                 secondary_limit = int(self.plugin._cfg("save_secondary_daily_limit", 1500000) or 1500000)
 
-            # Responses API 需要完整的 api_key + model 才生效
-            primary_is_responses = use_responses and bool(resp_key) and bool(resp_model)
-            # 主模型 ID：Responses API 模式下用模型名追踪，否则用 provider_id
-            primary_id = resp_model if primary_is_responses else primary_provider_id
+            # Responses 模式：主/副模型从 resp_providers 列表按顺序取
+            # 非 Responses 模式：用框架 provider_id
+            if use_responses and resp_providers:
+                primary_id = resp_providers[0]["id"]
+                secondary_id = resp_providers[1]["id"] if len(resp_providers) > 1 else ""
+                primary_is_responses = True
+                secondary_is_responses = len(resp_providers) > 1
+            else:
+                primary_id = primary_provider_id
+                secondary_id = secondary_provider_id
+                primary_is_responses = False
+                secondary_is_responses = False
 
-            if not primary_id and not secondary_provider_id:
+            if not primary_id and not secondary_id:
                 logger.warning("[Wardrobe] 未配置存图模型，无法分析图片")
                 return None
 
@@ -183,20 +189,21 @@ class ImageAnalyzer:
             token_router = self._find_token_router()
             if token_router:
                 active_id = token_router.get_active_storage_provider(
-                    primary_id, secondary_provider_id, primary_limit, secondary_limit
+                    primary_id, secondary_id, primary_limit, secondary_limit
                 )
             else:
                 active_id = primary_id
 
             # 构建尝试顺序：active 优先，另一个作为 per-call 错误回退
+            # 每项: (provider_id, is_responses)
             attempts: list[tuple[str, bool]] = []
             if active_id == primary_id:
                 attempts.append((primary_id, primary_is_responses))
-                if secondary_provider_id and secondary_provider_id != primary_id:
-                    attempts.append((secondary_provider_id, False))
+                if secondary_id and secondary_id != primary_id:
+                    attempts.append((secondary_id, secondary_is_responses))
             else:
-                attempts.append((secondary_provider_id, False))
-                if primary_id and primary_id != secondary_provider_id:
+                attempts.append((secondary_id, secondary_is_responses))
+                if primary_id and primary_id != secondary_id:
                     attempts.append((primary_id, primary_is_responses))
 
             for provider_id, is_responses in attempts:
@@ -205,9 +212,13 @@ class ImageAnalyzer:
                 try:
                     t0 = time.perf_counter()
                     if is_responses:
+                        p_cfg = self._get_responses_provider_cfg(provider_id, resp_providers)
+                        if not p_cfg:
+                            logger.warning("[Wardrobe] 未找到 Responses 提供商配置 id=%s", provider_id)
+                            continue
                         result, tokens = await asyncio.wait_for(
                             self._call_responses_api(
-                                resp_key, resp_url, provider_id,
+                                p_cfg["api_key"], p_cfg["base_url"], p_cfg["model"],
                                 system_prompt, prompt_text, image_bytes, mime,
                             ),
                             timeout=timeout_seconds,
@@ -259,6 +270,43 @@ class ImageAnalyzer:
                 candidate = getattr(meta, attr, None)
                 if candidate is not None and hasattr(candidate, "get_active_storage_provider"):
                     return candidate
+        return None
+
+    def _parse_responses_providers(self) -> list[dict[str, str]]:
+        """解析 save_responses_providers 配置，返回有效的 Responses API 提供商列表。
+
+        每项: {"id", "base_url", "api_key", "model"}
+        跳过 id/api_key/model 为空的项。
+        """
+        if not self.plugin:
+            return []
+        raw = self.plugin._cfg("save_responses_providers", [])
+        if not isinstance(raw, list):
+            return []
+        result: list[dict[str, str]] = []
+        for item in raw:
+            if not isinstance(item, dict):
+                continue
+            pid = str(item.get("id", "") or "").strip()
+            api_key = str(item.get("api_key", "") or "").strip()
+            model = str(item.get("model", "") or "").strip()
+            if not pid or not api_key or not model:
+                continue
+            base_url = str(item.get("base_url", "https://ark.cn-beijing.volces.com") or "").strip()
+            result.append({
+                "id": pid,
+                "base_url": base_url,
+                "api_key": api_key,
+                "model": model,
+            })
+        return result
+
+    @staticmethod
+    def _get_responses_provider_cfg(provider_id: str, providers: list[dict[str, str]]) -> Optional[dict[str, str]]:
+        """从 providers 列表中按 id 查找配置。"""
+        for p in providers:
+            if p["id"] == provider_id:
+                return p
         return None
 
     async def _call_responses_api(
