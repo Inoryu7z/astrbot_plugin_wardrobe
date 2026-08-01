@@ -1083,26 +1083,21 @@
     btn.disabled=true;
     btn.textContent='导出中...';
     try{
-      const resp=await fetch('/api/images/export',{
+      const resp=await fetch('/api/images/export/prepare',{
         method:'POST',
         headers:{'Content-Type':'application/json','X-Wardrobe-Token':getToken()},
         body:JSON.stringify({ids:[...state.selectedIds]})
       });
       if(resp.status===401){localStorage.removeItem('wardrobe_token');window.location.href='/login';return;}
       if(!resp.ok){
-        toast('导出失败','error');
+        const err=await resp.json().catch(()=>({}));
+        toast('导出失败: '+(err.error||''),'error');
         return;
       }
-      const blob=await resp.blob();
-      const url=URL.createObjectURL(blob);
-      const a=document.createElement('a');
-      a.href=url;
-      a.download=`wardrobe_images_${new Date().toISOString().slice(0,10)}.zip`;
-      document.body.appendChild(a);
-      a.click();
-      document.body.removeChild(a);
-      URL.revokeObjectURL(url);
-      toast(`已导出 ${state.selectedIds.size} 张图片`,'success');
+      const data=await resp.json();
+      // 浏览器原生 GET 下载，规避 blob 内存限制
+      window.location.href=`/api/backup/download?token=${encodeURIComponent(data.token)}`;
+      toast(`已开始导出 ${state.selectedIds.size} 张图片`,'success');
     }catch(e){
       toast('导出失败: '+e.message,'error');
     }finally{
@@ -1127,19 +1122,14 @@
       });
       if(resp.status===401){localStorage.removeItem('wardrobe_token');window.location.href='/login';return;}
       if(!resp.ok){
-        toast('导出备份失败','error');
+        const err=await resp.json().catch(()=>({}));
+        toast('导出备份失败: '+(err.error||''),'error');
         return;
       }
-      const blob=await resp.blob();
-      const url=URL.createObjectURL(blob);
-      const a=document.createElement('a');
-      a.href=url;
-      a.download=`wardrobe_backup_selected_${new Date().toISOString().slice(0,10)}.zip`;
-      document.body.appendChild(a);
-      a.click();
-      document.body.removeChild(a);
-      URL.revokeObjectURL(url);
-      toast(`已导出 ${state.selectedIds.size} 张图片的备份`,'success');
+      const data=await resp.json();
+      // 浏览器原生 GET 下载，规避 blob 内存限制
+      window.location.href=`/api/backup/download?token=${encodeURIComponent(data.token)}`;
+      toast(`已开始导出 ${state.selectedIds.size} 张图片的备份`,'success');
     }catch(e){
       toast('导出备份失败: '+e.message,'error');
     }finally{
@@ -1557,19 +1547,14 @@
         });
         if(resp.status===401){localStorage.removeItem('wardrobe_token');window.location.href='/login';return;}
         if(!resp.ok){
-          toast('导出失败','error');
+          const err=await resp.json().catch(()=>({}));
+          toast('导出失败: '+(err.error||''),'error');
           return;
         }
-        const blob=await resp.blob();
-        const url=URL.createObjectURL(blob);
-        const a=document.createElement('a');
-        a.href=url;
-        a.download=`wardrobe_backup_${new Date().toISOString().slice(0,10)}.zip`;
-        document.body.appendChild(a);
-        a.click();
-        document.body.removeChild(a);
-        URL.revokeObjectURL(url);
-        toast('备份导出成功','success');
+        const data=await resp.json();
+        // 浏览器原生 GET 下载，规避 blob 内存限制
+        window.location.href=`/api/backup/download?token=${encodeURIComponent(data.token)}`;
+        toast('备份导出已开始','success');
       }catch(e){
         toast('导出失败: '+e.message,'error');
       }finally{
