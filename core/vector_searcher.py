@@ -1,5 +1,6 @@
 import json
 import os
+import re
 import time
 from pathlib import Path
 from typing import Any, Optional
@@ -16,6 +17,11 @@ try:
     _VECTORD_AVAILABLE = True
 except ImportError:
     _VECTORD_AVAILABLE = False
+
+# 解析"重点是X。"前缀，X 为本次自拍的核心视觉焦点
+_FOCUS_PREFIX_RE = re.compile(r"^重点是(.+?)[。.]")
+# 焦点路召回的 similarity 加权倍数（让焦点匹配的图更易进入候选池）
+_FOCUS_WEIGHT = 1.3
 
 
 class WardrobeVectorSearcher:
@@ -197,6 +203,12 @@ class WardrobeVectorSearcher:
 
         processed_query = query[:2000] if len(query) > 2000 else query
 
+        # 解析"重点是X。"前缀：X 是本次自拍的核心视觉焦点。
+        # 长 query 中 X 的语义会被其余描述稀释导致召回不到，因此对 X 单独做一路召回，
+        # 再与主路结果融合（焦点路 similarity 加权），确保焦点相关图能进入候选池。
+        focus_match = _FOCUS_PREFIX_RE.match(processed_query)
+        focus_term = focus_match.group(1).strip() if focus_match else ""
+
         try:
             metadata_filters = {}
             filter_no_persona = persona is not None and persona == ""
@@ -209,50 +221,33 @@ class WardrobeVectorSearcher:
             fetch_k = k * 5 if metadata_filters else k * 3
             if filter_no_persona or exclude_persona:
                 fetch_k = max(fetch_k, k * 5)
-            results = await self._faiss_db.retrieve(
-                query=processed_query,
-                k=k,
-                fetch_k=fetch_k,
-                rerank=False,
-                metadata_filters=metadata_filters if metadata_filters else None,
+
+            # 主路：完整 query 检索
+            filtered = await self._retrieve_and_filter(
+                processed_query, k, fetch_k, min_similarity,
+                metadata_filters, filter_no_persona, exclude_persona,
             )
 
-            filtered: list[tuple[str, float, str]] = []
-            seen = set()
-            for result in results:
-                if result.similarity < min_similarity:
-                    continue
-
-                doc_data = result.data
-                meta = doc_data.get("metadata", {})
-                if isinstance(meta, str):
-                    try:
-                        meta = json.loads(meta)
-                    except (json.JSONDecodeError, TypeError):
-                        meta = {}
-
-                wid = meta.get("wardrobe_id", "")
-                if not wid:
-                    wid = self._reverse_map.get(str(doc_data.get("id", "")), "")
-
-                if not wid:
-                    continue
-
-                if wid in seen:
-                    continue
-                seen.add(wid)
-
-                doc_persona = meta.get("persona_id", meta.get("persona", ""))
-                if filter_no_persona:
-                    if doc_persona:
-                        continue
-
-                if exclude_persona:
-                    if doc_persona == exclude_persona:
-                        continue
-
-                doc_content = doc_data.get("content", "")
-                filtered.append((wid, result.similarity, doc_content))
+            # 焦点路：用 X 单独检索，融合两路结果（焦点路加权）
+            if focus_term and 1 <= len(focus_term) <= 100:
+                focus_filtered = await self._retrieve_and_filter(
+                    focus_term, k, fetch_k, min_similarity,
+                    metadata_filters, filter_no_persona, exclude_persona,
+                )
+                if focus_filtered:
+                    main_count = len(filtered)
+                    wid_map: dict[str, tuple[float, str]] = {}
+                    for wid, sim, content in filtered:
+                        wid_map[wid] = (sim, content)
+                    for wid, sim, content in focus_filtered:
+                        weighted_sim = sim * _FOCUS_WEIGHT
+                        if wid not in wid_map or weighted_sim > wid_map[wid][0]:
+                            wid_map[wid] = (weighted_sim, content)
+                    filtered = [(wid, sim, content) for wid, (sim, content) in wid_map.items()]
+                    logger.debug(
+                        "[Wardrobe] 焦点多路召回: 主路%d张 焦点路%d张 融合后%d张 (focus=%s)",
+                        main_count, len(focus_filtered), len(filtered), focus_term,
+                    )
 
             if not filtered:
                 return []
@@ -265,6 +260,63 @@ class WardrobeVectorSearcher:
         except Exception as e:
             logger.warning("[Wardrobe] 向量检索失败（将回退到本地检索）: %s", e)
             return []
+
+    async def _retrieve_and_filter(
+        self,
+        query: str,
+        k: int,
+        fetch_k: int,
+        min_similarity: float,
+        metadata_filters: dict,
+        filter_no_persona: bool,
+        exclude_persona: str,
+    ) -> list[tuple[str, float, str]]:
+        """向量检索 + 过滤，返回 (wardrobe_id, similarity, doc_content) 列表。"""
+        results = await self._faiss_db.retrieve(
+            query=query,
+            k=k,
+            fetch_k=fetch_k,
+            rerank=False,
+            metadata_filters=metadata_filters if metadata_filters else None,
+        )
+
+        filtered: list[tuple[str, float, str]] = []
+        seen = set()
+        for result in results:
+            if result.similarity < min_similarity:
+                continue
+
+            doc_data = result.data
+            meta = doc_data.get("metadata", {})
+            if isinstance(meta, str):
+                try:
+                    meta = json.loads(meta)
+                except (json.JSONDecodeError, TypeError):
+                    meta = {}
+
+            wid = meta.get("wardrobe_id", "")
+            if not wid:
+                wid = self._reverse_map.get(str(doc_data.get("id", "")), "")
+
+            if not wid:
+                continue
+
+            if wid in seen:
+                continue
+            seen.add(wid)
+
+            doc_persona = meta.get("persona_id", meta.get("persona", ""))
+            if filter_no_persona:
+                if doc_persona:
+                    continue
+
+            if exclude_persona:
+                if doc_persona == exclude_persona:
+                    continue
+
+            doc_content = doc_data.get("content", "")
+            filtered.append((wid, result.similarity, doc_content))
+        return filtered
 
     async def _rerank_results(
         self,
