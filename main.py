@@ -47,7 +47,7 @@ _MIGRATION_STATE_FILE = "migration_state.json"
     "astrbot_plugin_wardrobe",
     "Inoryu7z",
     "图片衣柜管理插件，支持智能分类、语义检索和参考图接口",
-    "2.9.9",
+    "2.10.0",
 )
 class WardrobePlugin(Star):
     def __init__(self, context: Context, config: AstrBotConfig = None):
@@ -715,13 +715,14 @@ class WardrobePlugin(Star):
     async def build_backup_zip(self, include_videos: bool = False) -> tuple[Path, int, int]:
         backup_dir = self.data_dir / "backups"
         backup_dir.mkdir(exist_ok=True)
-        export_path = backup_dir / "wardrobe_manual_export.zip"
+        import uuid
+        export_path = backup_dir / f"wardrobe_manual_export_{uuid.uuid4().hex[:8]}.zip"
 
         total_records, added_files, _ = await self._build_backup_to_file(
             export_path,
             include_videos=include_videos,
             incremental=False,
-            throttle_sleep=0.5,
+            throttle_sleep=0.0,
         )
 
         return export_path, total_records, added_files
@@ -734,7 +735,8 @@ class WardrobePlugin(Star):
 
         backup_dir = self.data_dir / "backups"
         backup_dir.mkdir(exist_ok=True)
-        export_path = backup_dir / "wardrobe_selected_export.zip"
+        import uuid
+        export_path = backup_dir / f"wardrobe_selected_export_{uuid.uuid4().hex[:8]}.zip"
 
         images_dir = self.store.images_dir
         total_records = len(records)
@@ -816,7 +818,8 @@ class WardrobePlugin(Star):
 
         backup_dir = self.data_dir / "backups"
         backup_dir.mkdir(exist_ok=True)
-        export_path = backup_dir / "wardrobe_images_export.zip"
+        import uuid
+        export_path = backup_dir / f"wardrobe_images_export_{uuid.uuid4().hex[:8]}.zip"
 
         images_dir = self.store.images_dir
 

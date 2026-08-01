@@ -53,6 +53,7 @@ class WardrobeWebServer:
         self.host = str(plugin._cfg("webui_host", "127.0.0.1") or "127.0.0.1")
         self.port = int(plugin._cfg("webui_port", 18921) or 18921)
         self._tokens: dict[str, float] = {}
+        self._download_tokens: dict[str, dict] = {}
         self._server: uvicorn.Server | None = None
         self._server_task: asyncio.Task | None = None
         self._web_dir = Path(__file__).parent.parent / "web"
@@ -74,6 +75,20 @@ class WardrobeWebServer:
         expired = [t for t, ts in self._tokens.items() if now - ts > _TOKEN_TTL]
         for t in expired:
             del self._tokens[t]
+        # 同时清理过期的下载令牌
+        dl_expired = [t for t, info in self._download_tokens.items() if time.time() > info["expires"]]
+        for t in dl_expired:
+            del self._download_tokens[t]
+
+    def _register_download(self, file_path, download_name: str) -> str:
+        """注册一次性下载令牌，返回 token。30 分钟有效。"""
+        token = secrets.token_hex(32)
+        self._download_tokens[token] = {
+            "path": str(file_path),
+            "filename": download_name,
+            "expires": time.time() + 1800,
+        }
+        return token
 
     def _create_app(self) -> Quart:
         app = Quart(
@@ -622,11 +637,13 @@ class WardrobeWebServer:
                     return jsonify({"error": "没有可导出的图片"}), 400
 
                 logger.debug("[Wardrobe] 图片导出: %d张图片", added_files)
+                download_name = f"wardrobe_images_{time.strftime('%Y%m%d_%H%M%S')}.zip"
                 return await send_file(
                     str(file_path),
                     mimetype="application/zip",
                     as_attachment=True,
-                    attachment_filename=f"wardrobe_images_{time.strftime('%Y%m%d_%H%M%S')}.zip",
+                    download_name=download_name,
+                    conditional=True,
                 )
             except Exception as e:
                 logger.error("[Wardrobe] 图片导出失败: %s", e, exc_info=True)
@@ -646,15 +663,66 @@ class WardrobeWebServer:
                     return jsonify({"error": "没有可导出的数据"}), 400
 
                 logger.debug("[Wardrobe] 选择备份导出: %d条记录, %d个图片文件", total_records, added_files)
-                return await send_file(
-                    str(file_path),
-                    mimetype="application/zip",
-                    as_attachment=True,
-                    attachment_filename=f"wardrobe_backup_selected_{time.strftime('%Y%m%d_%H%M%S')}.zip",
-                )
+                download_name = f"wardrobe_backup_selected_{time.strftime('%Y%m%d_%H%M%S')}.zip"
+                token = self._register_download(file_path, download_name)
+                return jsonify({
+                    "token": token,
+                    "records": total_records,
+                    "files": added_files,
+                    "download_name": download_name,
+                })
             except Exception as e:
                 logger.error("[Wardrobe] 选择备份导出失败: %s", e, exc_info=True)
                 return jsonify({"error": f"导出失败: {e}"}), 500
+
+        @app.route("/api/images/export/prepare", methods=["POST"])
+        async def api_images_export_prepare():
+            try:
+                await self.plugin._ensure_db()
+                data = await request.get_json(silent=True) or {}
+                ids = data.get("ids", [])
+                if not ids:
+                    return jsonify({"error": "未选择图片"}), 400
+
+                file_path, added_files = await self.plugin.export_images_zip(ids)
+                if not file_path or added_files == 0:
+                    return jsonify({"error": "没有可导出的图片"}), 400
+
+                logger.debug("[Wardrobe] 图片导出(prepare): %d张图片", added_files)
+                download_name = f"wardrobe_images_{time.strftime('%Y%m%d_%H%M%S')}.zip"
+                token = self._register_download(file_path, download_name)
+                return jsonify({
+                    "token": token,
+                    "files": added_files,
+                    "download_name": download_name,
+                })
+            except Exception as e:
+                logger.error("[Wardrobe] 图片导出(prepare)失败: %s", e, exc_info=True)
+                return jsonify({"error": f"导出失败: {e}"}), 500
+
+        @app.route("/api/backup/download")
+        async def api_backup_download():
+            token = request.args.get("token", "")
+            info = self._download_tokens.get(token)
+            if not info or time.time() > info["expires"]:
+                if token in self._download_tokens:
+                    del self._download_tokens[token]
+                return jsonify({"error": "下载链接已过期或无效"}), 410
+            file_path = info["path"]
+            download_name = info["filename"]
+            # 一次性令牌，下载即失效
+            del self._download_tokens[token]
+            try:
+                return await send_file(
+                    file_path,
+                    mimetype="application/zip",
+                    as_attachment=True,
+                    download_name=download_name,
+                    conditional=True,
+                )
+            except Exception as e:
+                logger.error("[Wardrobe] 下载文件失败: %s", e, exc_info=True)
+                return jsonify({"error": f"下载失败: {e}"}), 500
 
         @app.route("/api/images/upload", methods=["POST"])
         async def api_image_upload():
@@ -931,12 +999,14 @@ class WardrobeWebServer:
                 file_path, total_records, added_files = await self.plugin.build_backup_zip(include_videos=include_videos)
                 logger.debug("[Wardrobe] 备份导出: %d条记录, %d个图片文件, 包含视频=%s", total_records, added_files, include_videos)
 
-                return await send_file(
-                    str(file_path),
-                    mimetype="application/zip",
-                    as_attachment=True,
-                    attachment_filename=f"wardrobe_backup_{time.strftime('%Y%m%d_%H%M%S')}.zip",
-                )
+                download_name = f"wardrobe_backup_{time.strftime('%Y%m%d_%H%M%S')}.zip"
+                token = self._register_download(file_path, download_name)
+                return jsonify({
+                    "token": token,
+                    "records": total_records,
+                    "files": added_files,
+                    "download_name": download_name,
+                })
             except Exception as e:
                 logger.error("[Wardrobe] 备份导出失败: %s", e, exc_info=True)
                 return jsonify({"error": f"导出失败: {e}"}), 500
