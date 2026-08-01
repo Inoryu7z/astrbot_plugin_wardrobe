@@ -264,7 +264,8 @@ class ImageAnalyzer:
         """解析 save_responses_providers 配置，返回有效的 Responses API 提供商列表。
 
         每项: {"id", "base_url", "api_key", "model", "daily_limit"}
-        跳过 id/api_key/model 为空的项。
+        model 从 provider_id 的 '/' 后面解析。
+        跳过 provider_id/api_key 为空的项。
         """
         if not self.plugin:
             return []
@@ -275,11 +276,12 @@ class ImageAnalyzer:
         for item in raw:
             if not isinstance(item, dict):
                 continue
-            pid = str(item.get("id", "") or "").strip()
+            pid = str(item.get("provider_id", "") or "").strip()
             api_key = str(item.get("api_key", "") or "").strip()
-            model = str(item.get("model", "") or "").strip()
-            if not pid or not api_key or not model:
+            if not pid or not api_key:
                 continue
+            # 从 provider_id 解析模型名（'/' 后面的部分）
+            model = pid.split("/", 1)[1] if "/" in pid else pid
             base_url = str(item.get("base_url", "https://ark.cn-beijing.volces.com") or "").strip()
             daily_limit = int(item.get("daily_limit", 1500000) or 1500000)
             result.append({
@@ -293,7 +295,7 @@ class ImageAnalyzer:
 
     @staticmethod
     def _get_responses_provider_cfg(provider_id: str, providers: list[dict]) -> Optional[dict]:
-        """从 providers 列表中按 id 查找配置。"""
+        """从 providers 列表中按 provider_id 查找配置。"""
         for p in providers:
             if p["id"] == provider_id:
                 return p
