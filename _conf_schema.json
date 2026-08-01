@@ -13,6 +13,42 @@
     "default": "",
     "_special": "select_provider"
   },
+  "save_use_responses_api": {
+    "description": "存图联网搜索",
+    "hint": "开启后存图分析走豆包 Responses API（带 web_search 工具），模型可联网查证图片内容（如识别 cosplay 角色、品牌等）。需配置下方 API 密钥和模型。关闭时走上方视觉模型。",
+    "type": "bool",
+    "default": false
+  },
+  "save_responses_api_key": {
+    "description": "Responses API 密钥",
+    "hint": "豆包 Responses API 的 API Key（火山方舟控制台获取）。仅在「存图联网搜索」开启时使用",
+    "type": "string",
+    "default": ""
+  },
+  "save_responses_base_url": {
+    "description": "Responses API 端点",
+    "hint": "火山方舟 API 端点，默认 https://ark.cn-beijing.volces.com",
+    "type": "string",
+    "default": "https://ark.cn-beijing.volces.com"
+  },
+  "save_responses_model": {
+    "description": "Responses API 模型",
+    "hint": "豆包模型名，如 doubao-seed-2-0-pro-260215。需支持 Responses API 和 web_search 工具",
+    "type": "string",
+    "default": "doubao-seed-2-0-pro-260215"
+  },
+  "save_primary_daily_limit": {
+    "description": "存图主模型日限额",
+    "hint": "主模型当日 token 用量达到此限额后切换到副模型（需安装 token_router 插件）。0 表示不限制。默认 1500000（150万）",
+    "type": "int",
+    "default": 1500000
+  },
+  "save_secondary_daily_limit": {
+    "description": "存图副模型日限额",
+    "hint": "副模型当日 token 用量达到此限额后继续使用副模型（不二次路由，仅日志告警）。0 表示不限制。默认 1500000（150万）",
+    "type": "int",
+    "default": 1500000
+  },
   "search_provider_id": {
     "description": "取图主模型",
     "hint": "用于解析检索意图和从候选图片中选择的模型（需支持视觉能力）",

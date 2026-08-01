@@ -1,8 +1,12 @@
 import asyncio
+import base64
+import json
 import tempfile
 import time
 from pathlib import Path
 from typing import Any, Optional
+
+import aiohttp
 
 from astrbot.api import logger
 
@@ -153,21 +157,71 @@ class ImageAnalyzer:
             if user_description and user_description.strip():
                 prompt_text += f"\n\n【用户描述】{user_description.strip()}\n\n请参考用户描述进行分析，注意：用户描述中的专有名词（如服装名称）请原样保留，不要发散解释。"
 
-            providers = [p for p in [primary_provider_id, secondary_provider_id] if p.strip()]
-            if not providers:
+            # 读取 Responses API 配置
+            use_responses = False
+            resp_key = resp_url = resp_model = ""
+            primary_limit = 1500000
+            secondary_limit = 1500000
+            if self.plugin:
+                use_responses = bool(self.plugin._cfg("save_use_responses_api", False))
+                resp_key = str(self.plugin._cfg("save_responses_api_key", "") or "").strip()
+                resp_url = str(self.plugin._cfg("save_responses_base_url", "https://ark.cn-beijing.volces.com") or "").strip()
+                resp_model = str(self.plugin._cfg("save_responses_model", "doubao-seed-2-0-pro-260215") or "").strip()
+                primary_limit = int(self.plugin._cfg("save_primary_daily_limit", 1500000) or 1500000)
+                secondary_limit = int(self.plugin._cfg("save_secondary_daily_limit", 1500000) or 1500000)
+
+            # Responses API 需要完整的 api_key + model 才生效
+            primary_is_responses = use_responses and bool(resp_key) and bool(resp_model)
+            # 主模型 ID：Responses API 模式下用模型名追踪，否则用 provider_id
+            primary_id = resp_model if primary_is_responses else primary_provider_id
+
+            if not primary_id and not secondary_provider_id:
                 logger.warning("[Wardrobe] 未配置存图模型，无法分析图片")
                 return None
 
-            for provider_id in providers:
+            # 查找 token_router 插件，获取当日用量决策
+            token_router = self._find_token_router()
+            if token_router:
+                active_id = token_router.get_active_storage_provider(
+                    primary_id, secondary_provider_id, primary_limit, secondary_limit
+                )
+            else:
+                active_id = primary_id
+
+            # 构建尝试顺序：active 优先，另一个作为 per-call 错误回退
+            attempts: list[tuple[str, bool]] = []
+            if active_id == primary_id:
+                attempts.append((primary_id, primary_is_responses))
+                if secondary_provider_id and secondary_provider_id != primary_id:
+                    attempts.append((secondary_provider_id, False))
+            else:
+                attempts.append((secondary_provider_id, False))
+                if primary_id and primary_id != secondary_provider_id:
+                    attempts.append((primary_id, primary_is_responses))
+
+            for provider_id, is_responses in attempts:
+                if not provider_id:
+                    continue
                 try:
                     t0 = time.perf_counter()
-                    result = await asyncio.wait_for(
-                        self._call_vision_model(provider_id, system_prompt, prompt_text, resolved_path),
-                        timeout=timeout_seconds,
-                    )
+                    if is_responses:
+                        result, tokens = await asyncio.wait_for(
+                            self._call_responses_api(
+                                resp_key, resp_url, provider_id,
+                                system_prompt, prompt_text, image_bytes, mime,
+                            ),
+                            timeout=timeout_seconds,
+                        )
+                    else:
+                        result, tokens = await asyncio.wait_for(
+                            self._call_vision_model(provider_id, system_prompt, prompt_text, resolved_path),
+                            timeout=timeout_seconds,
+                        )
                     elapsed = time.perf_counter() - t0
-                    logger.debug("[Wardrobe] 图片分析完成 provider=%s 耗时=%.2fs", provider_id, elapsed)
+                    logger.debug("[Wardrobe] 图片分析完成 provider=%s 耗时=%.2fs tokens=%d", provider_id, elapsed, tokens)
                     if result:
+                        if token_router and tokens > 0:
+                            token_router.record_storage_usage(provider_id, tokens)
                         return result
                     logger.warning("[Wardrobe] 模型返回结果解析失败 provider=%s，尝试下一个模型", provider_id)
                 except asyncio.TimeoutError:
@@ -189,13 +243,125 @@ class ImageAnalyzer:
         except Exception:
             pass
 
+    def _find_token_router(self):
+        """跨插件查找 token_router 实例。找不到或无目标方法时返回 None。"""
+        try:
+            stars = self.context.get_all_stars()
+        except Exception:
+            return None
+        for meta in stars or []:
+            p_id = str(getattr(meta, "id", "") or "")
+            p_name = str(getattr(meta, "name", "") or "")
+            root_dir_name = str(getattr(meta, "root_dir_name", "") or "")
+            if "token_router" not in p_id and "token_router" not in p_name and "token_router" not in root_dir_name:
+                continue
+            for attr in ("star_instance", "instance", "star_cls"):
+                candidate = getattr(meta, attr, None)
+                if candidate is not None and hasattr(candidate, "get_active_storage_provider"):
+                    return candidate
+        return None
+
+    async def _call_responses_api(
+        self,
+        api_key: str,
+        base_url: str,
+        model: str,
+        system_prompt: str,
+        prompt_text: str,
+        image_bytes: bytes,
+        mime: str,
+    ) -> tuple[Optional[dict[str, Any]], int]:
+        """通过豆包 Responses API（带 web_search 工具）分析图片。
+
+        Returns:
+            (解析后的属性 JSON, 总 token 用量)。失败时返回 (None, 0)。
+        """
+        url = f"{base_url.rstrip('/')}/api/v3/responses"
+        img_b64 = base64.b64encode(image_bytes).decode("ascii")
+        image_data_uri = f"data:{mime};base64,{img_b64}"
+
+        body: dict[str, Any] = {
+            "model": model,
+            "stream": False,
+            "input": [
+                {
+                    "role": "system",
+                    "content": [{"type": "input_text", "text": system_prompt}],
+                },
+                {
+                    "role": "user",
+                    "content": [
+                        {"type": "input_text", "text": prompt_text},
+                        {"type": "input_image", "image_url": image_data_uri},
+                    ],
+                },
+            ],
+            "tools": [{"type": "web_search"}],
+        }
+        headers = {
+            "Authorization": f"Bearer {api_key}",
+            "Content-Type": "application/json",
+        }
+
+        async with aiohttp.ClientSession() as session:
+            async with session.post(
+                url,
+                json=body,
+                headers=headers,
+                timeout=aiohttp.ClientTimeout(total=120),
+            ) as resp:
+                if resp.status != 200:
+                    error_text = await resp.text()
+                    logger.warning(
+                        "[Wardrobe] Responses API 返回 %d: %s",
+                        resp.status,
+                        error_text[:500],
+                    )
+                    return None, 0
+
+                raw_text = await resp.text()
+                data = json.loads(raw_text)
+
+        # 解析 output -> output_text
+        message = ""
+        try:
+            for item in data.get("output", []):
+                if item.get("type") == "message":
+                    for content_item in item.get("content", []):
+                        if content_item.get("type") == "output_text":
+                            message = content_item.get("text", "")
+                            break
+                    if message:
+                        break
+        except (KeyError, IndexError, TypeError) as e:
+            logger.warning("[Wardrobe] Responses API 响应解析失败: %s", e)
+            return None, 0
+
+        if not message:
+            logger.warning("[Wardrobe] Responses API 返回空响应")
+            return None, 0
+
+        # 解析 usage
+        usage = data.get("usage", {})
+        total_tokens = usage.get("input_tokens", 0) + usage.get("output_tokens", 0)
+
+        result = parse_json_response(message)
+        if not result:
+            logger.warning("[Wardrobe] Responses API 返回内容 JSON 解析失败")
+        return result, total_tokens
+
     async def _call_vision_model(
         self,
         provider_id: str,
         system_prompt: str,
         prompt_text: str,
         image_path: str,
-    ) -> Optional[dict[str, Any]]:
+    ) -> tuple[Optional[dict[str, Any]], int]:
+        """通过 AstrBot provider 系统调用视觉模型。
+
+        Returns:
+            (解析后的属性 JSON, 总 token 用量)。失败时返回 (None, 0)。
+        """
         try:
             llm_resp = await self.context.llm_generate(
                 chat_provider_id=provider_id,
@@ -216,6 +382,12 @@ class ImageAnalyzer:
 
         raw_text = (getattr(llm_resp, "completion_text", "") or "").strip()
         if not raw_text:
-            return None
+            return None, 0
 
-        return parse_json_response(raw_text)
+        # 提取 token 用量
+        usage_obj = getattr(llm_resp, "usage", None)
+        total_tokens = 0
+        if usage_obj:
+            total_tokens = getattr(usage_obj, "total", 0) or 0
+
+        return parse_json_response(raw_text), total_tokens
