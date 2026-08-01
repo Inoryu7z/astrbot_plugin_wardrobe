@@ -532,6 +532,33 @@ class WardrobeWebServer:
             cleared = await self.plugin.db.batch_clear_use_counts(ids)
             return jsonify({"success": True, "cleared": cleared})
 
+        @app.route("/api/images/batch-add-style", methods=["POST"])
+        async def api_images_batch_add_style():
+            await self.plugin._ensure_db()
+            data = await request.get_json(silent=True) or {}
+            ids = data.get("ids", [])
+            style_name = (data.get("style_name", "") or "").strip()
+            if not ids:
+                return jsonify({"error": "未指定图片"}), 400
+            if not style_name:
+                return jsonify({"error": "未指定风格"}), 400
+            updated = 0
+            for image_id in ids:
+                img = await self.plugin.db.get_image(image_id)
+                if not img:
+                    continue
+                current = img.get("style", []) or []
+                if isinstance(current, str):
+                    current = [current]
+                if style_name not in current:
+                    current.append(style_name)
+                    ok = await self.plugin.db.update_image(image_id, style=current)
+                    if ok:
+                        updated += 1
+                else:
+                    updated += 1
+            return jsonify({"success": True, "updated": updated, "style_name": style_name})
+
         @app.route("/api/images/ids")
         async def api_images_ids():
             await self.plugin._ensure_db()
@@ -655,6 +682,30 @@ class WardrobeWebServer:
             except Exception as e:
                 logger.error("[Wardrobe] WebUI上传异常: %s", e, exc_info=True)
                 return jsonify({"error": f"服务器内部错误: {e}"}), 500
+
+        @app.route("/api/images/<image_id>/toggle-style", methods=["POST"])
+        async def api_images_toggle_style(image_id):
+            await self.plugin._ensure_db()
+            data = await request.get_json(silent=True) or {}
+            style_name = (data.get("style_name", "") or "").strip()
+            if not style_name:
+                return jsonify({"error": "未指定风格"}), 400
+            img = await self.plugin.db.get_image(image_id)
+            if not img:
+                return jsonify({"error": "图片不存在"}), 404
+            current = img.get("style", []) or []
+            if isinstance(current, str):
+                current = [current]
+            if style_name in current:
+                current.remove(style_name)
+                added = False
+            else:
+                current.append(style_name)
+                added = True
+            ok = await self.plugin.db.update_image(image_id, style=current)
+            if not ok:
+                return jsonify({"error": "更新失败"}), 500
+            return jsonify({"success": True, "style": current, "added": added})
 
         @app.route("/api/images/<image_id>/favorite", methods=["PATCH"])
         async def api_image_favorite(image_id):

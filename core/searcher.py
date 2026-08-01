@@ -76,7 +76,10 @@ SEARCH_SELECT_SYSTEM_PROMPT = """# 角色
 ```
 
 # 选择策略（优先级从高到低）
-1. **最高优先级**：clothing_type（服装类型）、description 中的服装与姿势表述、body_focus（身体焦点）——这些直接决定"拍的是什么"
+0. **绝对最高优先级**：user_tags（用户标签）——这是用户本人对图片的明确标注，优先级高于一切其他字段。当 user_tags 与 description、style、clothing_type 等任何字段冲突时，一律以 user_tags 为准，不得被 description 或自身判断误导。
+   - 例：description 写"图片在cos知更鸟"，但 user_tags 写"cos朵莉亚" → 该图片应被视为"cos朵莉亚"，按朵莉亚匹配，而非知更鸟
+   - 用户标签代表用户真实意图，即使你认为描述更准确也必须服从 user_tags
+1. **高优先级**：clothing_type（服装类型）、description 中的服装与姿势表述、body_focus（身体焦点）——这些直接决定"拍的是什么"
 2. **中等优先级**：scene（场景）
 3. **低优先级**：composition（构图）
 4. style（风格）和 atmosphere（氛围）仅作为辅助参考，不作为主要匹配依据
@@ -627,6 +630,7 @@ class ImageSearcher:
                 "scene": c.get("scene", []),
                 "atmosphere": c.get("atmosphere", []),
                 "description": c.get("description", ""),
+                "user_tags": c.get("user_tags", ""),
                 "use_count": c.get("use_count", 0),
             }
             if c.get("category") == "人物":

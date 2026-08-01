@@ -985,6 +985,28 @@
     }
   }
 
+  async function batchAddStyle(styleName){
+    if(state.selectedIds.size===0){
+      toast('请先选择图片','warning');
+      return;
+    }
+    if(!confirm(`确定将选中的 ${state.selectedIds.size} 张图片打上「${styleName}」标签？`))return;
+    const resp=await api('/api/images/batch-add-style',{
+      method:'POST',
+      json:{ids:[...state.selectedIds],style_name:styleName}
+    });
+    if(!resp)return;
+    const data=await resp.json();
+    if(data.success){
+      toast(`已为 ${data.updated} 张图片打上「${styleName}」标签`,'success');
+      state.selectedIds.clear();
+      updateBatchUI();
+      state.page=1;state.allLoaded=false;loadImages(true);loadStats();
+    }else{
+      toast(data.error||'操作失败','error');
+    }
+  }
+
   async function batchClearUseCount(){
     if(state.selectedIds.size===0){
       toast('请先选择图片','warning');
@@ -2009,6 +2031,7 @@
       {icon:'👍',label:'喜欢',action:()=>quickFavorite(id,'like')},
       {icon:'😐',label:'无感',action:()=>quickFavorite(id,'meh')},
       {icon:'🎨',label:'切换参考强度',action:()=>quickRefStrength(id)},
+      {icon:'🎭',label:'切换cosplay标记',action:()=>quickToggleCosplay(id)},
       {icon:'🏷️',label:'编辑用户标签',action:()=>quickEditUserTags(id,e.clientX,e.clientY)},
       {type:'divider'},
       {icon:'🔄',label:'重新分析',action:()=>quickReanalyze(id)},
@@ -2149,6 +2172,23 @@
       card.appendChild(favMark);
     }
     favMark.textContent=fav==='favorite'?'❤️':fav==='like'?'👍':fav==='meh'?'😐':'';
+  }
+
+  async function quickToggleCosplay(id){
+    const resp=await api(`/api/images/${id}/toggle-style`,{method:'POST',json:{style_name:'cosplay'}});
+    if(!resp){toast('操作失败','error');return;}
+    const result=await resp.json();
+    if(result.success){
+      toast(result.added?'已添加cosplay标记':'已移除cosplay标记','success');
+      const styles=result.style||[];
+      const cached=state.detailCache.get(id);
+      if(cached)cached.style=styles;
+      if(state.currentImageId===id&&state.currentImageData){
+        state.currentImageData.style=styles;
+      }
+    }else{
+      toast(result.error||'操作失败','error');
+    }
   }
 
   async function quickDelete(id){
@@ -2484,6 +2524,13 @@
         const fav=btn.dataset.fav;
         $('#batchFavDropdown').classList.add('hidden');
         batchFavorite(fav);
+      });
+    });
+    document.querySelectorAll('.batch-fav-item[data-add-style]').forEach(btn=>{
+      btn.addEventListener('click',()=>{
+        const styleName=btn.dataset.addStyle;
+        $('#batchFavDropdown').classList.add('hidden');
+        batchAddStyle(styleName);
       });
     });
     $('#batchExportToggle').addEventListener('click',()=>{
