@@ -320,16 +320,28 @@ class ImageAnalyzer:
         img_b64 = base64.b64encode(image_bytes).decode("ascii")
         image_data_uri = f"data:{mime};base64,{img_b64}"
 
-        # 追加联网搜索引导：cosplay 等场景必须调用 web_search
+        # 联网搜索引导写入 system prompt（而非 user prompt），让模型在解析任务时优先遵守
+        # 关键：豆包 web_search 是模型自主决定是否调用的工具，必须在 system 层明确触发条件
         search_guidance = (
-            "\n\n# 联网搜索指引（已启用 web_search 工具）\n"
-            "本次已启用联网搜索。请按以下规则使用：\n"
-            "1. 如果图片是 cosplay（角色扮演），必须调用 web_search 搜索该角色的出处（作品名、角色名）。"
-            "在 key_features 中记录\"cosplay: 作品名/角色名\"，在 description 开头提及角色出处。\n"
-            "2. 如果图片涉及可识别的品牌 logo、IP 角色、特定作品元素，也应搜索确认。\n"
-            "3. 日常穿搭、纯风景等不涉及上述内容的图片无需搜索。"
+            "\n\n# 联网搜索（已启用 web_search 工具，必须遵守）\n"
+            "本次分析已启用联网搜索。请严格遵守以下规则：\n\n"
+            "## 触发条件（必须搜索）\n"
+            "当图片出现以下任一特征时，必须调用 web_search 搜索角色出处：\n"
+            "- 角色扮演（cosplay）：夸张假发、非日常发色（如奶金、银、粉、蓝等）、明显非日常服饰（如精灵装、女仆装、洛丽塔配花藤道具等）、道具武器、特殊妆容纹身\n"
+            "- 动漫/游戏/影视角色：服饰带有明显IP元素、特定作品标志性配件（如花弓、魔法杖、特定印纹）\n"
+            "- 可识别的IP角色：品牌logo、吉祥物、特定作品场景\n\n"
+            "## 搜索流程\n"
+            "1. 识别到上述任一特征 → 必须调用 web_search 搜索（关键词示例：\"作品名 角色名 cosplay\"、\"服饰特征关键词 cosplay 角色\"）\n"
+            "2. 根据搜索结果确认角色出处（作品名、角色名）\n"
+            "3. 在 key_features 中以 \"cosplay: 作品名/角色名\" 格式记录\n"
+            "4. 在 description 开头第一句提及角色出处，如\"图中是《XX》角色XX的cosplay\"\n\n"
+            "## 重要\n"
+            "- 禁止凭记忆直接判断角色出处，必须先调用 web_search 确认\n"
+            "- 即使你认为自己认识该角色，也要调用 web_search 验证，避免张冠李戴\n"
+            "- 搜索失败或无结果时，在 key_features 中记录\"cosplay: 未识别\"，但仍需详细描述服饰特征\n"
+            "- 仅当图片完全不含上述特征（日常穿搭、纯风景、普通街拍等）时才无需搜索"
         )
-        final_prompt = prompt_text + search_guidance
+        final_system_prompt = system_prompt + search_guidance
 
         body: dict[str, Any] = {
             "model": model,
@@ -337,12 +349,12 @@ class ImageAnalyzer:
             "input": [
                 {
                     "role": "system",
-                    "content": [{"type": "input_text", "text": system_prompt}],
+                    "content": [{"type": "input_text", "text": final_system_prompt}],
                 },
                 {
                     "role": "user",
                     "content": [
-                        {"type": "input_text", "text": final_prompt},
+                        {"type": "input_text", "text": prompt_text},
                         {"type": "input_image", "image_url": image_data_uri},
                     ],
                 },
