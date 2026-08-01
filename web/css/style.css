@@ -1470,6 +1470,38 @@ html, body {
   to { opacity: 1; transform: scale(1); }
 }
 
+.user-tags-popover {
+  position: fixed;
+  z-index: 400;
+  width: 260px;
+  max-width: calc(100vw - 20px);
+  background: var(--bg-card);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  box-shadow: 0 8px 32px rgba(45,36,56,0.2);
+  padding: 12px;
+  animation: contextIn .15s ease;
+}
+
+.user-tags-popover-title {
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--text-muted);
+  margin-bottom: 8px;
+}
+
+.user-tags-popover-input {
+  width: 100%;
+  margin-bottom: 10px;
+  box-sizing: border-box;
+}
+
+.user-tags-popover-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+}
+
 .view-toggle-group {
   display: flex;
   gap: 2px;
