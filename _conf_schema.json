@@ -31,8 +31,8 @@
           "id": {
             "type": "string",
             "description": "提供商唯一标识",
-            "hint": "用于 token_router 用量追踪，需全局唯一。如 doubao-pro、doubao-backup 等",
-            "default": ""
+            "hint": "格式：提供商名/模型名，如 火山/doubao-seed-2-0-pro-260215。用于 token_router 用量追踪，需全局唯一",
+            "default": "火山/doubao-seed-2-0-pro-260215"
           },
           "base_url": {
             "type": "string",
