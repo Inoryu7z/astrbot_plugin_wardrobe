@@ -32,7 +32,7 @@ STYLE_GROUPS = {
     "纯欲系": ["柔焦纯欲风", "轻熟纯欲风", "居家纯欲风", "纯欲少女风", "雾面纯欲风", "清透纯欲风", "诱惑纯欲风", "挂脖露肩装", "甜欲露背装", "甜欲露脐装"],
     "法式优雅系": ["法式优雅风", "法式浪漫风", "温柔淑女风", "轻礼服千金风", "精致约会风", "英式复古优雅风"],
     "暗黑系": ["哥特暗黑风", "赛博朋克风", "暗黑少女风", "维多利亚暗黑风", "暗黑哥特风", "哥特风", "地雷系", "水色天使风"],
-    "日韩系": ["日系软妹风", "日系森女风", "韩系甜美风", "韩系温柔风", "日系通勤风", "韩系清冷风", "量产型甜美风"],
+    "日韩系": ["日系软妹风", "韩系甜美风", "韩系温柔风", "日系通勤风", "韩系清冷风", "量产型甜美风"],
     "性感系": ["性感兔女郎风", "性感女仆风", "高开叉旗袍风", "魅惑吊带风"],
     "其他": ["女仆装", "旗袍", "改良韩服温柔风", "复古风", "波西米亚风", "维多利亚复古风", "赛博机械风", "cosplay风", "花嫁", "中华娘风", "修女风", "巫女服", "女儿服", "日式体操服"],
 }
@@ -1090,10 +1090,16 @@ class WardrobeWebServer:
             elif action == "remove_pool":
                 if pool_key in pools:
                     del pools[pool_key]
+            elif action == "reset_default":
+                from .core.pools import ALL_POOLS
+                if pool_key in ALL_POOLS:
+                    pools[pool_key] = list(ALL_POOLS[pool_key])
             else:
                 return jsonify({"error": "未知操作"}), 400
 
             await self.plugin.save_custom_pools(pools)
+            if action == "reset_default":
+                return jsonify({"success": True, "style": pools.get("style", [])})
             return jsonify({"success": True, "pools": {k: list(v) for k, v in pools.items()}})
 
         # ---------- 人格级风格池（供 aiimg 补拍使用） ----------

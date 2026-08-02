@@ -470,35 +470,41 @@
 <div class="modal-overlay hidden" id="poolsModal">
   <div class="modal-card modal-card-md">
     <button class="modal-close" id="poolsModalClose">&times;</button>
-    <h2 class="modal-title">标签分类管理</h2>
-    <p class="pools-hint">管理图片分析时使用的标签分类。向已有分类添加新选项后，AI 存图时也能识别归类。</p>
-    <div id="poolsList" class="pools-list"></div>
-    <div class="pools-create-section">
-      <h3 class="pools-create-title">创建新分类</h3>
-      <p class="pools-create-desc">需要全新的标签分类时在此创建，创建后可在上方添加具体选项</p>
-      <div class="pools-create-row">
-        <input type="text" id="poolNewKey" class="login-input pools-create-input" placeholder="输入分类名称，如：色调">
-        <button class="btn btn-accent btn-sm" id="poolAddKeyBtn">创建</button>
+    <h2 class="modal-title">池子管理</h2>
+
+    <!-- 风格池管理（主区域） -->
+    <div class="pools-style-section">
+      <div class="pools-style-header">
+        <h3 class="pools-section-title">风格池</h3>
+        <div class="pools-style-tabs" id="poolsStyleTabs">
+          <button class="pools-style-tab active" data-target="global">全局</button>
+        </div>
+      </div>
+      <div class="pools-style-toolbar">
+        <input type="text" id="styleSearchInput" class="login-input pools-style-search" placeholder="搜索风格...">
+        <button class="btn btn-ghost btn-sm" id="styleResetBtn" title="恢复默认风格池">恢复默认</button>
+      </div>
+      <div id="stylePoolList" class="style-pool-list"></div>
+      <div class="pools-create-row" style="margin-top:0.5rem;">
+        <input type="text" id="styleNewInput" class="login-input pools-create-input" placeholder="输入新风格名，回车添加">
+        <button class="btn btn-accent btn-sm" id="styleAddBtn">添加风格</button>
       </div>
     </div>
-    <div class="pools-create-section" style="margin-top:1.5rem;border-top:1px solid rgba(255,255,255,0.08);padding-top:1.5rem;">
-      <h3 class="pools-create-title">人格风格池（补拍专用）</h3>
-      <p class="pools-create-desc">为每个人格定制 aiimg 补拍使用的风格池。选择人格后管理其专属风格列表；留空（删除所有项）则该人格回退到全局风格池。</p>
-      <div class="pools-create-row" style="margin-bottom:0.75rem;">
-        <select id="personaStyleSelect" class="login-input" style="flex:0 0 auto;min-width:160px;">
-          <option value="">选择人格...</option>
-        </select>
-        <button class="btn btn-ghost btn-sm" id="personaStyleResetBtn" title="清空该人格的风格池，回退到全局池">重置为全局</button>
+
+    <!-- 标签分类管理（折叠区） -->
+    <details class="pools-tags-section">
+      <summary class="pools-section-title">标签分类管理（服装类型/场景/氛围等）</summary>
+      <p class="pools-hint" style="margin-top:0.5rem;">管理图片分析时使用的标签分类。向已有分类添加新选项后，AI 存图时也能识别归类。</p>
+      <div id="poolsList" class="pools-list"></div>
+      <div class="pools-create-section">
+        <h3 class="pools-create-title">创建新分类</h3>
+        <p class="pools-create-desc">需要全新的标签分类时在此创建，创建后可在上方添加具体选项</p>
+        <div class="pools-create-row">
+          <input type="text" id="poolNewKey" class="login-input pools-create-input" placeholder="输入分类名称，如：色调">
+          <button class="btn btn-accent btn-sm" id="poolAddKeyBtn">创建</button>
+        </div>
       </div>
-      <div id="personaStyleList" class="pool-group-body" style="min-height:40px;border:1px dashed rgba(255,255,255,0.1);border-radius:8px;padding:0.5rem;margin-bottom:0.5rem;">
-        <span class="pools-hint" style="opacity:0.5;">请先选择人格</span>
-      </div>
-      <div class="pools-create-row">
-        <input type="text" id="personaStyleInput" class="login-input pools-create-input" placeholder="输入风格名称，回车添加（也可从下方全局池点击快速添加）" disabled>
-        <button class="btn btn-accent btn-sm" id="personaStyleAddBtn" disabled>添加</button>
-      </div>
-      <div id="globalStyleQuickAdd" style="margin-top:0.5rem;"></div>
-    </div>
+    </details>
   </div>
 </div>
 

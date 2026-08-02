@@ -145,12 +145,15 @@ class WardrobePlugin(Star):
         merged = {k: list(v) for k, v in ALL_POOLS.items()}
         custom = await self._load_custom_pools()
         for k, v in custom.items():
+            additions = v.get("additions", []) if isinstance(v, dict) else v
+            removals = v.get("removals", []) if isinstance(v, dict) else []
             if k in merged:
-                for item in v:
+                merged[k] = [item for item in merged[k] if item not in removals]
+                for item in additions:
                     if item not in merged[k]:
                         merged[k].append(item)
             else:
-                merged[k] = list(v)
+                merged[k] = list(additions)
         return merged
 
     async def _load_custom_pools(self) -> dict:
@@ -161,9 +164,17 @@ class WardrobePlugin(Star):
                 data = await asyncio.to_thread(self._read_custom_pools_file, path)
                 if not isinstance(data, dict):
                     return {}
+                # 迁移旧格式（list）到新格式（{additions, removals}）
                 for k, v in data.items():
-                    if not isinstance(v, list):
-                        data[k] = []
+                    if isinstance(v, list):
+                        data[k] = {"additions": v, "removals": []}
+                    elif not isinstance(v, dict):
+                        data[k] = {"additions": [], "removals": []}
+                    else:
+                        data[k] = {
+                            "additions": v.get("additions", []) if isinstance(v.get("additions"), list) else [],
+                            "removals": v.get("removals", []) if isinstance(v.get("removals"), list) else [],
+                        }
                 return data
             except Exception:
                 pass
@@ -181,9 +192,14 @@ class WardrobePlugin(Star):
         custom = {}
         for k, v in merged_pools.items():
             default = ALL_POOLS.get(k, [])
-            extra = [item for item in v if item not in default]
-            if extra or k not in ALL_POOLS:
-                custom[k] = extra if k in ALL_POOLS else list(v)
+            if k in ALL_POOLS:
+                additions = [item for item in v if item not in default]
+                removals = [item for item in default if item not in v]
+                if additions or removals:
+                    custom[k] = {"additions": additions, "removals": removals}
+            else:
+                if v:
+                    custom[k] = {"additions": list(v), "removals": []}
         path = self.data_dir / "custom_pools.json"
         path.parent.mkdir(parents=True, exist_ok=True)
         content = json.dumps(custom, ensure_ascii=False, indent=2)
