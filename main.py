@@ -47,7 +47,7 @@ _MIGRATION_STATE_FILE = "migration_state.json"
     "astrbot_plugin_wardrobe",
     "Inoryu7z",
     "图片衣柜管理插件，支持智能分类、语义检索和参考图接口",
-    "3.0.2",
+    "3.0.3",
 )
 class WardrobePlugin(Star):
     def __init__(self, context: Context, config: AstrBotConfig = None):
@@ -2233,3 +2233,102 @@ class WardrobePlugin(Star):
             lines.append(f"参考强度：{ref_labels.get(ref_strength, ref_strength)}")
 
         return "\n".join(lines)
+
+    # ============ 素材库（部位素材 assets）============
+
+    async def save_asset(self, image_bytes: bytes, user_note: str = "") -> dict:
+        """上传部位素材图，调用存图模型产出短标签+完整描述并入库。
+
+        Returns:
+            {"asset_id": str, "short_tag": str, "description": str, "analyzed": bool, "error": str}
+        """
+        await self._ensure_db()
+
+        user_note = (user_note or "").strip()
+        if len(user_note) > _MAX_DESCRIPTION_LEN:
+            user_note = user_note[:_MAX_DESCRIPTION_LEN]
+
+        max_size = int(self._cfg("max_image_size_mb", _MAX_IMAGE_SIZE_MB) or _MAX_IMAGE_SIZE_MB)
+        if len(image_bytes) > max_size * 1024 * 1024:
+            return {"error": f"图片过大，限制{max_size}MB"}
+
+        primary = str(self._cfg("save_provider_id", "") or "").strip()
+        secondary = str(self._cfg("save_secondary_provider_id", "") or "").strip()
+        timeout = float(self._cfg("save_timeout_seconds", 60.0) or 60.0)
+
+        short_tag = ""
+        description = ""
+        analyzed = False
+        if primary or secondary:
+            attrs = await self.analyzer.analyze_asset(
+                image_bytes,
+                user_note=user_note,
+                primary_provider_id=primary,
+                secondary_provider_id=secondary,
+                timeout_seconds=timeout,
+            )
+            if attrs:
+                short_tag = ensure_str(attrs.get("short_tag"))
+                description = ensure_str(attrs.get("description"))
+                analyzed = True
+        else:
+            logger.warning("[Wardrobe] 未配置存图模型，素材仅保存原始图片")
+
+        filename = await self.store.save_image(image_bytes)
+        asset_id = await self.db.add_asset(
+            short_tag=short_tag,
+            description=description,
+            user_note=user_note,
+            image_path=filename,
+        )
+        return {
+            "asset_id": asset_id,
+            "short_tag": short_tag,
+            "description": description,
+            "analyzed": analyzed,
+        }
+
+    async def list_assets(self) -> list[dict]:
+        """返回全部素材的短标签总览（供 LLM 总览感知）。"""
+        await self._ensure_db()
+        records = await self.db.list_assets()
+        return [
+            {
+                "asset_id": r["id"],
+                "short_tag": r.get("short_tag", "") or "",
+            }
+            for r in records
+        ]
+
+    async def get_asset_detail(self, asset_id: str) -> Optional[dict]:
+        """返回单个素材的完整信息（含描述与图片路径）。
+
+        描述中的「参考图N」占位符由调用方在运行时替换为真实序号。
+        """
+        await self._ensure_db()
+        rec = await self.db.get_asset(asset_id)
+        if not rec:
+            return None
+        image_path = self.store.get_image_path(rec["image_path"])
+        if not image_path.exists():
+            logger.warning("[Wardrobe] 素材图片文件不存在 %s", rec["image_path"])
+            return None
+        return {
+            "asset_id": rec["id"],
+            "short_tag": rec.get("short_tag", "") or "",
+            "description": rec.get("description", "") or "",
+            "image_path": str(image_path),
+        }
+
+    async def delete_asset(self, asset_id: str) -> bool:
+        await self._ensure_db()
+        rec = await self.db.get_asset(asset_id)
+        if not rec:
+            return False
+        ok = await self.db.delete_asset(asset_id)
+        if ok and rec.get("image_path"):
+            try:
+                await self.store.delete_image(rec["image_path"])
+            except Exception as e:
+                logger.debug("[Wardrobe] 删除素材图片失败: %s", e)
+        return ok

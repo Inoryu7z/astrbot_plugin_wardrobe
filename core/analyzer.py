@@ -95,6 +95,45 @@ ANALYZE_SYSTEM_PROMPT = """# 角色
 3. 如果用户描述提到具体特征，请在描述中体现这些特征"""
 
 
+ASSET_ANALYZE_SYSTEM_PROMPT = """# 角色
+你是专业的部位素材分析助手。这类素材是**大图生成时的局部参考图**（如：足部、袜子、鞋子、表情、配饰等局部的特写），不是完整的人物照片。你的任务是把每张素材图提炼成「短标签」和「完整描述」，供后续大图生成时引用。
+
+# 输出格式
+输出 JSON 对象，字段如下：
+
+```json
+{
+  "short_tag": "一句话极简标签，用于总览列表，如：凉鞋+丝袜、超薄黑夹趾袜、白色踩脚袜、可爱蝴蝶白丝、挑逗表情",
+  "description": "完整描述，两段式，见下"
+}
+```
+
+# description 写法（两段式，必须严格遵循）
+description 分为两段，用换行分隔：
+
+## 第一段：内容简介
+用**极简**一句话说明本图展示了什么，明确本素材的**核心元素**是什么。例如：「黑色超薄夹趾袜，穿在脚上，特写」。只描述本图真正展示的东西。
+
+## 第二段：使用指导
+面向「大图生成」的指引，遵循以下原则（核心：图里有的不重复、引用时精准引用、重复反而更差）：
+1. 说明该素材是大图生成时注入的**参考图之一**，生成时应通过**精准引用参考图编号**来使用，而不是大段描述细节。
+2. 明确指出本素材的**核心元素**（如「丝袜」），生成时在提示词中写「参考图N中的<核心元素>」即可精准指定，不要重复描述该元素的其他细节。
+3. 明确本素材**不需要**覆盖什么（如「不要描述鞋子」「不要描述环境背景」），避免误导生图模型把无关元素也画进去。
+4. 若素材含多个元素，说明应重点引用哪个、弱化哪个。
+5. 使用「参考图N」占位符指代本素材，N 由调用方在运行时替换为真实序号。
+
+# 用户备注处理
+用户可能在【用户备注】里说明本素材的用途与关注点（例如「主要关注丝袜细节，之后引用本图时都是引用丝袜」）。请严格遵循：
+1. 用户备注是权威的，描述与使用指导必须围绕用户指定的核心元素展开。
+2. 用户备注提到「不要描述/不要包含」的元素，在使用指导中明确排除。
+3. 用户备注中的专有名词（如「超薄黑夹趾袜」）原样保留，不要发散解释。
+
+# 规则
+1. short_tag 尽量简短（≤15字），一眼能看出是什么，用于总览。
+2. description 第二段是重点，要写成可执行的生成指引，避免空泛。
+3. 只输出 JSON，不要输出解释或其他内容。"""
+
+
 class ImageAnalyzer:
     def __init__(self, context, plugin=None):
         self.context = context
@@ -229,6 +268,113 @@ class ImageAnalyzer:
                     logger.warning("[Wardrobe] 存图模型调用失败 provider=%s error=%s", provider_id, e)
 
             logger.error("[Wardrobe] 存图模型均不可用")
+            return None
+        finally:
+            self._cleanup_temp(temp_path)
+
+    async def analyze_asset(
+        self,
+        image_bytes: bytes,
+        user_note: str = "",
+        *,
+        primary_provider_id: str,
+        secondary_provider_id: str = "",
+        timeout_seconds: float = 60.0,
+    ) -> Optional[dict[str, Any]]:
+        """分析部位素材图，产出 {short_tag, description}。
+
+        复用与 analyze_image 相同的存图模型链路（Responses / 框架 provider /
+        token_router 日用量路由），仅切换为素材专用 system prompt。
+        """
+        system_prompt = ASSET_ANALYZE_SYSTEM_PROMPT
+
+        mime = detect_image_mime(image_bytes)
+        ext = mime_to_ext(mime)
+
+        temp_path = ""
+        try:
+            temp_fd, temp_path = tempfile.mkstemp(suffix=f".{ext}")
+            try:
+                import os
+                os.write(temp_fd, image_bytes)
+            finally:
+                os.close(temp_fd)
+            resolved_path = str(Path(temp_path).resolve())
+        except Exception as e:
+            logger.warning("[Wardrobe] 保存临时素材图片失败: %s", e)
+            self._cleanup_temp(temp_path)
+            return None
+
+        try:
+            prompt_text = "请分析这张部位素材图片。"
+            if user_note and user_note.strip():
+                prompt_text += f"\n\n【用户备注】{user_note.strip()}\n\n请严格遵循用户备注：其中的专有名词原样保留，围绕用户关注的核心元素提炼短标签与使用指导。"
+
+            use_responses = False
+            resp_providers: list[dict] = []
+            if self.plugin:
+                use_responses = bool(self.plugin._cfg("save_use_responses_api", False))
+                resp_providers = self._parse_responses_providers()
+
+            token_router = self._find_token_router()
+
+            attempts: list[tuple[str, bool]] = []
+            if use_responses and resp_providers:
+                if token_router:
+                    providers_for_router = [
+                        {"id": p["id"], "daily_limit": p["daily_limit"]} for p in resp_providers
+                    ]
+                    active_id = token_router.get_active_storage_provider(providers_for_router)
+                else:
+                    active_id = resp_providers[0]["id"]
+                attempts.append((active_id, True))
+                for p in resp_providers:
+                    if p["id"] != active_id:
+                        attempts.append((p["id"], True))
+            else:
+                if not primary_provider_id and not secondary_provider_id:
+                    logger.warning("[Wardrobe] 未配置存图模型，无法分析素材")
+                    return None
+                if primary_provider_id:
+                    attempts.append((primary_provider_id, False))
+                if secondary_provider_id and secondary_provider_id != primary_provider_id:
+                    attempts.append((secondary_provider_id, False))
+
+            for provider_id, is_responses in attempts:
+                if not provider_id:
+                    continue
+                try:
+                    t0 = time.perf_counter()
+                    if is_responses:
+                        p_cfg = self._get_responses_provider_cfg(provider_id, resp_providers)
+                        if not p_cfg:
+                            logger.warning("[Wardrobe] 未找到 Responses 提供商配置 id=%s", provider_id)
+                            continue
+                        result, tokens = await asyncio.wait_for(
+                            self._call_responses_api(
+                                p_cfg["api_key"], p_cfg["base_url"], p_cfg["model"],
+                                system_prompt, prompt_text, image_bytes, mime,
+                            ),
+                            timeout=timeout_seconds,
+                        )
+                    else:
+                        result, tokens = await asyncio.wait_for(
+                            self._call_vision_model(provider_id, system_prompt, prompt_text, resolved_path),
+                            timeout=timeout_seconds,
+                        )
+                    elapsed = time.perf_counter() - t0
+                    logger.debug("[Wardrobe] 素材分析完成 provider=%s 耗时=%.2fs tokens=%d", provider_id, elapsed, tokens)
+                    if result:
+                        if token_router and tokens > 0:
+                            token_router.record_storage_usage(provider_id, tokens)
+                        return result
+                    logger.warning("[Wardrobe] 素材模型返回结果解析失败 provider=%s，尝试下一个模型", provider_id)
+                except asyncio.TimeoutError:
+                    logger.warning("[Wardrobe] 存图模型超时 provider=%s", provider_id)
+                except Exception as e:
+                    logger.warning("[Wardrobe] 存图模型调用失败 provider=%s error=%s", provider_id, e)
+
+            logger.error("[Wardrobe] 存图模型均不可用（素材分析）")
             return None
         finally:
             self._cleanup_temp(temp_path)

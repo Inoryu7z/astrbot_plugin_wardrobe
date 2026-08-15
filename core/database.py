@@ -98,6 +98,18 @@ CREATE INDEX IF NOT EXISTS idx_videos_status ON videos(status);
 CREATE INDEX IF NOT EXISTS idx_videos_persona ON videos(persona);
 """
 
+_CREATE_ASSETS_TABLE_SQL = """
+CREATE TABLE IF NOT EXISTS assets (
+    id TEXT PRIMARY KEY,
+    short_tag TEXT DEFAULT '',
+    description TEXT DEFAULT '',
+    user_note TEXT DEFAULT '',
+    image_path TEXT NOT NULL,
+    created_at TEXT NOT NULL,
+    updated_at TEXT NOT NULL
+);
+"""
+
 _UPDATABLE_VIDEO_FIELDS = frozenset({
     "video_path", "video_url", "provider_id", "tier", "user_thoughts",
     "generated_prompt", "persona", "status", "error_message",
@@ -153,6 +165,7 @@ class WardrobeDatabase:
                 await db.executescript(_CREATE_IMAGE_USAGE_TABLE_SQL)
                 await db.executescript(_CREATE_SCHEMA_VERSION_TABLE_SQL)
                 await db.executescript(_CREATE_VIDEOS_TABLE_SQL)
+                await db.executescript(_CREATE_ASSETS_TABLE_SQL)
                 for col, default in [
                     ("video_url", "TEXT DEFAULT ''"),
                 ]:
@@ -1489,3 +1502,73 @@ class WardrobeDatabase:
                         logger.debug("[Wardrobe] 导入视频记录跳过: id=%s error=%s", rec.get("id"), e)
                 await db.commit()
         return imported
+
+    # ============ 素材库（部位素材 assets）============
+
+    async def add_asset(
+        self,
+        *,
+        short_tag: str = "",
+        description: str = "",
+        user_note: str = "",
+        image_path: str,
+    ) -> str:
+        now = datetime.now(timezone.utc).isoformat()
+        asset_id = str(uuid.uuid4())
+        async with self._lock:
+            async with aiosqlite.connect(self.db_path) as db:
+                await db.execute(
+                    """INSERT INTO assets (
+                        id, short_tag, description, user_note, image_path, created_at, updated_at
+                    ) VALUES (?, ?, ?, ?, ?, ?, ?)""",
+                    (asset_id, short_tag, description, user_note, image_path, now, now),
+                )
+                await db.commit()
+        return asset_id
+
+    async def get_asset(self, asset_id: str) -> Optional[dict[str, Any]]:
+        async with aiosqlite.connect(self.db_path) as db:
+            db.row_factory = aiosqlite.Row
+            async with db.execute("SELECT * FROM assets WHERE id = ?", (asset_id,)) as cursor:
+                row = await cursor.fetchone()
+                if row is None:
+                    return None
+                return dict(row)
+
+    async def list_assets(self) -> list[dict[str, Any]]:
+        async with aiosqlite.connect(self.db_path) as db:
+            db.row_factory = aiosqlite.Row
+            async with db.execute(
+                "SELECT * FROM assets ORDER BY created_at ASC, id ASC"
+            ) as cursor:
+                rows = await cursor.fetchall()
+                return [dict(row) for row in rows]
+
+    async def update_asset(self, asset_id: str, **kwargs) -> bool:
+        if not kwargs:
+            return False
+        kwargs["updated_at"] = datetime.now(timezone.utc).isoformat()
+        sets = []
+        values: list[Any] = []
+        for key, val in kwargs.items():
+            if key not in ("short_tag", "description", "user_note", "image_path", "updated_at"):
+                continue
+            sets.append(f"{key} = ?")
+            values.append(val)
+        if not sets:
+            return False
+        values.append(asset_id)
+        async with self._lock:
+            async with aiosqlite.connect(self.db_path) as db:
+                await db.execute(
+                    f"UPDATE assets SET {', '.join(sets)} WHERE id = ?", values
+                )
+                await db.commit()
+        return True
+
+    async def delete_asset(self, asset_id: str) -> bool:
+        async with self._lock:
+            async with aiosqlite.connect(self.db_path) as db:
+                cursor = await db.execute("DELETE FROM assets WHERE id = ?", (asset_id,))
+                await db.commit()
+                return cursor.rowcount > 0
