@@ -2840,10 +2840,21 @@
       const zone=$('#assetUploadZone');
       zone.classList.remove('hidden');
       $('#assetUploadPreview').classList.add('hidden');
+      $('#assetEditFields').classList.add('hidden');
+      $('#assetEditShortTag').value='';
+      $('#assetEditDescription').value='';
       $('#assetUploadFile').value='';
       $('#assetUploadStatus').textContent='';
       submitBtn.disabled=true;
       modal.classList.remove('hidden');
+    });
+
+    $('#assetDetailCloseBtn').addEventListener('click',()=>{$('#assetDetailModal').classList.add('hidden');});
+    $('#assetDetailModalClose').addEventListener('click',()=>{$('#assetDetailModal').classList.add('hidden');});
+    $('#assetDetailModal').addEventListener('click',e=>{if(e.target===e.currentTarget)$('#assetDetailModal').classList.add('hidden');});
+    $('#assetDetailEditBtn').addEventListener('click',()=>{
+      $('#assetDetailModal').classList.add('hidden');
+      if(_assetDetailId)openAssetEdit(_assetDetailId);
     });
 
     $('#videoGenerateBtn').addEventListener('click',()=>{
@@ -3048,14 +3059,11 @@
           else{toast('删除失败','error');}
         });
       });
-      // 点击图片放大
-      grid.querySelectorAll('.asset-card-img').forEach(img=>{
-        img.addEventListener('click',function(){
-          const orig=this.dataset.original;
-          const lightbox=$('#lightbox');
-          const lightboxImg=$('#lightboxImage');
-          lightboxImg.src=orig;
-          lightbox.classList.remove('hidden');
+      // 点击卡片打开详情（编辑/删除按钮除外）
+      grid.querySelectorAll('.asset-card').forEach(card=>{
+        card.addEventListener('click',e=>{
+          if(e.target.closest('.asset-edit-btn')||e.target.closest('.asset-delete-btn'))return;
+          openAssetDetail(card.dataset.id);
         });
       });
       // 懒加载原图
@@ -3070,11 +3078,36 @@
     }
   }
 
+  let _assetDetailId=null;
+
+  async function openAssetDetail(assetId){
+    const resp=await api('/api/assets');
+    if(!resp||!resp.ok)return;
+    const data=await resp.json();
+    const asset=(data.assets||[]).find(a=>a.asset_id===assetId);
+    if(!asset){toast('素材不存在','error');return;}
+    _assetDetailId=assetId;
+    $('#assetDetailImg').src='/api/asset-file/'+assetId;
+    $('#assetDetailShortTag').textContent=asset.short_tag||'素材';
+    $('#assetDetailDesc').textContent=asset.description||'（暂无描述）';
+    const noteEl=$('#assetDetailNote');
+    if(asset.user_note){
+      noteEl.textContent='存图备注：'+asset.user_note;
+      noteEl.classList.remove('hidden');
+    }else{
+      noteEl.classList.add('hidden');
+    }
+    $('#assetDetailModal').classList.remove('hidden');
+  }
+
   function openAssetEdit(assetId){
     const modal=$('#assetUploadModal');
     const title=modal.querySelector('h2');
     const submitBtn=$('#assetUploadSubmit');
     const note=$('#assetUploadNote');
+    const shortTag=$('#assetEditShortTag');
+    const description=$('#assetEditDescription');
+    const editFields=$('#assetEditFields');
     const zone=$('#assetUploadZone');
     const preview=$('#assetUploadPreview');
     const previewImg=$('#assetPreviewImg');
@@ -3083,11 +3116,14 @@
     // 重置为编辑模式
     title.textContent='编辑素材';
     submitBtn.textContent='保存修改';
-    zone.classList.remove('hidden');
+    zone.classList.add('hidden');
     preview.classList.add('hidden');
+    editFields.classList.remove('hidden');
     status.textContent='';
     fileInput.value='';
     note.value='';
+    shortTag.value='';
+    description.value='';
     // 加载现有数据
     api('/api/assets').then(async resp=>{
       if(!resp||!resp.ok)return;
@@ -3095,9 +3131,11 @@
       const asset=(data.assets||[]).find(a=>a.asset_id===assetId);
       if(!asset){toast('素材不存在','error');return;}
       note.value=asset.user_note||'';
+      shortTag.value=asset.short_tag||'';
+      description.value=asset.description||'';
       previewImg.src='/api/asset-file/'+assetId;
       preview.classList.remove('hidden');
-      zone.classList.add('hidden');
+      editFields.classList.remove('hidden');
       submitBtn.disabled=false;
       modal.classList.remove('hidden');
       // 保存时带 asset_id
@@ -3144,10 +3182,12 @@
       status.textContent='上传中...';
       const editingId=submitBtn._editingAssetId;
       if(editingId){
-        // 编辑模式：只更新文字
+        // 编辑模式：更新短标签/完整描述/备注
+        const shortTagVal=($('#assetEditShortTag').value||'').trim();
+        const descVal=($('#assetEditDescription').value||'').trim();
         const resp=await api('/api/assets/'+editingId,{
           method:'PUT',
-          json:{user_note:note.value}
+          json:{short_tag:shortTagVal,description:descVal,user_note:note.value}
         });
         if(resp&&resp.ok){
           toast('已更新','success');
@@ -3191,6 +3231,9 @@
       selectedFile=null;
       zone.classList.remove('hidden');
       preview.classList.add('hidden');
+      $('#assetEditFields').classList.add('hidden');
+      $('#assetEditShortTag').value='';
+      $('#assetEditDescription').value='';
       fileInput.value='';
       note.value='';
       submitBtn.disabled=true;

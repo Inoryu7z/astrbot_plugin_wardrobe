@@ -6,7 +6,7 @@
 <title>衣橱图鉴</title>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link href="https://fonts.googleapis.com/css2?family=Fredoka:wght@400;500;600;700&family=Nunito:wght@300;400;500;600;700&display=swap" rel="stylesheet">
-<link rel="stylesheet" href="/static/css/style.css?v=3.1.0">
+<link rel="stylesheet" href="/static/css/style.css?v=3.0.3">
 <script src="https://cdn.jsdelivr.net/npm/echarts@5.5.1/dist/echarts.min.js"></script>
 </head>
 <body>
@@ -292,7 +292,7 @@
     <div class="asset-view hidden" id="assetView">
       <div class="asset-view-header">
         <h2 class="asset-view-title">素材库（部位素材）</h2>
-        <p class="asset-view-hint">上传足部、袜子、鞋子、表情等局部特写图作为自拍参考素材。上传时填写的「备注」用于指导存图模型生成短标签与使用指导。</p>
+        <p class="asset-view-hint">上传局部特写图作为自拍参考素材。上传时填写的「备注」用于指导存图模型生成短标签与使用指导。</p>
         <button class="btn btn-accent" id="assetUploadBtn">
           <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="18" height="18"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="17 8 12 3 7 8"/><line x1="12" y1="3" x2="12" y2="15"/></svg>
           上传素材
@@ -318,12 +318,33 @@
         <div class="upload-preview hidden" id="assetUploadPreview">
           <img id="assetPreviewImg" src="" alt="预览">
         </div>
+        <div class="asset-edit-fields hidden" id="assetEditFields">
+          <label class="upload-label">短标签</label>
+          <input class="field-text-input" id="assetEditShortTag" placeholder="一句话极简标签，用于总览列表">
+          <label class="upload-label">完整描述</label>
+          <textarea class="field-textarea asset-note-textarea" id="assetEditDescription" placeholder="图片本身的完整描述，供大图生成时引用"></textarea>
+        </div>
         <div class="upload-options">
-          <label class="upload-label">备注（非必填，给存图模型看）</label>
+          <label class="upload-label">备注（非必填）</label>
           <textarea class="field-textarea asset-note-textarea" id="assetUploadNote" placeholder="例如：主要关注丝袜细节，之后引用本图时都是引用丝袜，这个丝袜叫超薄黑夹趾袜，不要描述鞋子。"></textarea>
         </div>
         <button class="btn btn-accent btn-block" id="assetUploadSubmit" disabled>保存素材</button>
         <div id="assetUploadStatus" class="upload-status"></div>
+      </div>
+    </div>
+
+    <div class="modal-overlay hidden" id="assetDetailModal">
+      <div class="modal-card modal-card-sm">
+        <button class="modal-close" id="assetDetailModalClose">&times;</button>
+        <h2 class="modal-title">素材详情</h2>
+        <div class="asset-detail-img-wrap"><img id="assetDetailImg" class="asset-detail-img" src="" alt=""></div>
+        <div class="asset-detail-short-tag" id="assetDetailShortTag"></div>
+        <div class="asset-detail-desc" id="assetDetailDesc"></div>
+        <div class="asset-detail-note hidden" id="assetDetailNote"></div>
+        <div class="modal-bottom-actions">
+          <button class="btn btn-accent" id="assetDetailEditBtn">编辑</button>
+          <button class="btn btn-secondary" id="assetDetailCloseBtn">关闭</button>
+        </div>
       </div>
     </div>
 
@@ -633,6 +654,6 @@
     </div>
   </div>
 
-<script src="/static/js/app.js?v=3.1.0"></script>
+<script src="/static/js/app.js?v=3.0.3"></script>
 </body>
 </html>
