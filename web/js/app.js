@@ -87,6 +87,7 @@
     videoViewActive:false,
     videoCurrentPlayerId:null,
     videoGridIds:[],
+    assetViewActive:false,
     dragSelecting:false,
     dragSelectAction:null
   };
@@ -2497,6 +2498,7 @@
     _initOriginalObserver();
 
     setupViewToggle();
+    setupAssetUpload();
 
     document.addEventListener('click',e=>{
       if(!e.target.closest('.context-menu'))hideContextMenu();
@@ -2824,6 +2826,26 @@
       toggleVideoView(!state.videoViewActive);
     });
 
+    $('#assetViewBtn').addEventListener('click',()=>{
+      toggleAssetView(!state.assetViewActive);
+    });
+
+    $('#assetUploadBtn').addEventListener('click',()=>{
+      const modal=$('#assetUploadModal');
+      const note=$('#assetUploadNote');
+      const submitBtn=$('#assetUploadSubmit');
+      submitBtn._editingAssetId=null;
+      submitBtn.textContent='保存素材';
+      note.value='';
+      const zone=$('#assetUploadZone');
+      zone.classList.remove('hidden');
+      $('#assetUploadPreview').classList.add('hidden');
+      $('#assetUploadFile').value='';
+      $('#assetUploadStatus').textContent='';
+      submitBtn.disabled=true;
+      modal.classList.remove('hidden');
+    });
+
     $('#videoGenerateBtn').addEventListener('click',()=>{
       if(!state.currentImageId){toast('请先打开一张图片','error');return;}
       showVideoGeneratePanel();
@@ -2946,6 +2968,237 @@
       if(videoSettingsBtn)videoSettingsBtn.classList.add('hidden');
       Object.keys(state.videoPollIntervals).forEach(id=>stopVideoPoll(parseInt(id)));
       loadImages(false);
+    }
+  }
+
+  function toggleAssetView(show){
+    state.assetViewActive=show;
+    const assetView=$('#assetView');
+    const imageGrid=$('#imageGrid');
+    const statsView=$('#statsView');
+    const sidebar=$('#sidebar');
+    const assetBtn=$('#assetViewBtn');
+    document.body.classList.toggle('asset-view-active', show);
+    if(show){
+      assetView.classList.remove('hidden');
+      imageGrid.classList.add('hidden');
+      if(statsView)statsView.classList.add('hidden');
+      if(sidebar)sidebar.classList.add('hidden');
+      const emptyState=$('#emptyState');
+      if(emptyState)emptyState.classList.add('hidden');
+      const scrollSentinel=$('#scrollSentinel');
+      if(scrollSentinel)scrollSentinel.classList.add('hidden');
+      const batchBar=$('#batchBar');
+      if(batchBar)batchBar.classList.add('hidden');
+      const videoView=$('#videoView');
+      if(videoView)videoView.classList.add('hidden');
+      if(assetBtn){assetBtn.classList.add('btn-accent');assetBtn.classList.remove('btn-secondary');}
+      loadAssets();
+    }else{
+      assetView.classList.add('hidden');
+      imageGrid.classList.remove('hidden');
+      if(sidebar)sidebar.classList.remove('hidden');
+      const scrollSentinel=$('#scrollSentinel');
+      if(scrollSentinel)scrollSentinel.classList.remove('hidden');
+      if(assetBtn){assetBtn.classList.remove('btn-accent');assetBtn.classList.add('btn-secondary');}
+    }
+  }
+
+  async function loadAssets(){
+    const grid=$('#assetGrid');
+    const empty=$('#assetEmptyState');
+    grid.innerHTML='<div class="loading-spinner"></div>';
+    try{
+      const resp=await api('/api/assets');
+      if(!resp||!resp.ok){grid.innerHTML='';empty.classList.remove('hidden');return;}
+      const data=await resp.json();
+      const assets=data.assets||[];
+      if(assets.length===0){
+        grid.innerHTML='';
+        empty.classList.remove('hidden');
+        return;
+      }
+      empty.classList.add('hidden');
+      grid.innerHTML=assets.map(a=>{
+        const thumbUrl=a.thumbnail_url||'/api/asset-file/'+a.asset_id+'/thumbnail';
+        return `<div class="asset-card" data-id="${esc(a.asset_id)}">
+          <div class="asset-card-img-wrap">
+            <img class="asset-card-img" src="${esc(thumbUrl)}" alt="${esc(a.short_tag||'素材')}"
+                 loading="lazy" data-original="/api/asset-file/${esc(a.asset_id)}">
+          </div>
+          <div class="asset-card-body">
+            <div class="asset-card-short-tag">${esc(a.short_tag||'素材')}</div>
+            <div class="asset-card-desc">${esc((a.description||'').slice(0,80))}</div>
+            <div class="asset-card-actions">
+              <button class="btn btn-ghost btn-sm asset-edit-btn" data-id="${esc(a.asset_id)}">编辑</button>
+              <button class="btn btn-danger btn-sm asset-delete-btn" data-id="${esc(a.asset_id)}">删除</button>
+            </div>
+          </div>
+        </div>`;
+      }).join('');
+      // 绑定编辑/删除事件
+      grid.querySelectorAll('.asset-edit-btn').forEach(btn=>{
+        btn.addEventListener('click',()=>openAssetEdit(btn.dataset.id));
+      });
+      grid.querySelectorAll('.asset-delete-btn').forEach(btn=>{
+        btn.addEventListener('click',async()=>{
+          if(!confirm('确定删除该素材？'))return;
+          const resp=await api('/api/assets/'+btn.dataset.id,{method:'DELETE'});
+          if(resp&&resp.ok){toast('已删除','success');loadAssets();}
+          else{toast('删除失败','error');}
+        });
+      });
+      // 点击图片放大
+      grid.querySelectorAll('.asset-card-img').forEach(img=>{
+        img.addEventListener('click',function(){
+          const orig=this.dataset.original;
+          const lightbox=$('#lightbox');
+          const lightboxImg=$('#lightboxImage');
+          lightboxImg.src=orig;
+          lightbox.classList.remove('hidden');
+        });
+      });
+      // 懒加载原图
+      _initOriginalObserver();
+      grid.querySelectorAll('img[data-original]').forEach(img=>{
+        _originalObserver.observe(img);
+      });
+    }catch(e){
+      console.error('loadAssets error:',e);
+      grid.innerHTML='';
+      empty.classList.remove('hidden');
+    }
+  }
+
+  function openAssetEdit(assetId){
+    const modal=$('#assetUploadModal');
+    const title=modal.querySelector('h2');
+    const submitBtn=$('#assetUploadSubmit');
+    const note=$('#assetUploadNote');
+    const zone=$('#assetUploadZone');
+    const preview=$('#assetUploadPreview');
+    const previewImg=$('#assetPreviewImg');
+    const status=$('#assetUploadStatus');
+    const fileInput=$('#assetUploadFile');
+    // 重置为编辑模式
+    title.textContent='编辑素材';
+    submitBtn.textContent='保存修改';
+    zone.classList.remove('hidden');
+    preview.classList.add('hidden');
+    status.textContent='';
+    fileInput.value='';
+    note.value='';
+    // 加载现有数据
+    api('/api/assets').then(async resp=>{
+      if(!resp||!resp.ok)return;
+      const data=await resp.json();
+      const asset=(data.assets||[]).find(a=>a.asset_id===assetId);
+      if(!asset){toast('素材不存在','error');return;}
+      note.value=asset.user_note||'';
+      previewImg.src='/api/asset-file/'+assetId;
+      preview.classList.remove('hidden');
+      zone.classList.add('hidden');
+      submitBtn.disabled=false;
+      modal.classList.remove('hidden');
+      // 保存时带 asset_id
+      submitBtn._editingAssetId=assetId;
+    });
+  }
+
+  function setupAssetUpload(){
+    const zone=$('#assetUploadZone');
+    const fileInput=$('#assetUploadFile');
+    const preview=$('#assetUploadPreview');
+    const previewImg=$('#assetPreviewImg');
+    const submitBtn=$('#assetUploadSubmit');
+    const status=$('#assetUploadStatus');
+    const note=$('#assetUploadNote');
+    const modal=$('#assetUploadModal');
+    const closeBtn=$('#assetUploadModalClose');
+    let selectedFile=null;
+
+    zone.addEventListener('click',()=>fileInput.click());
+    zone.addEventListener('dragover',e=>{e.preventDefault();zone.classList.add('dragover');});
+    zone.addEventListener('dragleave',()=>zone.classList.remove('dragover'));
+    zone.addEventListener('drop',e=>{
+      e.preventDefault();zone.classList.remove('dragover');
+      const files=[...e.dataTransfer.files].filter(f=>f.type.startsWith('image/'));
+      if(files.length)selectFile(files[0]);
+    });
+    fileInput.addEventListener('change',()=>{
+      if(fileInput.files.length)selectFile(fileInput.files[0]);
+    });
+    closeBtn.addEventListener('click',closeAssetModal);
+    modal.addEventListener('click',e=>{if(e.target===e.currentTarget)closeAssetModal();});
+
+    function selectFile(file){
+      selectedFile=file;
+      previewImg.src=URL.createObjectURL(file);
+      preview.classList.remove('hidden');
+      zone.classList.add('hidden');
+      submitBtn.disabled=false;
+    }
+
+    submitBtn.addEventListener('click',async()=>{
+      submitBtn.disabled=true;
+      status.textContent='上传中...';
+      const editingId=submitBtn._editingAssetId;
+      if(editingId){
+        // 编辑模式：只更新文字
+        const resp=await api('/api/assets/'+editingId,{
+          method:'PUT',
+          json:{user_note:note.value}
+        });
+        if(resp&&resp.ok){
+          toast('已更新','success');
+          closeAssetModal();
+          loadAssets();
+        }else{
+          toast('更新失败','error');
+          status.textContent='更新失败';
+          submitBtn.disabled=false;
+        }
+        return;
+      }
+      // 上传模式
+      if(!selectedFile){status.textContent='请先选择图片';submitBtn.disabled=false;return;}
+      const fd=new FormData();
+      fd.append('image',selectedFile);
+      fd.append('user_note',note.value);
+      try{
+        const resp=await api('/api/assets',{method:'POST',body:fd});
+        if(!resp){toast('上传失败','error');status.textContent='请求失败';submitBtn.disabled=false;return;}
+        if(resp.error){toast(resp.error,'error');status.textContent=resp.error;submitBtn.disabled=false;return;}
+        const data=await resp.json();
+        if(data.success){
+          toast('素材已保存','success');
+          closeAssetModal();
+          loadAssets();
+        }else{
+          toast('保存失败','error');
+          status.textContent=data.error||'保存失败';
+          submitBtn.disabled=false;
+        }
+      }catch(e){
+        toast('网络错误','error');
+        status.textContent='网络错误';
+        submitBtn.disabled=false;
+      }
+    });
+
+    function closeAssetModal(){
+      modal.classList.add('hidden');
+      selectedFile=null;
+      zone.classList.remove('hidden');
+      preview.classList.add('hidden');
+      fileInput.value='';
+      note.value='';
+      submitBtn.disabled=true;
+      submitBtn.textContent='保存素材';
+      submitBtn._editingAssetId=null;
+      status.textContent='';
+      const title=modal.querySelector('h2');
+      title.textContent='上传部位素材';
     }
   }
 

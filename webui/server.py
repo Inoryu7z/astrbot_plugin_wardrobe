@@ -908,6 +908,102 @@ class WardrobeWebServer:
                 logger.error("[Wardrobe] WebUI上传异常: %s", e, exc_info=True)
                 return jsonify({"error": f"服务器内部错误: {e}"}), 500
 
+        # ============ 素材库（部位素材 assets）============
+
+        @app.route("/api/assets", methods=["GET"])
+        async def api_assets_list():
+            try:
+                await self.plugin._ensure_db()
+                records = await self.plugin.db.list_assets()
+                result = []
+                for r in records:
+                    item = {
+                        "asset_id": r["id"],
+                        "short_tag": r.get("short_tag", "") or "",
+                        "description": r.get("description", "") or "",
+                        "user_note": r.get("user_note", "") or "",
+                        "created_at": r.get("created_at", "") or "",
+                    }
+                    thumb = self.plugin.store.get_thumbnail_path(r.get("image_path", ""))
+                    item["thumbnail_url"] = f"/api/asset-file/{r['id']}/thumbnail" if thumb.exists() else ""
+                    result.append(item)
+                return jsonify({"success": True, "assets": result})
+            except Exception as e:
+                logger.error("[Wardrobe] 素材列表异常: %s", e, exc_info=True)
+                return jsonify({"error": f"服务器内部错误: {e}"}), 500
+
+        @app.route("/api/assets", methods=["POST"])
+        async def api_asset_upload():
+            try:
+                await self.plugin._ensure_db()
+                files = await request.files
+                file = files.get("image")
+                if not file:
+                    return jsonify({"error": "未选择图片"}), 400
+                image_bytes = file.read()
+                if not image_bytes:
+                    return jsonify({"error": "图片为空"}), 400
+                form = await request.form
+                user_note = form.get("user_note", "")
+                result = await self.plugin.save_asset(image_bytes, user_note=user_note)
+                if result.get("error"):
+                    return jsonify({"error": result["error"]}), 400
+                return jsonify({"success": True, **result})
+            except Exception as e:
+                logger.error("[Wardrobe] 素材上传异常: %s", e, exc_info=True)
+                return jsonify({"error": f"服务器内部错误: {e}"}), 500
+
+        @app.route("/api/assets/<asset_id>", methods=["DELETE"])
+        async def api_asset_delete(asset_id):
+            try:
+                ok = await self.plugin.delete_asset(asset_id)
+                if not ok:
+                    return jsonify({"error": "素材不存在"}), 404
+                return jsonify({"success": True})
+            except Exception as e:
+                logger.error("[Wardrobe] 素材删除异常: %s", e, exc_info=True)
+                return jsonify({"error": f"服务器内部错误: {e}"}), 500
+
+        @app.route("/api/assets/<asset_id>", methods=["PUT"])
+        async def api_asset_update(asset_id):
+            try:
+                data = await request.get_json(silent=True) or {}
+                short_tag = (data.get("short_tag") or "").strip()
+                description = (data.get("description") or "").strip()
+                user_note = (data.get("user_note") or "").strip()
+                ok = await self.plugin.db.update_asset(
+                    asset_id,
+                    short_tag=short_tag,
+                    description=description,
+                    user_note=user_note,
+                )
+                if not ok:
+                    return jsonify({"error": "素材不存在"}), 404
+                return jsonify({"success": True})
+            except Exception as e:
+                logger.error("[Wardrobe] 素材更新异常: %s", e, exc_info=True)
+                return jsonify({"error": f"服务器内部错误: {e}"}), 500
+
+        @app.route("/api/asset-file/<asset_id>")
+        async def api_asset_file(asset_id):
+            rec = await self.plugin.db.get_asset(asset_id)
+            if not rec:
+                return jsonify({"error": "素材不存在"}), 404
+            path = self.plugin.store.get_image_path(rec.get("image_path", ""))
+            if not path.exists():
+                return jsonify({"error": "文件不存在"}), 404
+            return await send_file(str(path), mimetype="image/jpeg")
+
+        @app.route("/api/asset-file/<asset_id>/thumbnail")
+        async def api_asset_file_thumbnail(asset_id):
+            rec = await self.plugin.db.get_asset(asset_id)
+            if not rec:
+                return jsonify({"error": "素材不存在"}), 404
+            thumb = self.plugin.store.get_thumbnail_path(rec.get("image_path", ""))
+            if not thumb.exists():
+                return jsonify({"error": "缩略图不存在"}), 404
+            return await send_file(str(thumb), mimetype="image/jpeg")
+
         @app.route("/api/images/<image_id>/toggle-style", methods=["POST"])
         async def api_images_toggle_style(image_id):
             await self.plugin._ensure_db()
