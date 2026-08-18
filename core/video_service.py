@@ -791,7 +791,11 @@ class VideoService:
     @staticmethod
     def _is_upload_terminated(error: Exception) -> bool:
         error_str = str(error).lower()
-        return "retcode=1200" in error_str and "terminated" in error_str
+        if "retcode=1200" not in error_str:
+            return False
+        # NapCat 在上传/发送超时时返回 retcode=1200，wording 可能是 terminated
+        # 也可能是 Timeout，此时消息往往已经发出，只是没等到回执
+        return "terminated" in error_str or "timeout" in error_str
 
     async def _send_video_to_conversation(self, umo: str, video_path: Path, video_id: str = "", video_url: str = ""):
         from astrbot.api.message_components import Video as VideoComp
@@ -845,6 +849,12 @@ class VideoService:
                 _TERMINATED_GRACE_PERIOD, video_id,
             )
             await asyncio.sleep(_TERMINATED_GRACE_PERIOD)
+            # 上传可能仍在后台进行，停止后续 URL/base64/纯文本兜底，避免重复发送
+            return VideoSendResult(
+                success=False,
+                terminated=True,
+                message="视频发送超时，但可能已在后台发送，请稍后检查聊天记录",
+            )
 
         if not success and video_url:
             logger.debug(
@@ -867,6 +877,12 @@ class VideoService:
                     logger.warning(
                         "[VideoService] URL 发送也被终止（上传可能仍在后台进行）video_id=%s",
                         video_id,
+                    )
+                    # URL 发送超时，可能仍在后台进行，停止后续兜底避免重复发送
+                    return VideoSendResult(
+                        success=False,
+                        terminated=True,
+                        message="URL 发送超时，但可能已在后台发送，请稍后检查聊天记录",
                     )
                 else:
                     logger.warning("[VideoService] URL 发送失败 video_id=%s error=%s", video_id, e_url)
