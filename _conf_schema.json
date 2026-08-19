@@ -135,6 +135,30 @@
     "type": "bool",
     "default": false
   },
+  "daily_selfie_fair_mode": {
+    "description": "补拍取图公平轮换",
+    "hint": "开启后，补拍选参考图时优先选择热度低/未用过的图片，并保证冷图有机会进候选池；关闭则保持原有的衰减过滤逻辑。仅影响补拍取图，不影响手动取图。",
+    "type": "bool",
+    "default": true
+  },
+  "daily_selfie_recall_k": {
+    "description": "补拍候选召回数量",
+    "hint": "补拍取图时从衣橱召回的候选图片数量。比普通取图更大，让更多相关但低热度/未用过的图片进入候选池，供公平轮换。",
+    "type": "int",
+    "default": 40
+  },
+  "daily_selfie_cold_slack": {
+    "description": "补拍冷梯队容差",
+    "hint": "补拍选参考图时，只保留候选池中热度最低的一档，允许再往上放宽的热度点数。0=只保留池内最低热度那一档；调大可给取图模型更多选择空间，但会让高热度图更早回归。",
+    "type": "int",
+    "default": 1
+  },
+  "daily_selfie_cold_seats": {
+    "description": "补拍冷图配额席位",
+    "hint": "补拍时保证有一定数量的低热度/未用图片进入候选池，即使它们相似度很低。设为0表示关闭该机制。建议保持较小的值(如1-5)，避免拉入过多不相关图片。",
+    "type": "int",
+    "default": 3
+  },
   "search_include_user_tags": {
     "description": "取图结果包含用户标注",
     "hint": "开启后，取图返回给聊天模型的描述中会额外包含用户保存时添加的标注信息",

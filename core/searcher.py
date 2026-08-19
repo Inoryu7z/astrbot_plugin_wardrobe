@@ -97,6 +97,21 @@ SEARCH_SELECT_SYSTEM_PROMPT = """# 角色
 4. 只输出 JSON，不要输出解释"""
 
 
+# 喜爱程度对"有效热度"的折扣系数：同一热度下优先选喜爱的图。
+# 特别喜爱(favorite)=实际*0.6（-40%），普通喜爱(like)=实际*0.8（-20%）。
+_LIKE_HEAT_FACTOR = 0.8
+_FAVORITE_HEAT_FACTOR = 0.6
+
+
+def _heat_factor(favorite: str) -> float:
+    """按喜爱程度返回有效热度系数。"""
+    if favorite == "favorite":
+        return _FAVORITE_HEAT_FACTOR
+    if favorite == "like":
+        return _LIKE_HEAT_FACTOR
+    return 1.0
+
+
 class ImageSearcher:
     def __init__(self, context, db: WardrobeDatabase, store: ImageStore, vector_searcher=None):
         self.context = context
@@ -106,6 +121,61 @@ class ImageSearcher:
         self._pools_text_cache = None
         self._pools_text_ts = 0
         self._pools_text_persona = ""
+
+    def _cfg_value(self, key: str, default):
+        """读取 wardrobe 插件配置，失败或不可用时回退默认值。"""
+        try:
+            plugin = getattr(self.context, "_wardrobe_plugin", None)
+            if plugin is not None:
+                return plugin._cfg(key, default)
+        except Exception:
+            pass
+        return default
+
+    async def _merge_cold_seats(
+        self,
+        user_query: str,
+        candidates: list[dict[str, Any]],
+        current_persona: str,
+        seats: int,
+    ) -> list[dict[str, Any]]:
+        """A1 冷图配额席位：用 query 取一段"不过滤相似度"的最近邻，
+        从中挑热度最低的 seats 张并入候选池，让再冷门/相似度再低的图也有机会被冷梯队捞到。"""
+        try:
+            if seats <= 0:
+                return candidates
+            existing_ids = {c["id"] for c in candidates}
+            # min_similarity=0.0 = 不过滤相似度（与 cosplay 语义一致），只按距离取最近，再挑最冷
+            seed = await self._vector_search(user_query, k=seats * 2, persona="", min_similarity=0.0)
+            if not seed:
+                return candidates
+            extra = [c for c in seed if c["id"] not in existing_ids]
+            if not extra:
+                return candidates
+            # 注入按人格热度，取最冷的 seats 张
+            if current_persona and current_persona.strip():
+                counts = await self.db.get_use_counts_by_persona(
+                    [c["id"] for c in extra], current_persona.strip()
+                )
+                for c in extra:
+                    c["use_count"] = counts.get(c["id"], 0)
+            else:
+                for c in extra:
+                    c["use_count"] = 0
+            extra.sort(
+                key=lambda c_: (
+                    int(c_.get("use_count", 0) or 0)
+                    + int(c_.get("daily_selfie_use_count", 0) or 0)
+                )
+            )
+            extra = extra[:seats]
+            logger.debug(
+                "[Wardrobe] 冷图配额席位合并 +%d 张 (query=%s)", len(extra), user_query[:50]
+            )
+            return candidates + extra
+        except Exception as exc:
+            logger.warning("[Wardrobe] 冷图配额合并失败: %s", exc)
+            return candidates
 
     async def _get_pools_text(self, persona: str = "") -> str:
         persona_key = (persona or "").strip()
@@ -174,6 +244,13 @@ class ImageSearcher:
         daily_selfie_mode: bool = False,
     ) -> tuple[list[dict[str, Any]], dict[str, Any]]:
         meta = {"persona_mismatch": False, "searched_persona": persona, "persona_scope": "global"}
+
+        # 补拍召回扩池：拉大候选数量（配置驱动），让更多相关但低热度/未用图进入候选池。
+        # 这里只放宽候选数量，不改相似度阈值，避免硬编码。
+        if daily_selfie_mode:
+            _recall_k = self._cfg_value("daily_selfie_recall_k", 40)
+            if _recall_k and _recall_k > candidate_limit:
+                candidate_limit = int(_recall_k)
 
         if self.vector_searcher and self.vector_searcher.available and exclude_current_persona and current_persona:
             if persona_mode == "no_persona_only":
@@ -281,38 +358,80 @@ class ImageSearcher:
         if prioritize_unused:
             def _effective_use_count(r):
                 base = r.get("use_count", 0) or 0
-                fav = r.get("favorite", "none")
-                if fav == "favorite":
-                    base -= 3
-                elif fav == "like":
-                    base -= 1
-                return base
+                # 喜爱折扣：特别喜爱 -40%，普通喜爱 -20%
+                return int(base * _heat_factor(r.get("favorite", "none")))
             candidates.sort(key=_effective_use_count)
 
         if daily_selfie_mode:
-            _DECAY_FACTOR = 0.6
-            _EXCLUDE_THRESHOLD = 0.05
-            before_count = len(candidates)
-            filtered = []
-            for c in candidates:
-                dsuc = int(c.get("daily_selfie_use_count", 0) or 0)
-                if dsuc <= 0:
-                    filtered.append(c)
-                    continue
-                weight = _DECAY_FACTOR ** dsuc
-                if weight >= _EXCLUDE_THRESHOLD:
-                    filtered.append(c)
-            candidates = filtered
-            logger.debug(
-                "[Wardrobe] 补拍衰减过滤: %d -> %d (排除%d张, factor=%.1f, threshold=%.2f)",
-                before_count, len(candidates), before_count - len(candidates),
-                _DECAY_FACTOR, _EXCLUDE_THRESHOLD,
-            )
-            if not candidates:
-                logger.debug("[Wardrobe] 补拍衰减过滤后无候选图片")
-                return [], meta
+            if not self._cfg_value("daily_selfie_fair_mode", True):
+                # 关闭公平轮换时，保留原有按 daily_selfie_use_count 衰减过滤的逻辑
+                _DECAY_FACTOR = 0.6
+                _EXCLUDE_THRESHOLD = 0.05
+                before_count = len(candidates)
+                filtered = []
+                for c in candidates:
+                    dsuc = int(c.get("daily_selfie_use_count", 0) or 0)
+                    if dsuc <= 0:
+                        filtered.append(c)
+                        continue
+                    weight = _DECAY_FACTOR ** dsuc
+                    if weight >= _EXCLUDE_THRESHOLD:
+                        filtered.append(c)
+                candidates = filtered
+                logger.debug(
+                    "[Wardrobe] 补拍衰减过滤: %d -> %d (排除%d张, factor=%.1f, threshold=%.2f)",
+                    before_count, len(candidates), before_count - len(candidates),
+                    _DECAY_FACTOR, _EXCLUDE_THRESHOLD,
+                )
+                if not candidates:
+                    logger.debug("[Wardrobe] 补拍衰减过滤后无候选图片")
+                    return [], meta
+            else:
+                # 先并入冷图配额席位，保证极冷门/低相似度图也有机会进池
+                _seats = int(self._cfg_value("daily_selfie_cold_seats", 3) or 0)
+                if _seats > 0 and candidates:
+                    candidates = await self._merge_cold_seats(
+                        user_query, candidates, current_persona, _seats
+                    )
+                # 补拍公平轮换：只保留"相对池内最低热度±slack"的冷梯队，
+                # 并 round-robin 排序，保证低热度/未用图优先被取图模型看到。
+                # 热度 = person 使用数 + 每日补拍累计使用数，并按喜爱程度打折。
+                _slack = int(self._cfg_value("daily_selfie_cold_slack", 1) or 0)
+                before_count = len(candidates)
+                min_heat = 0
+                if candidates:
+                    def _heat(c_):
+                        raw = int(c_.get("use_count", 0) or 0) + int(c_.get("daily_selfie_use_count", 0) or 0)
+                        return int(raw * _heat_factor(c_.get("favorite", "none")))
+                    he = [_heat(c) for c in candidates]
+                    min_heat = min(he)
+                    kept = [c for c in candidates if _heat(c) <= min_heat + _slack]
+                    candidates = kept
+                    # round-robin：热度升序 → 最近使用升序 → 相似度降序
+                    candidates.sort(
+                        key=lambda c_: (
+                            _heat(c_),
+                            c_.get("last_used_at", "") or "",
+                            -float(c_.get("_similarity", 0) or 0),
+                        )
+                    )
+                logger.debug(
+                    "[Wardrobe] 补拍冷梯队: %d -> %d (min_heat=%d slack=%d)",
+                    before_count, len(candidates), min_heat, _slack,
+                )
+                if not candidates:
+                    logger.debug("[Wardrobe] 补拍冷梯队后无候选图片")
+                    return [], meta
 
-        if len(candidates) <= max_select:
+        if daily_selfie_mode and self._cfg_value("daily_selfie_fair_mode", True):
+            # 补拍公平模式：不走 LLM 取图，直接取冷梯队排序后的前 max_select 张（deterministic）。
+            # 排序已保证 低热度 → 久未用 → 更贴 优先，向量召回排序即足以定夺，省一次 LLM 调用。
+            selected = candidates[:max_select]
+            logger.debug(
+                "[Wardrobe] 补拍公平模式，直接取冷梯队排序结果 %d/%d 张",
+                len(selected), len(candidates),
+            )
+        elif len(candidates) <= max_select:
             selected = candidates
         else:
             selected = await self._select_from_candidates(
