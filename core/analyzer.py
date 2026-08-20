@@ -18,7 +18,7 @@ ANALYZE_SYSTEM_PROMPT = """# 角色
 你是专业的图片分析助手，负责对图片进行详细的属性标注。
 
 # 任务
-分析给定的图片，提取以下属性信息。预定义值池仅供参考和优先选用，如果池中没有更合适的值，允许自行填写更准确的描述。尤其表情和姿势变化丰富，不要被池子限制。
+分析给定的图片，提取以下属性信息。预定义值池仅供参考和优先选用，如果池中没有更合适的值，允许自行填写更准确的描述；表情和姿势变化丰富，池外更准确的描述可直接填写。
 
 # 预定义值池
 {pools_text}
@@ -27,7 +27,7 @@ ANALYZE_SYSTEM_PROMPT = """# 角色
 输出 JSON 对象，字段如下：
 
 ```json
-{{
+{
   "category": "人物 或 衣服",
   "style": ["优先从风格池选择，也可自行填写，可多选"],
   "clothing_type": "优先从服装类型池选择，也可自行填写。多个服装类型用顿号分隔，如：跳裙（JSK）、连裤袜、高跟鞋",
@@ -52,15 +52,15 @@ ANALYZE_SYSTEM_PROMPT = """# 角色
   "description": "按规则3详细描述",
   "ref_strength": "style / full / reimagine（仅人物分类需要，衣服分类填 style）",
   "ref_strength_reason": "用2-3句话描述人物的姿势状态与构图，说明评级依据。要像在给朋友描述这张图的姿势一样自然具体，说出身体在做什么、曲线如何、构图有什么设计。禁止使用抽象评价（如'视觉表现力较强''具有参考模仿价值''氛围感'），用具体描述代替（仅人物分类需要，衣服分类填空字符串）"
-}}
+}
 ```
 
 # 规则
 1. category 判断：如果图片中有人物（脸部、身体），则填"人物"；否则填"衣服"
 2. 如果 category 是"衣服"，则 pose_type、body_orientation、dynamic_level、action_style、shot_size、camera_angle、expression 填空字符串或空数组
-3. description 用一段式客观描述图片，以人物为绝对重点，按从头到脚顺序详细描述。描述需覆盖以下颗粒度：发型与发色、头饰结构与材质、面部可见部分与妆容、服装款式与颜色（精确到具体色调）、面料质感（厚度、透明度、光泽、纹理）、装饰细节（图案、花纹、配饰位置）、肢体姿势与手指脚趾状态、所持物品的具体结构与外观。保留合理的风格定性，去除纯文学比喻。环境、背景、光线等次要元素简化但不省略，省略文字水印等无关信息，需明确空间方位和前后层次关系。整体信息密度要高，所有可见元素均需覆盖，闭上眼睛能完整还原画面
+3. description 用一段式客观描述图片，以人物为绝对重点，按从头到脚顺序详细描述。描述需覆盖以下颗粒度：发型与发色、头饰结构与材质、面部可见部分与妆容、服装款式与颜色（精确到具体色调）、面料质感（厚度、透明度、光泽、纹理）、装饰细节（图案、花纹、配饰位置）、肢体姿势与手指脚趾状态、所持物品的具体结构与外观。只写画面中实际可见的内容（不写就是没有）；风格或氛围定性须以具体可见的细节为支撑，如光线、色调，无可见支撑则不写。去除纯文学比喻。环境、背景、光线等次要元素简化但不省略，省略文字水印等无关信息，需明确空间方位和前后层次关系。整体信息密度要高，所有可见元素均需覆盖，闭上眼睛能完整还原画面
 
-   # description 示例（同一张图）
+   ### description 示例（同一张图）
    ❌ 失败（太笼统，缺少颗粒度，无法还原画面）：
    图中是一位扮演草系精灵的少女，留着浅金色的超粗三股麻花长辫，头戴由白色大朵鲜花和绿叶组成的花环头饰，她坐在黑色电竞椅上，双腿蜷曲抬起，一只脚踩在电竞椅的可伸缩脚踏上，另一只脚被花藤缠绕抬起。她的右手举着背面印有心形图案的粉色智能手机，遮挡住大半张脸，仅露出一只眼睛看向镜头，左手牵拉着一支装饰着白色小玫瑰和绿叶的藤蔓道具。她穿着浅绿色带白色蕾丝花边的挂脖精灵服饰，手臂套着带蕾丝荷叶边的透明白色袖套，腿和脚都缠绕着印绿色枝叶、点缀白色花朵的薄网纱配饰，手臂可见纹身图案。整体呈现出清新梦幻的居家自拍氛围。
 
@@ -161,6 +161,20 @@ class ImageAnalyzer:
             lines.append("")
         return "\n".join(lines)
 
+    def _resolve_analyze_system_prompt(self, pools_text: str) -> str:
+        """解析存图分析 system prompt。
+
+        优先使用用户配置的「存图分析提示词」（save_system_prompt），留空时回退内置模板。
+        占位符 {pools_text} 用 str.replace 替换（不用 str.format），避免用户模板中
+        出现未转义的 { } 导致渲染异常。
+        """
+        template = ANALYZE_SYSTEM_PROMPT
+        if self.plugin:
+            cfg_prompt = str(self.plugin._cfg("save_system_prompt", "") or "").strip()
+            if cfg_prompt:
+                template = cfg_prompt
+        return template.replace("{pools_text}", pools_text or "")
+
     async def analyze_image(
         self,
         image_bytes: bytes,
@@ -172,7 +186,7 @@ class ImageAnalyzer:
         persona: str = "",
     ) -> Optional[dict[str, Any]]:
         pools_text = await self._build_pools_text(persona=persona)
-        system_prompt = ANALYZE_SYSTEM_PROMPT.format(pools_text=pools_text)
+        system_prompt = self._resolve_analyze_system_prompt(pools_text)
 
         mime = detect_image_mime(image_bytes)
         ext = mime_to_ext(mime)
