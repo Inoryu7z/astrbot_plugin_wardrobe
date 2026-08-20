@@ -31,7 +31,7 @@ try:
 except ImportError:
     _VEC_AVAILABLE = False
 
-_MAX_IMAGE_SIZE_MB = 10
+_MAX_IMAGE_SIZE_MB = 20
 _MAX_DESCRIPTION_LEN = 2000
 # 仅监听 aiimg_generate 这一个统一入口工具。
 # aiimg_draw / aiimg_edit 内部最终都走 aiimg_generate，所以只需监听这一个即可覆盖所有 LLM 工具调用路径。
@@ -47,7 +47,7 @@ _MIGRATION_STATE_FILE = "migration_state.json"
     "astrbot_plugin_wardrobe",
     "Inoryu7z",
     "图片衣柜管理插件，支持智能分类、语义检索和参考图接口",
-    "3.0.4",
+    "3.0.5",
 )
 class WardrobePlugin(Star):
     def __init__(self, context: Context, config: AstrBotConfig = None):
@@ -1285,10 +1285,6 @@ class WardrobePlugin(Star):
             attrs.get("description", ""),
         )
 
-        feedback_enabled = bool(self._cfg("save_feedback_enabled", False))
-        if feedback_enabled:
-            return self._format_save_feedback(image_id, attrs)
-
         return f"图片已保存到衣柜库（ID: {image_id}）"
 
     async def _save_image_from_bytes(
@@ -1305,7 +1301,7 @@ class WardrobePlugin(Star):
         # 剥离 aiimg 自拍模式固定首尾，仅保留中间描述部分入库。
         ai_prompt = strip_ai_prompt_affixes(ai_prompt)
 
-        max_size = int(self._cfg("max_image_size_mb", _MAX_IMAGE_SIZE_MB) or _MAX_IMAGE_SIZE_MB)
+        max_size = _MAX_IMAGE_SIZE_MB
         if len(image_bytes) > max_size * 1024 * 1024:
             logger.warning("[Wardrobe] 图片过大 (%.1fMB)", len(image_bytes) / 1024 / 1024)
             return None, None, None
@@ -2033,7 +2029,7 @@ class WardrobePlugin(Star):
 
         parts = [f"已发送 {len(image_paths)} 张匹配的图片"]
 
-        include_user_tags = bool(self._cfg("search_include_user_tags", False))
+        include_user_tags = True
         for i, r in enumerate(results[:3], 1):
             desc = r.get("description", "")
             img_persona = r.get("persona", "")
@@ -2191,49 +2187,6 @@ class WardrobePlugin(Star):
             return canonical, aliases
         return entry.strip(), []
 
-    @staticmethod
-    def _format_save_feedback(image_id: str, attrs: dict) -> str:
-        lines = [f"图片已保存（ID: {image_id}）"]
-        lines.append(f"分类：{attrs.get('category', '未知')}")
-        style = attrs.get("style", [])
-        if style:
-            lines.append(f"风格：{', '.join(style)}")
-        clothing = attrs.get("clothing_type", "")
-        if clothing:
-            lines.append(f"服装类型：{clothing}")
-        exposure = attrs.get("exposure_level", "")
-        if exposure:
-            lines.append(f"暴露程度：{exposure}")
-        scene = attrs.get("scene", [])
-        if scene:
-            lines.append(f"场景：{', '.join(scene)}")
-        atmosphere = attrs.get("atmosphere", [])
-        if atmosphere:
-            lines.append(f"氛围：{', '.join(atmosphere)}")
-        desc = attrs.get("description", "")
-        if desc:
-            lines.append(f"描述：{desc}")
-
-        category = attrs.get("category", "")
-        if category == "人物":
-            pose = attrs.get("pose_type", "")
-            if pose:
-                lines.append(f"姿势：{pose}")
-            expr = attrs.get("expression", "")
-            if expr:
-                lines.append(f"表情：{expr}")
-            shot = attrs.get("shot_size", "")
-            if shot:
-                lines.append(f"景别：{shot}")
-            angle = attrs.get("camera_angle", "")
-            if angle:
-                lines.append(f"角度：{angle}")
-            ref_strength = attrs.get("ref_strength", "style")
-            ref_labels = {"full": "📸完整参考", "style": "🎨风格参考", "reimagine": "🔄重构"}
-            lines.append(f"参考强度：{ref_labels.get(ref_strength, ref_strength)}")
-
-        return "\n".join(lines)
-
     # ============ 素材库（部位素材 assets）============
 
     async def save_asset(self, image_bytes: bytes, user_note: str = "") -> dict:
@@ -2248,7 +2201,7 @@ class WardrobePlugin(Star):
         if len(user_note) > _MAX_DESCRIPTION_LEN:
             user_note = user_note[:_MAX_DESCRIPTION_LEN]
 
-        max_size = int(self._cfg("max_image_size_mb", _MAX_IMAGE_SIZE_MB) or _MAX_IMAGE_SIZE_MB)
+        max_size = _MAX_IMAGE_SIZE_MB
         if len(image_bytes) > max_size * 1024 * 1024:
             return {"error": f"图片过大，限制{max_size}MB"}
 
