@@ -15,6 +15,11 @@ try:
 except ImportError:
     _VEC_AVAILABLE = False
 
+# 补拍取图硬编码参数（原配置项已移除，固定取值）
+_DAILY_SELFIE_RECALL_K = 40    # 补拍候选召回数量
+_DAILY_SELFIE_COLD_SLACK = 1   # 补拍冷梯队容差
+_DAILY_SELFIE_COLD_SEATS = 3   # 补拍冷图配额席位
+
 
 SEARCH_PARSE_SYSTEM_PROMPT = """# 角色
 你是图片检索意图解析助手。根据用户的自然语言描述，生成结构化的查询条件。
@@ -245,10 +250,10 @@ class ImageSearcher:
     ) -> tuple[list[dict[str, Any]], dict[str, Any]]:
         meta = {"persona_mismatch": False, "searched_persona": persona, "persona_scope": "global"}
 
-        # 补拍召回扩池：拉大候选数量（配置驱动），让更多相关但低热度/未用图进入候选池。
-        # 这里只放宽候选数量，不改相似度阈值，避免硬编码。
+        # 补拍召回扩池：拉大候选数量，让更多相关但低热度/未用图进入候选池。
+        # 这里只放宽候选数量，不改相似度阈值。
         if daily_selfie_mode:
-            _recall_k = self._cfg_value("daily_selfie_recall_k", 40)
+            _recall_k = _DAILY_SELFIE_RECALL_K
             if _recall_k and _recall_k > candidate_limit:
                 candidate_limit = int(_recall_k)
 
@@ -388,7 +393,7 @@ class ImageSearcher:
                     return [], meta
             else:
                 # 先并入冷图配额席位，保证极冷门/低相似度图也有机会进池
-                _seats = int(self._cfg_value("daily_selfie_cold_seats", 3) or 0)
+                _seats = _DAILY_SELFIE_COLD_SEATS
                 if _seats > 0 and candidates:
                     candidates = await self._merge_cold_seats(
                         user_query, candidates, current_persona, _seats
@@ -396,7 +401,7 @@ class ImageSearcher:
                 # 补拍公平轮换：只保留"相对池内最低热度±slack"的冷梯队，
                 # 并 round-robin 排序，保证低热度/未用图优先被取图模型看到。
                 # 热度 = person 使用数 + 每日补拍累计使用数，并按喜爱程度打折。
-                _slack = int(self._cfg_value("daily_selfie_cold_slack", 1) or 0)
+                _slack = _DAILY_SELFIE_COLD_SLACK
                 before_count = len(candidates)
                 min_heat = 0
                 if candidates:

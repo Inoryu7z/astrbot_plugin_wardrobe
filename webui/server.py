@@ -882,7 +882,7 @@ class WardrobeWebServer:
                 persona = self.plugin._resolve_persona(persona)
                 description = form.get("description", "")
 
-                max_size = int(self.plugin._cfg("max_image_size_mb", 10) or 10)
+                max_size = 20  # 与 main.py _MAX_IMAGE_SIZE_MB 保持一致
                 if len(image_bytes) > max_size * 1024 * 1024:
                     return jsonify({"error": f"图片过大，限制{max_size}MB"}), 400
 
@@ -1506,11 +1506,7 @@ class WardrobeWebServer:
                 return jsonify({"error": "图片转视频功能未启用"}), 400
 
             prompt_provider_id = str(self.plugin._cfg("video_prompt_provider_id", "") or "").strip()
-            api_base = str(self.plugin._cfg("video_prompt_base_url", "") or "").strip()
-            api_key = str(self.plugin._cfg("video_prompt_api_key", "") or "").strip()
-            api_model = str(self.plugin._cfg("video_prompt_model", "") or "").strip()
-            has_prompt_config = bool(prompt_provider_id) or (api_base and api_key and api_model)
-            if not has_prompt_config:
+            if not prompt_provider_id:
                 return jsonify({"error": "未配置视频提示词生成模型，请在插件设置中配置"}), 400
 
             try:

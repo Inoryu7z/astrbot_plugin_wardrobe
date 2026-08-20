@@ -111,12 +111,6 @@
     "type": "float",
     "default": 30.0
   },
-  "save_feedback_enabled": {
-    "description": "存图反馈",
-    "hint": "开启后，存图时会向用户发送图片的描述和属性信息；关闭则静默保存",
-    "type": "bool",
-    "default": false
-  },
   "search_candidate_limit": {
     "description": "候选图片数量",
     "hint": "从数据库中取出的候选图片数量，供取图模型从中选择",
@@ -141,30 +135,6 @@
     "type": "bool",
     "default": true
   },
-  "daily_selfie_recall_k": {
-    "description": "补拍候选召回数量",
-    "hint": "补拍取图时从衣橱召回的候选图片数量。比普通取图更大，让更多相关但低热度/未用过的图片进入候选池，供公平轮换。",
-    "type": "int",
-    "default": 40
-  },
-  "daily_selfie_cold_slack": {
-    "description": "补拍冷梯队容差",
-    "hint": "补拍选参考图时，只保留候选池中热度最低的一档，允许再往上放宽的热度点数。0=只保留池内最低热度那一档；调大可给取图模型更多选择空间，但会让高热度图更早回归。",
-    "type": "int",
-    "default": 1
-  },
-  "daily_selfie_cold_seats": {
-    "description": "补拍冷图配额席位",
-    "hint": "补拍时保证有一定数量的低热度/未用图片进入候选池，即使它们相似度很低。设为0表示关闭该机制。建议保持较小的值(如1-5)，避免拉入过多不相关图片。",
-    "type": "int",
-    "default": 3
-  },
-  "search_include_user_tags": {
-    "description": "取图结果包含用户标注",
-    "hint": "开启后，取图返回给聊天模型的描述中会额外包含用户保存时添加的标注信息",
-    "type": "bool",
-    "default": false
-  },
   "search_persona_mode": {
     "description": "参考图人格搜索策略",
     "hint": "AiImg获取参考图时的人格过滤策略。no_persona_only：只搜无人格图，搜不到直接返回空；fallback_other：优先搜无人格图，搜不到再搜其他人格的图。Bot自己取图时不受此配置影响，始终优先搜当前人格的图。",
@@ -174,12 +144,6 @@
       "no_persona_only",
       "fallback_other"
     ]
-  },
-  "max_image_size_mb": {
-    "description": "图片大小限制(MB)",
-    "hint": "超过此大小的图片将被拒绝保存",
-    "type": "int",
-    "default": 10
   },
   "personas": {
     "description": "人格配置列表",
@@ -256,45 +220,9 @@
   },
   "video_prompt_provider_id": {
     "description": "视频提示词生成模型",
-    "hint": "回退方案：仅当下方直连 API 三项为空时生效。直连 API 优先，因为 Provider 传图可能不可靠",
+    "hint": "用于生成视频提示词的模型（需支持视觉能力）",
     "type": "string",
     "default": "",
     "_special": "select_provider"
-  },
-  "video_prompt_base_url": {
-    "description": "提示词模型 API 地址",
-    "hint": "直连 OpenAI 兼容 API 的 base_url，用于生成视频提示词。填写后绕过 AstrBot Provider，直接 HTTP 调用，确保图片正确传递。例如：https://api.openai.com/v1",
-    "type": "string",
-    "default": ""
-  },
-  "video_prompt_api_key": {
-    "description": "提示词模型 API Key",
-    "hint": "对应于 base_url 的 API Key",
-    "type": "string",
-    "default": ""
-  },
-  "video_prompt_model": {
-    "description": "提示词模型名",
-    "hint": "模型名称，例如：gpt-4o、grok-2-vision-1212、gemini-2.0-flash",
-    "type": "string",
-    "default": ""
-  },
-  "video_normal_default_backend": {
-    "description": "正常档默认视频后端",
-    "hint": "aiimg 中已配置的视频后端 provider ID，用户在 WebUI 未手动选择时使用",
-    "type": "string",
-    "default": ""
-  },
-  "video_light_spicy_default_backend": {
-    "description": "轻荤档默认视频后端",
-    "hint": "aiimg 中已配置的视频后端 provider ID",
-    "type": "string",
-    "default": ""
-  },
-  "video_heavy_spicy_default_backend": {
-    "description": "重荤档默认视频后端",
-    "hint": "aiimg 中已配置的视频后端 provider ID",
-    "type": "string",
-    "default": ""
   }
 }

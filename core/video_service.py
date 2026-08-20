@@ -157,7 +157,7 @@ class VideoService:
             async with aiofiles.open(image_path, "rb") as f:
                 image_bytes = await f.read()
 
-            provider_id = backend_override.strip() or self._get_tier_backend(tier)
+            provider_id = backend_override.strip()
             if not provider_id:
                 raise ValueError(f"未配置「{tier_label}」档的视频后端")
 
@@ -240,25 +240,13 @@ class VideoService:
         except Exception:
             pass
 
-        # 检查直连 API 配置
-        api_base = str(self.plugin._cfg("video_prompt_base_url", "") or "").strip()
-        api_key = str(self.plugin._cfg("video_prompt_api_key", "") or "").strip()
-        api_model = str(self.plugin._cfg("video_prompt_model", "") or "").strip()
-        use_direct_api = api_base and api_key and api_model
-
-        if use_direct_api:
-            logger.debug("[VideoService] 使用直连 API 生成提示词 model=%s image_size=%d", api_model, len(image_bytes))
-            raw_text = await self._call_direct_vision_api(
-                api_base, api_key, api_model, system_prompt, user_prompt,
-                image_bytes, mime
-            )
-        else:
-            logger.debug("[VideoService] 回退 AstrBot Provider 生成提示词 provider=%s image_size=%d",
-                        prompt_provider_id, len(image_bytes))
-            raw_text = await self._call_astrbot_llm_generate(
-                prompt_provider_id, system_prompt, user_prompt,
-                image_bytes, mime
-            )
+        # 提示词生成统一走 AstrBot Provider（原直连 API 配置项已移除）
+        logger.debug("[VideoService] 通过 AstrBot Provider 生成提示词 provider=%s image_size=%d",
+                     prompt_provider_id, len(image_bytes))
+        raw_text = await self._call_astrbot_llm_generate(
+            prompt_provider_id, system_prompt, user_prompt,
+            image_bytes, mime
+        )
 
         if not raw_text:
             raise ValueError("提示词生成模型返回了空结果")
@@ -280,65 +268,11 @@ class VideoService:
 
         return prompt_text
 
-    async def _call_direct_vision_api(
-        self, api_base: str, api_key: str, model: str,
-        system_prompt: str, user_prompt: str,
-        image_bytes: bytes, mime: str,
-    ) -> str:
-        """直接 HTTP 调用 OpenAI 兼容 Vision API，确保图片正确传递。"""
-        import time as _time
-        import httpx as _httpx
-
-        url = api_base.rstrip("/") + "/chat/completions"
-        b64 = _b64(image_bytes)
-        data_url = f"data:{mime};base64,{b64}"
-
-        payload = {
-            "model": model,
-            "messages": [
-                {"role": "system", "content": system_prompt},
-                {
-                    "role": "user",
-                    "content": [
-                        {"type": "text", "text": user_prompt},
-                        {"type": "image_url", "image_url": {"url": data_url}},
-                    ],
-                },
-            ],
-            "temperature": 0.8,
-        }
-
-        t0 = _time.perf_counter()
-        async with _httpx.AsyncClient(timeout=120.0) as client:
-            resp = await client.post(
-                url,
-                json=payload,
-                headers={
-                    "Authorization": f"Bearer {api_key}",
-                    "Content-Type": "application/json",
-                },
-            )
-            elapsed = _time.perf_counter() - t0
-            status = resp.status_code
-            logger.debug("[VideoService] 直连 API 完成 耗时=%.2fs status=%d", elapsed, status)
-
-            if status != 200:
-                raise ValueError(f"直连 API 返回 {status}: {resp.text[:500]}")
-
-            body = resp.json()
-            choices = body.get("choices", [])
-            if not choices:
-                raise ValueError("直连 API 无 choices 返回")
-
-            msg = choices[0].get("message", {})
-            text = msg.get("content", "") or ""
-            return text.strip()
-
     async def _call_astrbot_llm_generate(
         self, provider_id: str, system_prompt: str, user_prompt: str,
         image_bytes: bytes, mime: str,
     ) -> str:
-        """回退方案：通过 AstrBot Provider 调用多模态模型。"""
+        """通过 AstrBot Provider 调用多模态模型生成视频提示词。"""
         import tempfile
         import os as _os_module
         import time as _time
@@ -722,17 +656,6 @@ class VideoService:
                 if val and val.lower() not in ("none", "null", "", "nan"):
                     parts.append(f"{label}：{val}")
         return "\n".join(parts)
-
-    def _get_tier_backend(self, tier: str) -> str:
-        key_map = {
-            "normal": "video_normal_default_backend",
-            "light_spicy": "video_light_spicy_default_backend",
-            "heavy_spicy": "video_heavy_spicy_default_backend",
-        }
-        key = key_map.get(tier, "")
-        if not key:
-            return ""
-        return str(self.plugin._cfg(key, "") or "").strip()
 
     def _get_send_umo_path(self) -> Path:
         return self.plugin.data_dir / "video_send_umo.json"
