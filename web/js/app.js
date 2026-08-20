@@ -838,7 +838,7 @@
           else if(fav==='meh')hint=' (无感+0)';
           valWrap.innerHTML=`<span class="field-value-text">🔥${val!=null?val:0}${hint}</span>`;
         }else if(def.type==='textarea'){
-          // 长文本字段（描述/AI提示词/AI点评）用专门的长文本块渲染，保留换行、字号更大、超长内部滚动
+          // 长文本字段（描述/AI提示词/AI点评）用专门的长文本块渲染，保留换行、字号更大、内容完整展示
           valWrap.innerHTML=val?`<div class="field-text-block">${esc(String(val))}</div>`:'<span class="field-empty">-</span>';
         }else{
           valWrap.innerHTML=val?`<span class="field-value-text">${esc(String(val))}</span>`:'<span class="field-empty">-</span>';

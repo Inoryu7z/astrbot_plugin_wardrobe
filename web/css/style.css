@@ -1034,22 +1034,30 @@ html, body {
 }
 
 .field-value-text {
-  font-size:13px; color:var(--text);
+  font-size:14px; color:var(--text);
   line-height:1.5;
   word-break:break-all;
 }
 
-/* 长文本块：描述 / AI提示词 / AI点评 的详情展示，保留换行、字号更大、超长内部滚动 */
+/* 长文本块：描述 / AI提示词 / AI点评 的详情展示 —— 柔和笔记卡片：浅渐变底 + 左侧粉紫渐变装饰条 + 柔和投影 */
 .field-text-block {
+  position:relative;
   width:100%;
-  font-size:14px; line-height:1.7;
+  font-size:14px; line-height:1.75;
   color:var(--text);
   white-space:pre-wrap; word-break:break-word;
-  background:rgba(243,238,248,0.6);
+  background:linear-gradient(135deg, #FFFFFF 0%, #F7F0FC 100%);
   border:1px solid var(--border);
-  border-radius:10px;
-  padding:10px 12px;
-  max-height:280px; overflow-y:auto;
+  border-radius:14px;
+  padding:12px 14px 12px 18px;
+  box-shadow:var(--shadow-sm);
+}
+
+.field-text-block::before {
+  content:'';
+  position:absolute; left:8px; top:12px; bottom:12px;
+  width:3px; border-radius:2px;
+  background:linear-gradient(180deg, var(--pink), var(--lavender));
 }
 
 .field-empty {
