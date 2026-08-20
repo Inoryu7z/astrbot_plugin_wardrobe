@@ -47,7 +47,7 @@ _MIGRATION_STATE_FILE = "migration_state.json"
     "astrbot_plugin_wardrobe",
     "Inoryu7z",
     "图片衣柜管理插件，支持智能分类、语义检索和参考图接口",
-    "3.0.6",
+    "3.0.7",
 )
 class WardrobePlugin(Star):
     def __init__(self, context: Context, config: AstrBotConfig = None):
@@ -73,6 +73,8 @@ class WardrobePlugin(Star):
         self._webui: Optional[WardrobeWebServer] = None
         self._last_auto_saved: dict[str, str] = {}
         self._bg_tasks: set[asyncio.Task] = set()
+        # 评论队列惰性初始化：首次投递评论时才创建并启动消费协程，避免 __init__ 依赖事件循环
+        self._comment_queue: Optional[asyncio.Queue] = None
 
         self.context._wardrobe_plugin = self
 
@@ -525,6 +527,94 @@ class WardrobePlugin(Star):
         self._bg_tasks.add(task)
         task.add_done_callback(self._bg_tasks.discard)
         return task
+
+    # ============ 图片评论（ai_comment）============
+
+    def _resolve_comment_provider(self) -> str:
+        """解析评论模型：评论模型 → 存图主模型 → 存图备用模型。"""
+        for key in ("ai_comment_provider_id", "save_provider_id", "save_secondary_provider_id"):
+            p = str(self._cfg(key, "") or "").strip()
+            if p:
+                return p
+        return ""
+
+    def _enqueue_comment(self, image_id: str, delay: int | None = None):
+        """投递图片评论任务。延迟后进入串行队列，逐个生成避免模型压力。
+
+        仅在开启「图片评论」时生效。delay=None 读取配置 ai_comment_delay_seconds；
+        delay<=0 立即入队。队列与消费协程在首次投递时惰性创建。
+        """
+        if not self._cfg("ai_comment_enabled", False):
+            return
+        if self._comment_queue is None:
+            self._comment_queue = asyncio.Queue()
+            self._spawn_bg_task(self._comment_queue_loop())
+        if delay is None:
+            try:
+                delay = max(0, int(self._cfg("ai_comment_delay_seconds", 3600) or 3600))
+            except Exception:
+                delay = 3600
+        if delay <= 0:
+            self._comment_queue.put_nowait(image_id)
+        else:
+            self._spawn_bg_task(self._delayed_comment_enqueue(image_id, delay))
+
+    async def _delayed_comment_enqueue(self, image_id: str, delay: int):
+        try:
+            await asyncio.sleep(delay)
+            self._comment_queue.put_nowait(image_id)
+        except asyncio.CancelledError:
+            pass
+        except Exception:
+            pass
+
+    async def _comment_queue_loop(self):
+        """串行消费评论队列，避免并发调用模型。"""
+        while True:
+            image_id = await self._comment_queue.get()
+            try:
+                await self._generate_comment_for_image(image_id)
+            except Exception as e:
+                logger.warning("[Wardrobe] 评论队列处理异常 id=%s error=%s", image_id, e)
+            finally:
+                self._comment_queue.task_done()
+
+    async def _generate_comment_for_image(self, image_id: str) -> str:
+        """为图片生成点评并入库。成功返回点评文本，失败返回空字符串。"""
+        try:
+            await self._ensure_db()
+            image = await self.db.get_image(image_id)
+            if not image:
+                return ""
+            path = self.store.get_image_path(image.get("image_path", ""))
+            if not path.exists():
+                logger.warning("[Wardrobe] 评论图片文件不存在 id=%s", image_id)
+                return ""
+
+            provider = self._resolve_comment_provider()
+            if not provider:
+                logger.warning("[Wardrobe] 未配置评论模型，跳过评论 id=%s", image_id)
+                return ""
+
+            import aiofiles
+            async with aiofiles.open(path, "rb") as f:
+                image_bytes = await f.read()
+            if not image_bytes:
+                return ""
+
+            timeout = float(self._cfg("save_timeout_seconds", 60.0) or 60.0)
+            comment = await self.analyzer.generate_comment(
+                image_bytes, provider_id=provider, timeout_seconds=timeout
+            )
+            if not comment:
+                logger.warning("[Wardrobe] 评论生成返回空 id=%s", image_id)
+                return ""
+            await self.db.update_image(image_id, ai_comment=comment)
+            logger.info("[Wardrobe] 图片评论生成完成 id=%s len=%d", image_id, len(comment))
+            return comment
+        except Exception as e:
+            logger.warning("[Wardrobe] 图片评论生成异常 id=%s error=%s", image_id, e)
+            return ""
 
     async def _load_backup_state(self) -> dict:
         path = self.data_dir / "backups" / _BACKUP_STATE_FILE
@@ -1369,6 +1459,7 @@ class WardrobePlugin(Star):
             await self._index_to_vector(image_id, user_description or "模型分析失败，无描述", user_description,
                                          category="人物", persona=persona,
                                          style=[], clothing_type="")
+            self._enqueue_comment(image_id)
             return image_id, None, None
 
         category = attrs.get("category", "人物")
@@ -1423,6 +1514,7 @@ class WardrobePlugin(Star):
             category=category, persona=persona,
         )
 
+        self._enqueue_comment(image_id)
         return image_id, attrs, None
 
     async def _auto_save_aiimg_image(self, event: AstrMessageEvent, tool=None):

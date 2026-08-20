@@ -134,6 +134,11 @@ description 分为两段，用换行分隔：
 3. 只输出 JSON，不要输出解释或其他内容。"""
 
 
+COMMENT_SYSTEM_PROMPT = """你是住在衣橱里的猫娘，负责给主人的图片写可爱的点评。
+请用猫娘的口吻点评这张图片的画面细节（服装、姿势、表情、场景、氛围等），语气活泼可爱，2-3句话。
+只输出点评正文，不要解释。"""
+
+
 class ImageAnalyzer:
     def __init__(self, context, plugin=None):
         self.context = context
@@ -174,6 +179,75 @@ class ImageAnalyzer:
             if cfg_prompt:
                 template = cfg_prompt
         return template.replace("{pools_text}", pools_text or "")
+
+    async def generate_comment(
+        self,
+        image_bytes: bytes,
+        *,
+        provider_id: str = "",
+        timeout_seconds: float = 60.0,
+    ) -> str:
+        """为图片生成一条点评文本（猫娘口吻，点评画面细节）。
+
+        使用配置的「评论提示词」（ai_comment_prompt），留空回退内置猫娘模板。
+        provider_id 由调用方解析（评论模型 → 存图主模型 → 存图备用模型），
+        为空时不生成评论。返回点评正文，失败返回空字符串。
+        """
+        provider_id = (provider_id or "").strip()
+        if not provider_id:
+            return ""
+
+        system_prompt = COMMENT_SYSTEM_PROMPT
+        if self.plugin:
+            cfg_prompt = str(self.plugin._cfg("ai_comment_prompt", "") or "").strip()
+            if cfg_prompt:
+                system_prompt = cfg_prompt
+
+        mime = detect_image_mime(image_bytes)
+        ext = mime_to_ext(mime)
+
+        temp_path = ""
+        try:
+            temp_fd, temp_path = tempfile.mkstemp(suffix=f".{ext}")
+            try:
+                import os
+                os.write(temp_fd, image_bytes)
+            finally:
+                os.close(temp_fd)
+            resolved_path = str(Path(temp_path).resolve())
+
+            try:
+                llm_resp = await asyncio.wait_for(
+                    self.context.llm_generate(
+                        chat_provider_id=provider_id,
+                        prompt="请点评这张图片。",
+                        system_prompt=system_prompt,
+                        image_urls=[resolved_path],
+                    ),
+                    timeout=timeout_seconds,
+                )
+            except (TypeError, AttributeError) as e:
+                logger.warning("[Wardrobe] 评论 image_urls 列表格式不兼容，回退字符串模式: %s", e)
+                llm_resp = await asyncio.wait_for(
+                    self.context.llm_generate(
+                        chat_provider_id=provider_id,
+                        prompt="请点评这张图片。",
+                        system_prompt=system_prompt,
+                        image_urls=resolved_path,
+                    ),
+                    timeout=timeout_seconds,
+                )
+
+            text = (getattr(llm_resp, "completion_text", "") or "").strip()
+            return text
+        except asyncio.TimeoutError:
+            logger.warning("[Wardrobe] 图片评论模型超时 provider=%s", provider_id)
+            return ""
+        except Exception as e:
+            logger.warning("[Wardrobe] 图片评论生成失败 provider=%s error=%s", provider_id, e)
+            return ""
+        finally:
+            self._cleanup_temp(temp_path)
 
     async def analyze_image(
         self,

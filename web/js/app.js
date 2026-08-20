@@ -48,6 +48,7 @@
     {key:'description',label:'描述',type:'textarea'},
     {key:'user_tags',label:'用户标签',type:'text'},
     {key:'ai_prompt',label:'AI提示词',type:'textarea',hideIfEmpty:true,hint:'由 aiimg 插件生成该图时所用的提示词'},
+    {key:'ai_comment',label:'AI点评',type:'textarea',hideIfEmpty:true,readonly:true,hint:'由评论模型生成的图片点评'},
     {key:'persona',label:'人格',type:'text'},
     {key:'favorite',label:'收藏',type:'select',options:['none','favorite','like','meh']},
     {key:'use_count',label:'热度',type:'number',min:0,readonly:true},
@@ -2217,6 +2218,7 @@
       {icon:'🏷️',label:'编辑用户标签',action:()=>quickEditUserTags(id,e.clientX,e.clientY)},
       {type:'divider'},
       {icon:'🔄',label:'重新分析',action:()=>quickReanalyze(id)},
+      {icon:'💬',label:'重新评论',action:()=>quickRecomment(id)},
       {type:'divider'},
       {icon:'🗑️',label:'删除',action:()=>quickDelete(id),danger:true},
     ];
@@ -2393,6 +2395,40 @@
       const btn=$('#modalReanalyzeBtn');
       if(btn)btn.click();
     },300);
+  }
+
+  function quickRecomment(id){
+    showDetail(id);
+    setTimeout(()=>recommentCurrent(),300);
+  }
+
+  async function recommentCurrent(){
+    if(!state.currentImageId)return;
+    const btn=$('#modalRecommentBtn');
+    if(!btn||btn.disabled)return;
+    const orig=btn.textContent;
+    btn.disabled=true;
+    btn.textContent='评论中...';
+    try{
+      const resp=await api(`/api/images/${state.currentImageId}/recomment`,{method:'POST',json:{}});
+      if(!resp){toast('请求失败','error');return;}
+      const result=await resp.json();
+      if(result.success){
+        toast('评论已生成','success');
+        if(result.image){
+          state.currentImageData=result.image;
+          state.detailCache.set(state.currentImageId,result.image);
+          renderDetailFields(result.image,false);
+        }
+      }else{
+        toast(result.error||'评论失败','error');
+      }
+    }catch(e){
+      toast('网络错误: '+e.message,'error');
+    }finally{
+      btn.disabled=false;
+      btn.textContent=orig;
+    }
   }
 
   function quickRefStrength(id){
@@ -2772,6 +2808,7 @@
       $('#reanalyzeDesc').value='';
       $('#reanalyzeStatus').classList.add('hidden');
     });
+    $('#modalRecommentBtn').addEventListener('click',recommentCurrent);
     $('#reanalyzeCancelBtn').addEventListener('click',()=>{
       $('#reanalyzeSection').classList.add('hidden');
     });

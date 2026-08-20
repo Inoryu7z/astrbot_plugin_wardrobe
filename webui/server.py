@@ -588,11 +588,33 @@ class WardrobeWebServer:
                         logger.warning("[Wardrobe] 重新分析后向量索引重建失败: %s", e)
 
                 updated = await self.plugin.db.get_image(image_id)
+                # 开启图片评论时，重新分析后自动重新评论（立即入队串行生成）
+                if self.plugin._cfg("ai_comment_enabled", False):
+                    self.plugin._enqueue_comment(image_id, delay=0)
                 return jsonify({"success": True, "image": updated})
 
             except Exception as e:
                 logger.error("[Wardrobe] 重新分析失败: %s", e, exc_info=True)
                 return jsonify({"error": f"重新分析失败: {e}"}), 500
+
+        @app.route("/api/images/<image_id>/recomment", methods=["POST"])
+        async def api_image_recomment(image_id):
+            """手动重新评论：无评论则新增，有评论则覆盖。无视开关，需配置评论模型。"""
+            await self.plugin._ensure_db()
+            image = await self.plugin.db.get_image(image_id)
+            if not image:
+                return jsonify({"error": "未找到图片"}), 404
+
+            provider = self.plugin._resolve_comment_provider()
+            if not provider:
+                return jsonify({"error": "未配置评论模型（评论模型或存图模型）"}), 400
+
+            comment = await self.plugin._generate_comment_for_image(image_id)
+            if not comment:
+                return jsonify({"error": "评论生成失败，请检查评论模型配置或稍后重试"}), 500
+
+            updated = await self.plugin.db.get_image(image_id)
+            return jsonify({"success": True, "image": updated, "ai_comment": comment})
 
         @app.route("/api/images/batch-delete", methods=["POST"])
         async def api_images_batch_delete():
