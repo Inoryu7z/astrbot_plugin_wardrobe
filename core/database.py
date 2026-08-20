@@ -126,6 +126,7 @@ _UPDATABLE_FIELDS = frozenset({
     "ref_strength_reason",
     "daily_selfie_use_count",
     "ai_prompt",
+    "ai_comment",
 })
 
 
@@ -156,6 +157,7 @@ class WardrobeDatabase:
                     ("last_used_at", "TEXT DEFAULT ''"),
                     ("daily_selfie_use_count", "INTEGER DEFAULT 0"),
                     ("ai_prompt", "TEXT DEFAULT ''"),
+                    ("ai_comment", "TEXT DEFAULT ''"),
                 ]:
                     try:
                         await db.execute(f"ALTER TABLE images ADD COLUMN {col} {default}")
@@ -241,6 +243,7 @@ class WardrobeDatabase:
         ref_strength: str = "style",
         ref_strength_reason: str = "",
         ai_prompt: str = "",
+        ai_comment: str = "",
     ) -> str:
         now = datetime.now(timezone.utc).isoformat()
         image_id = str(uuid.uuid4())
@@ -253,8 +256,8 @@ class WardrobeDatabase:
                         dynamic_level, action_style, shot_size, camera_angle,
                         expression, color_tone, composition, background,
                         description, user_tags, exposure_features, key_features, prop_objects, allure_features, body_focus,
-                        persona, image_path, created_at, updated_at, created_by, favorite, use_count, file_hash, ref_strength, ref_strength_reason, ai_prompt
-                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+                        persona, image_path, created_at, updated_at, created_by, favorite, use_count, file_hash, ref_strength, ref_strength_reason, ai_prompt, ai_comment
+                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
                     (
                         image_id,
                         category,
@@ -291,6 +294,7 @@ class WardrobeDatabase:
                         ref_strength,
                         ref_strength_reason,
                         ai_prompt,
+                        ai_comment,
                     ),
                 )
                 await db.commit()
@@ -1092,8 +1096,8 @@ class WardrobeDatabase:
                                 dynamic_level, action_style, shot_size, camera_angle,
                                 expression, color_tone, composition, background,
                                 description, user_tags, exposure_features, key_features, prop_objects, allure_features, body_focus,
-                                persona, image_path, created_at, updated_at, created_by, favorite, use_count, file_hash, ref_strength, ref_strength_reason, daily_selfie_use_count, ai_prompt
-                            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+                                persona, image_path, created_at, updated_at, created_by, favorite, use_count, file_hash, ref_strength, ref_strength_reason, daily_selfie_use_count, ai_prompt, ai_comment
+                            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
                             (
                                 rec.get("id", str(uuid.uuid4())),
                                 rec.get("category", "人物"),
@@ -1131,6 +1135,7 @@ class WardrobeDatabase:
                                 rec.get("ref_strength_reason", ""),
                                 rec.get("daily_selfie_use_count", 0),
                                 rec.get("ai_prompt", ""),
+                                rec.get("ai_comment", ""),
                             ),
                         )
                         imported += 1

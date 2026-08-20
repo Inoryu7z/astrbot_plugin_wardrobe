@@ -66,6 +66,35 @@
     "editor_language": "markdown",
     "editor_theme": "vs-dark"
   },
+  "ai_comment_enabled": {
+    "description": "图片评论",
+    "hint": "开启后，新存入的图片会在空闲时间由模型生成一条可爱的点评（老图不受影响）。点评在卡片详情中查看。",
+    "type": "bool",
+    "default": false
+  },
+  "ai_comment_provider_id": {
+    "description": "评论模型",
+    "hint": "用于生成图片点评的模型（需支持视觉能力）。留空时使用存图主模型。",
+    "type": "string",
+    "default": "",
+    "_special": "select_provider"
+  },
+  "ai_comment_delay_seconds": {
+    "description": "评论延迟秒数",
+    "hint": "图片存入后延迟多少秒再生成评论，多图并发时自动排队逐个生成，避免模型压力。默认 3600（1小时）。",
+    "type": "int",
+    "default": 3600
+  },
+  "ai_comment_prompt": {
+    "description": "评论提示词",
+    "hint": "用于生成图片点评的 system prompt。留空时使用内置猫娘模板。",
+    "type": "text",
+    "default": "你是住在衣橱里的猫娘，负责给主人的图片写可爱的点评。请用猫娘的口吻点评这张图片的画面细节（服装、姿势、表情、场景、氛围等），语气活泼可爱，2-3句话。只输出点评正文，不要解释。",
+    "editor_mode": true,
+    "editor_mode_fullscreen": true,
+    "editor_language": "markdown",
+    "editor_theme": "vs-dark"
+  },
   "search_provider_id": {
     "description": "取图主模型",
     "hint": "用于解析检索意图和从候选图片中选择的模型（需支持视觉能力）",
