@@ -47,7 +47,7 @@ _MIGRATION_STATE_FILE = "migration_state.json"
     "astrbot_plugin_wardrobe",
     "Inoryu7z",
     "图片衣柜管理插件，支持智能分类、语义检索和参考图接口",
-    "3.0.7",
+    "3.0.8",
 )
 class WardrobePlugin(Star):
     def __init__(self, context: Context, config: AstrBotConfig = None):
@@ -1551,10 +1551,12 @@ class WardrobePlugin(Star):
             image_path = entry.get("path")
             image_mode = entry.get("mode", "")
             ai_prompt = entry.get("prompt", "") or ""
+            ref_user_tags = entry.get("user_tags", "") or ""
         else:
             image_path = entry
             image_mode = ""
             ai_prompt = ""
+            ref_user_tags = ""
 
         if not image_path:
             return
@@ -1586,12 +1588,12 @@ class WardrobePlugin(Star):
                 len(image_bytes) / 1024, persona or "无", tool_name or "command",
             )
 
-            # 自动存图不传 user_description：此时没有用户主动提供的描述，
-            # AI 分析模型会根据图片内容自动生成描述，无需额外文本。
-            # 仅 /存图 命令路径才会传入用户描述。
+            # 自动存图不传用户主动描述。但若本次自拍用了衣橱参考图，
+            # 则把该参考图的用户备注(user_tags)透传入库，使新图继承同样的备注（如"cos纳西妲"）。
             # ai_prompt 来自 aiimg 插件记录的生成提示词，原样透传入库。
             image_id, attrs, duplicate = await self._save_image_from_bytes(
                 image_bytes, persona=persona, created_by=user_id, ai_prompt=ai_prompt,
+                user_description=ref_user_tags,
             )
 
             if duplicate:
@@ -2033,6 +2035,7 @@ class WardrobePlugin(Star):
             "persona": best.get("persona", ""),
             "image_id": best["id"],
             "ref_strength": best.get("ref_strength", "style"),
+            "user_tags": best.get("user_tags", ""),
         }
 
     async def _ensure_vector_searcher(self):
