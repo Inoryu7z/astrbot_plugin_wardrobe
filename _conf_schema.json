@@ -15,13 +15,13 @@
   },
   "save_provider_daily_limit": {
     "description": "存图主模型每日用量限额(token)",
-    "hint": "主模型当日用量达到此限额后，自动切换到备用模型。需安装 token_router 插件并配置备用模型后生效；未配置时保持原行为。0 表示不限制。",
+    "hint": "主模型当日用量达到此限额后，自动切换到备用模型。若主模型同时作为聊天模型（token_router 窗口链中配置了同一 provider），聊天与存图消耗共享此额度，任何一方到限都会触发切换。需安装 token_router 插件并配置备用模型后生效；未配置时保持原行为。0 表示不限制。",
     "type": "int",
     "default": 0
   },
   "save_secondary_daily_limit": {
     "description": "存图备用模型每日用量限额(token)",
-    "hint": "备用模型当日用量达到此限额后，继续使用备用模型不再二次切换（与 token_router 存图路由语义一致）。0 表示不限制。",
+    "hint": "备用模型当日用量达到此限额后，继续使用备用模型不再二次切换（与 token_router 存图路由语义一致）。同样与聊天消耗共享额度。0 表示不限制。",
     "type": "int",
     "default": 0
   },

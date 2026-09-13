@@ -355,7 +355,7 @@ class ImageAnalyzer:
                     logger.debug("[Wardrobe] 图片分析完成 provider=%s 耗时=%.2fs tokens=%d", provider_id, elapsed, tokens)
                     if result:
                         if token_router and tokens > 0:
-                            token_router.record_storage_usage(provider_id, tokens)
+                            self._record_usage_to_router(token_router, provider_id, tokens)
                         return result
                     logger.warning("[Wardrobe] 模型返回结果解析失败 provider=%s，尝试下一个模型", provider_id)
                 except asyncio.TimeoutError:
@@ -470,7 +470,7 @@ class ImageAnalyzer:
                     logger.debug("[Wardrobe] 素材分析完成 provider=%s 耗时=%.2fs tokens=%d", provider_id, elapsed, tokens)
                     if result:
                         if token_router and tokens > 0:
-                            token_router.record_storage_usage(provider_id, tokens)
+                            self._record_usage_to_router(token_router, provider_id, tokens)
                         return result
                     logger.warning("[Wardrobe] 素材模型返回结果解析失败 provider=%s，尝试下一个模型", provider_id)
                 except asyncio.TimeoutError:
@@ -500,6 +500,21 @@ class ImageAnalyzer:
             return int(self.plugin._cfg(key, 0) or 0)
         except (TypeError, ValueError):
             return 0
+
+    def _record_usage_to_router(self, token_router, provider_id: str, tokens: int):
+        """上报存图用量到 token_router。
+
+        新版 token_router（含 get_provider_daily_usage）上报到聊天桶（record_plugin_usage），
+        使存图消耗与聊天共享日额度——同一模型同时作为聊天与存图模型时，任一方的消耗
+        都会触发另一方的切换判定。旧版回退存图桶（record_storage_usage，独立额度）。
+        """
+        if hasattr(token_router, "record_plugin_usage") and hasattr(token_router, "get_provider_daily_usage"):
+            try:
+                token_router.record_plugin_usage(provider_id, tokens)
+                return
+            except Exception as e:
+                logger.warning("[Wardrobe] 上报 token_router 聊天桶失败，回退存图桶: %s", e)
+        token_router.record_storage_usage(provider_id, tokens)
 
     def _find_token_router(self):
         """跨插件查找 token_router 实例。找不到或无目标方法时返回 None。"""
