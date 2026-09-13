@@ -13,6 +13,18 @@
     "default": "",
     "_special": "select_provider"
   },
+  "save_provider_daily_limit": {
+    "description": "存图主模型每日用量限额(token)",
+    "hint": "主模型当日用量达到此限额后，自动切换到备用模型。需安装 token_router 插件并配置备用模型后生效；未配置时保持原行为。0 表示不限制。",
+    "type": "int",
+    "default": 0
+  },
+  "save_secondary_daily_limit": {
+    "description": "存图备用模型每日用量限额(token)",
+    "hint": "备用模型当日用量达到此限额后，继续使用备用模型不再二次切换（与 token_router 存图路由语义一致）。0 表示不限制。",
+    "type": "int",
+    "default": 0
+  },
   "save_use_responses_api": {
     "description": "存图联网搜索",
     "hint": "开启后存图分析走豆包 Responses API（带 web_search 工具），模型可联网查证图片内容（如识别 cosplay 角色、品牌等）。需在下方配置至少1个提供商。关闭时走上方视觉模型。",

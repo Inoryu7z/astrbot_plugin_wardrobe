@@ -312,14 +312,22 @@ class ImageAnalyzer:
                     if p["id"] != active_id:
                         attempts.append((p["id"], True))
             else:
-                # 非 Responses 模式：框架 provider，无日用量路由
+                # 非 Responses 模式：框架 provider，配合 token_router 按日用量路由主/副模型
                 if not primary_provider_id and not secondary_provider_id:
                     logger.warning("[Wardrobe] 未配置存图模型，无法分析图片")
                     return None
-                if primary_provider_id:
-                    attempts.append((primary_provider_id, False))
-                if secondary_provider_id and secondary_provider_id != primary_provider_id:
-                    attempts.append((secondary_provider_id, False))
+                if token_router:
+                    providers_for_router = [
+                        {"id": primary_provider_id, "daily_limit": self._save_daily_limit("save_provider_daily_limit")},
+                        {"id": secondary_provider_id, "daily_limit": self._save_daily_limit("save_secondary_daily_limit")},
+                    ]
+                    active_id = token_router.get_active_storage_provider(providers_for_router)
+                else:
+                    active_id = primary_provider_id
+                attempts.append((active_id, False))
+                for pid in (primary_provider_id, secondary_provider_id):
+                    if pid and pid != active_id:
+                        attempts.append((pid, False))
 
             for provider_id, is_responses in attempts:
                 if not provider_id:
@@ -423,10 +431,18 @@ class ImageAnalyzer:
                 if not primary_provider_id and not secondary_provider_id:
                     logger.warning("[Wardrobe] 未配置存图模型，无法分析素材")
                     return None
-                if primary_provider_id:
-                    attempts.append((primary_provider_id, False))
-                if secondary_provider_id and secondary_provider_id != primary_provider_id:
-                    attempts.append((secondary_provider_id, False))
+                if token_router:
+                    providers_for_router = [
+                        {"id": primary_provider_id, "daily_limit": self._save_daily_limit("save_provider_daily_limit")},
+                        {"id": secondary_provider_id, "daily_limit": self._save_daily_limit("save_secondary_daily_limit")},
+                    ]
+                    active_id = token_router.get_active_storage_provider(providers_for_router)
+                else:
+                    active_id = primary_provider_id
+                attempts.append((active_id, False))
+                for pid in (primary_provider_id, secondary_provider_id):
+                    if pid and pid != active_id:
+                        attempts.append((pid, False))
 
             for provider_id, is_responses in attempts:
                 if not provider_id:
@@ -475,6 +491,15 @@ class ImageAnalyzer:
                 os.remove(temp_path)
         except Exception:
             pass
+
+    def _save_daily_limit(self, key: str) -> int:
+        """读取存图主/副模型日限额配置（0=不限制）。"""
+        if not self.plugin:
+            return 0
+        try:
+            return int(self.plugin._cfg(key, 0) or 0)
+        except (TypeError, ValueError):
+            return 0
 
     def _find_token_router(self):
         """跨插件查找 token_router 实例。找不到或无目标方法时返回 None。"""
