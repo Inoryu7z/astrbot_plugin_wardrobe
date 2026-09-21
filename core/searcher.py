@@ -20,6 +20,18 @@ _DAILY_SELFIE_RECALL_K = 40    # 补拍候选召回数量
 _DAILY_SELFIE_COLD_SLACK = 1   # 补拍冷梯队容差
 _DAILY_SELFIE_COLD_SEATS = 3   # 补拍冷图配额席位
 
+# query 含 "cos" 时，参考图候选限定为 cosplay 风格。
+# 原因：全量检索时"看着像 cos 但并非 cos"的图会被取走，导致取图错误。
+_COS_QUERY_KEYWORD = "cos"
+_COSPLAY_STYLE_KEYWORD = "cosplay"
+
+
+def _is_cosplay_style(record: dict[str, Any]) -> bool:
+    """记录是否属于 cosplay 风格（style 字段含 cosplay，兼容"cosplay风"等写法）。"""
+    style = record.get("style", "")
+    values = style if isinstance(style, (list, tuple, set)) else [style]
+    return any(_COSPLAY_STYLE_KEYWORD in str(v).lower() for v in values if v)
+
 
 SEARCH_PARSE_SYSTEM_PROMPT = """# 角色
 你是图片检索意图解析助手。根据用户的自然语言描述，生成结构化的查询条件。
@@ -344,6 +356,21 @@ class ImageSearcher:
             logger.debug("[Wardrobe] 未找到候选图片")
             return [], meta
 
+        # query 含 "cos" → 候选只认 cosplay 风格，避免"看着像 cos 但并非 cos"的图被误取。
+        # restrict_cosplay 一次性判定：候选池里一张 cosplay 风格的图都没有时不做限定（回退全量检索）。
+        # 限定放在热度/冷梯队逻辑之前，使补拍的公平轮换在 cosplay 子集内进行。
+        restrict_cosplay = False
+        if _COS_QUERY_KEYWORD in str(user_query or "").lower():
+            cosplay_count = sum(1 for c in candidates if _is_cosplay_style(c))
+            restrict_cosplay = cosplay_count > 0
+            logger.debug(
+                "[Wardrobe] query 含 cos：cosplay 风格候选 %d/%d 张，%s",
+                cosplay_count, len(candidates),
+                "启用 cosplay 限定" if restrict_cosplay else "池内无 cosplay 风格，回退全量检索",
+            )
+            if restrict_cosplay:
+                candidates = [c for c in candidates if _is_cosplay_style(c)]
+
         # 按当前人格注入 use_count（按人格独立热度）
         # current_persona 为空时（空人格）不记热度，use_count 保持 0
         if current_persona and current_persona.strip():
@@ -398,6 +425,9 @@ class ImageSearcher:
                     candidates = await self._merge_cold_seats(
                         user_query, candidates, current_persona, _seats
                     )
+                    if restrict_cosplay:
+                        # 冷图席位会并入最近邻里最冷的图，可能带进非 cosplay 图，这里再收敛一次
+                        candidates = [c for c in candidates if _is_cosplay_style(c)]
                 # 补拍公平轮换：只保留"相对池内最低热度±slack"的冷梯队，
                 # 并 round-robin 排序，保证低热度/未用图优先被取图模型看到。
                 # 热度 = person 使用数 + 每日补拍累计使用数，并按喜爱程度打折。
