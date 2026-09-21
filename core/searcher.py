@@ -259,6 +259,8 @@ class ImageSearcher:
         prioritize_unused: bool = False,
         min_similarity: float | None = None,
         daily_selfie_mode: bool = False,
+        persona_scope: str = "",
+        deprioritize_ids: Optional[list[str]] = None,
     ) -> tuple[list[dict[str, Any]], dict[str, Any]]:
         meta = {"persona_mismatch": False, "searched_persona": persona, "persona_scope": "global"}
 
@@ -316,15 +318,21 @@ class ImageSearcher:
             # persona 参数由上层 _do_search_image 在调用前已解析完成，
             # 直接传给 _vector_search 即可按人格池过滤。
             # ================================================================
-            candidates = await self._vector_search(user_query, k=candidate_limit, persona=persona, min_similarity=min_similarity)
+            candidates, scope_meta = await self._vector_search_by_scope(
+                user_query,
+                k=candidate_limit,
+                min_similarity=min_similarity,
+                persona=persona,
+                current_persona=current_persona,
+                persona_scope=persona_scope,
+            )
+            meta.update(scope_meta)
             logger.debug(
-                "[Wardrobe] 向量检索（用户搜图-跳过意图解析）: %d张 persona=%s",
-                len(candidates), "无人格" if persona == "" else (persona or "全局"),
+                "[Wardrobe] 向量检索（用户搜图-跳过意图解析）: %d张 scope=%s persona=%s",
+                len(candidates), persona_scope or "未指定", meta.get("searched_persona", "?"),
             )
             if candidates:
                 candidates = self._sort_by_favorite(candidates)
-                meta["searched_persona"] = persona or "全局"
-                meta["persona_scope"] = "vector"
             else:
                 logger.debug("[Wardrobe] 向量检索无结果，回退 LEGACY 意图解析+LIKE")
                 candidates = await self._legacy_parse_and_search(
@@ -478,6 +486,14 @@ class ImageSearcher:
                 timeout_seconds=timeout_seconds,
             )
 
+        if deprioritize_ids and len(selected) > 1:
+            recent = {str(i) for i in deprioritize_ids}
+            fresh = [r for r in selected if str(r.get("id", "")) not in recent]
+            if fresh:
+                stale = [r for r in selected if str(r.get("id", "")) in recent]
+                selected = fresh + stale
+                logger.debug("[Wardrobe] 近期已发降权: 延后%d张", len(stale))
+
         for r in selected:
             if current_persona and r.get("persona") and r["persona"] != current_persona:
                 meta["persona_mismatch"] = True
@@ -579,6 +595,63 @@ class ImageSearcher:
             min_similarity=min_similarity,
         )
         return candidates
+
+    async def _vector_search_by_scope(
+        self,
+        user_query: str,
+        *,
+        k: int,
+        min_similarity: float | None,
+        persona: str = "",
+        current_persona: str = "",
+        persona_scope: str = "",
+    ) -> tuple[list[dict[str, Any]], dict[str, Any]]:
+        """按人格范围做向量检索。persona_scope 为空时沿用传入的 persona（旧行为）。"""
+        meta: dict[str, Any] = {}
+        scope = (persona_scope or "").strip().lower()
+
+        if scope == "other":
+            # 别人的：无人格池优先，没有再排除当前人格后检索
+            candidates = await self._vector_search(user_query, k=k, persona="", min_similarity=min_similarity)
+            if candidates:
+                meta["searched_persona"] = ""
+                meta["persona_scope"] = "other"
+                return candidates, meta
+            if current_persona:
+                candidates = await self._vector_search(
+                    user_query, k=k, persona=None,
+                    exclude_persona=current_persona, min_similarity=min_similarity,
+                )
+                if candidates:
+                    meta["searched_persona"] = f"非{current_persona}"
+                    meta["persona_scope"] = "other"
+                    meta["persona_mismatch"] = True
+                    return candidates, meta
+            return [], meta
+
+        if scope == "global":
+            candidates = await self._vector_search(user_query, k=k, persona=None, min_similarity=min_similarity)
+            meta["searched_persona"] = "全局"
+            meta["persona_scope"] = "global"
+            return candidates, meta
+
+        if scope == "self":
+            target = current_persona or persona
+            candidates = await self._vector_search(user_query, k=k, persona=target, min_similarity=min_similarity)
+            meta["searched_persona"] = target or "全局"
+            meta["persona_scope"] = "self"
+            return candidates, meta
+
+        if scope == "named" and persona:
+            candidates = await self._vector_search(user_query, k=k, persona=persona, min_similarity=min_similarity)
+            meta["searched_persona"] = persona
+            meta["persona_scope"] = "named"
+            return candidates, meta
+
+        candidates = await self._vector_search(user_query, k=k, persona=persona, min_similarity=min_similarity)
+        meta["searched_persona"] = persona or "全局"
+        meta["persona_scope"] = "vector"
+        return candidates, meta
 
     async def _vector_search(self, user_query: str, k: int, persona: Optional[str] = None, exclude_persona: str = "", min_similarity: float | None = None) -> list[dict[str, Any]]:
         if not self.vector_searcher or not self.vector_searcher.available:

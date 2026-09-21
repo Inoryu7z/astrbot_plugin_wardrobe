@@ -7,6 +7,7 @@ import hashlib
 import json
 import time
 import zipfile
+from collections import deque
 
 from astrbot.api import AstrBotConfig, logger
 from astrbot.api.event import AstrMessageEvent, filter
@@ -75,6 +76,8 @@ class WardrobePlugin(Star):
         self._bg_tasks: set[asyncio.Task] = set()
         # 评论队列惰性初始化：首次投递评论时才创建并启动消费协程，避免 __init__ 依赖事件循环
         self._comment_queue: Optional[asyncio.Queue] = None
+        # 按人格记录最近已发出的图片 id，避免连续取图重复命中同一张
+        self._recent_sent: dict[str, deque] = {}
 
         self.context._wardrobe_plugin = self
 
@@ -1324,7 +1327,7 @@ class WardrobePlugin(Star):
         return result
 
     @filter.llm_tool(name="search_wardrobe_image")
-    async def search_wardrobe_image_tool(self, event: AstrMessageEvent, query: str, persona: str = "") -> str:
+    async def search_wardrobe_image_tool(self, event: AstrMessageEvent, query: str, persona: str = "", scope: str = "self") -> str:
         '''从图片衣柜库里检索已经保存好的图片，并直接把图片发送给用户。本工具只处理已经存在的图片。
 
 用户想看某张已有的图片时用它——自己以前拍的照片、收进来的别人的照片都算：
@@ -1334,15 +1337,16 @@ class WardrobePlugin(Star):
 按动词判断走哪个工具：用户说“发一张/找一张/之前那张再看看”，要的是图库里已有的那张，用本工具；说“拍一张/画一张/生成一张”，要的是新产出的图，走生图工具（aiimg）。带“上次/以前/之前/那套”等回溯词的，一律按已有图处理。
 去外网找资料或找网上的图片用联网搜索工具。
 
+要谁的图用 scope 表达：用户说“别人的/其他人的/不是你的”（如“发一张别人的cos照”）填 other；点名某个人格（“b 有没有…”）填 named，并在 persona 写上该人格名；泛泛地问“有没有穿jk的美少女”、不关心是谁，填 global；要当前人格自己的图填 self。
+query 只写画面内容，不要写人格名，人格归属交给 scope 和 persona。
+
 Args:
     query(string): 用户的图片需求描述，用自然语言完整表达意图，不要拆成关键词（用户说“色气的jk服”就填“色气的jk服”，不要填“jk服 色气”）。
-    persona(string): 当前对话人格名称。如果你正在扮演某个人格角色（如星织、雪音），必须填写你自己的人格名；如果用户提到了其他人格名（如“雪音有没有xxx”），也填写该名称；如果当前没有扮演任何人格角色则留空
+    persona(string): 人格名称。仅当 scope=named 时必填，写用户点名的那个人格；其他 scope 留空
+    scope(string): 取谁的照片。self=当前人格自己（默认）；other=别人的，排除当前人格，优先取无人格的图、没有再取其他人格的；named=指定某个人格的图；global=不区分人格全库找
         '''
-        if not persona.strip():
-            auto_persona = await self._get_current_persona_name(event)
-            if auto_persona:
-                persona = auto_persona
-        return await self._do_search_image(event, query=query, persona=persona)
+        # persona 不再兜底补当前人格：人格归属交给 scope，补了会让“别人的”被当成自己的
+        return await self._do_search_image(event, query=query, persona=persona, scope=scope)
 
     async def _do_save_image(
         self, event: AstrMessageEvent, user_description: str = "", persona: str = ""
@@ -2063,14 +2067,19 @@ Args:
                     new_vs.rerank_provider = self.rerank_provider
 
     async def _do_search_image(
-        self, event: AstrMessageEvent, query: str, persona: str = ""
+        self, event: AstrMessageEvent, query: str, persona: str = "", scope: str = "self"
     ) -> str:
         await self._ensure_db()
         await self._ensure_vector_searcher()
 
         raw_persona = persona.strip()
         resolved_persona = self._resolve_persona(raw_persona)
-        current_persona = resolved_persona or raw_persona
+        scope = (scope or "self").strip().lower()
+        if scope not in ("self", "other", "named", "global"):
+            scope = "self"
+        # 当前对话人格单独取：它决定“排除谁”与热度归属，与工具传入的 persona 无关
+        conv_persona = await self._get_current_persona_name(event)
+        current_persona = self._resolve_persona(conv_persona) if conv_persona else ""
         persona_names = self._get_persona_names_str()
 
         primary = str(self._cfg("search_provider_id", "") or "").strip()
@@ -2099,6 +2108,8 @@ Args:
             current_persona=current_persona,
             persona_mode=str(self._cfg("search_persona_mode", "no_persona_only") or "no_persona_only"),
             prioritize_unused=bool(self._cfg("search_prioritize_unused", False)),
+            persona_scope=scope,
+            deprioritize_ids=self._recent_sent_ids(current_persona),
         )
 
         logger.debug(
@@ -2121,6 +2132,7 @@ Args:
                 await self.db.increment_use_count_by_persona(r["id"], current_persona)
             except Exception:
                 pass
+            self._remember_sent(current_persona, r.get("id", ""))
 
         if not image_paths:
             return "图片文件不存在"
@@ -2159,6 +2171,22 @@ Args:
                     )
 
         return "\n".join(parts)
+
+    def _recent_sent_ids(self, persona: str) -> list[str]:
+        """该人格最近已发过的图片 id，用于避免连续取图重复命中同一张。"""
+        return list(self._recent_sent.get(persona or "__global__", []))
+
+    def _remember_sent(self, persona: str, image_id) -> None:
+        if not image_id:
+            return
+        key = persona or "__global__"
+        queue = self._recent_sent.get(key)
+        if queue is None:
+            queue = deque(maxlen=5)
+            self._recent_sent[key] = queue
+        sid = str(image_id)
+        if sid not in queue:
+            queue.append(sid)
 
     async def _extract_image_bytes(self, event: AstrMessageEvent) -> Optional[bytes]:
         # 仅提取第一张图片。多图场景下用户可逐张保存，或通过 WebUI 批量管理。
