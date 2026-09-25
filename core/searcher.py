@@ -911,19 +911,28 @@ class ImageSearcher:
         if store is None:
             return None
 
-        pairs: list[tuple[dict[str, Any], str]] = []
-        for c in candidates:
-            raw_path = str(c.get("image_path", "") or "")
-            if not raw_path:
-                continue
+        items = [(c, str(c.get("image_path", "") or "")) for c in candidates]
+        items = [(c, rp) for c, rp in items if rp]
+        if not items:
+            return None
+
+        async def _resolve_thumb(cand: dict[str, Any], raw_path: str) -> Path:
             try:
-                thumb = await store.ensure_vision_thumbnail(raw_path)
+                return Path(str(await store.ensure_vision_thumbnail(raw_path)))
             except Exception as e:
-                logger.warning("[Wardrobe] 视觉缩略图获取失败: id=%s error=%s", c.get("id"), e)
-                thumb = store.get_image_path(raw_path)
-            p = Path(str(thumb))
-            if p.exists():
-                pairs.append((c, str(p)))
+                logger.warning("[Wardrobe] 视觉缩略图获取失败: id=%s error=%s", cand.get("id"), e)
+                return Path(str(store.get_image_path(raw_path)))
+
+        # 并发生成：串行时 20 张缩略图会累加 1~4 秒，容易顶到取图超时
+        resolved = await asyncio.gather(
+            *[_resolve_thumb(c, rp) for c, rp in items], return_exceptions=True
+        )
+
+        pairs: list[tuple[dict[str, Any], str]] = []
+        for (cand, raw_path), res in zip(items, resolved):
+            p = res if not isinstance(res, BaseException) else Path(str(store.get_image_path(raw_path)))
+            if isinstance(p, Path) and p.exists():
+                pairs.append((cand, str(p)))
 
         if not pairs:
             return None
@@ -959,14 +968,18 @@ class ImageSearcher:
                     continue
                 if not isinstance(picked, list):
                     picked = [picked]
+                # 模型可能回图号（整数），也可能直接回图片 id 字符串，两种都接受
                 idx_to_cand = {i: c for i, (c, _) in enumerate(pairs, 1)}
+                id_to_cand = {str(c["id"]): c for c, _ in pairs}
                 chosen: list[dict[str, Any]] = []
                 for item in picked:
+                    cand = None
                     try:
-                        idx = int(item)
+                        cand = idx_to_cand.get(int(item))
                     except (TypeError, ValueError):
-                        continue
-                    cand = idx_to_cand.get(idx)
+                        cand = None
+                    if cand is None:
+                        cand = id_to_cand.get(str(item).strip())
                     if cand is not None and cand not in chosen:
                         chosen.append(cand)
                 if not chosen:
