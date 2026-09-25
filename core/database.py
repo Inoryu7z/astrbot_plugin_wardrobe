@@ -496,6 +496,7 @@ class WardrobeDatabase:
         favorite: Optional[str] = None,
         ref_strength: Optional[str] = None,
         desc_max_len: Optional[int] = None,
+        stale_before: Optional[str] = None,
     ) -> tuple[list[str], list[Any]]:
         conditions = []
         params: list[Any] = []
@@ -503,6 +504,13 @@ class WardrobeDatabase:
         if desc_max_len is not None:
             conditions.append("wb_charlen(COALESCE(description, '')) < ?")
             params.append(int(desc_max_len))
+
+        if stale_before:
+            # 临时筛选：存入时间早于阈值，且此后属性再没被写过（未重分析）
+            conditions.append("substr(COALESCE(created_at, ''), 1, 19) < ?")
+            params.append(stale_before)
+            conditions.append("substr(COALESCE(updated_at, ''), 1, 19) < ?")
+            params.append(stale_before)
 
         if category:
             conditions.append("category = ?")
@@ -591,6 +599,7 @@ class WardrobeDatabase:
         favorite: Optional[str] = None,
         ref_strength: Optional[str] = None,
         desc_max_len: Optional[int] = None,
+        stale_before: Optional[str] = None,
         sort_by: str = "created_at",
         limit: int = 20,
         offset: int = 0,
@@ -602,6 +611,7 @@ class WardrobeDatabase:
             persona=persona, exclude_persona=exclude_persona,
             shot_size=shot_size, favorite=favorite,
             ref_strength=ref_strength, desc_max_len=desc_max_len,
+            stale_before=stale_before,
         )
 
         where_clause = ""
@@ -645,6 +655,7 @@ class WardrobeDatabase:
         favorite: Optional[str] = None,
         ref_strength: Optional[str] = None,
         desc_max_len: Optional[int] = None,
+        stale_before: Optional[str] = None,
     ) -> int:
         conditions, params = self._build_search_conditions(
             category=category, exposure_level=exposure_level,
@@ -653,6 +664,7 @@ class WardrobeDatabase:
             persona=persona, exclude_persona=exclude_persona,
             shot_size=shot_size, favorite=favorite,
             ref_strength=ref_strength, desc_max_len=desc_max_len,
+            stale_before=stale_before,
         )
 
         where_clause = ""
@@ -928,6 +940,7 @@ class WardrobeDatabase:
         favorite: Optional[str] = None,
         ref_strength: Optional[str] = None,
         desc_max_len: Optional[int] = None,
+        stale_before: Optional[str] = None,
         sort_by: str = "created_at",
         limit: int = 50,
         offset: int = 0,
@@ -937,6 +950,11 @@ class WardrobeDatabase:
         if desc_max_len is not None:
             conditions.append("wb_charlen(COALESCE(description, '')) < ?")
             params.append(int(desc_max_len))
+        if stale_before:
+            conditions.append("substr(COALESCE(created_at, ''), 1, 19) < ?")
+            params.append(stale_before)
+            conditions.append("substr(COALESCE(updated_at, ''), 1, 19) < ?")
+            params.append(stale_before)
         if category:
             conditions.append("category = ?")
             params.append(category)
@@ -986,6 +1004,7 @@ class WardrobeDatabase:
         favorite: Optional[str] = None,
         ref_strength: Optional[str] = None,
         desc_max_len: Optional[int] = None,
+        stale_before: Optional[str] = None,
         sort_by: str = "created_at",
         limit: int = 50,
         offset: int = 0,
@@ -995,6 +1014,11 @@ class WardrobeDatabase:
         if desc_max_len is not None:
             conditions.append("wb_charlen(COALESCE(description, '')) < ?")
             params.append(int(desc_max_len))
+        if stale_before:
+            conditions.append("substr(COALESCE(created_at, ''), 1, 19) < ?")
+            params.append(stale_before)
+            conditions.append("substr(COALESCE(updated_at, ''), 1, 19) < ?")
+            params.append(stale_before)
         if category:
             conditions.append("category = ?")
             params.append(category)
@@ -1081,11 +1105,12 @@ class WardrobeDatabase:
         favorite: Optional[str] = None,
         ref_strength: Optional[str] = None,
         desc_max_len: Optional[int] = None,
+        stale_before: Optional[str] = None,
     ) -> list[str]:
         conditions, params = self._build_search_conditions(
             category=category, style=style, scene=scene, atmosphere=atmosphere,
             persona=persona or "", shot_size=shot_size, favorite=favorite, ref_strength=ref_strength,
-            desc_max_len=desc_max_len,
+            desc_max_len=desc_max_len, stale_before=stale_before,
         )
         where_clause = ""
         if conditions:

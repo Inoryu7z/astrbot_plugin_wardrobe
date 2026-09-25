@@ -1,6 +1,7 @@
 import asyncio
 import json
 import os
+import re
 import secrets
 import shutil
 import tempfile
@@ -81,6 +82,17 @@ class WardrobeWebServer:
         dl_expired = [t for t, info in self._download_tokens.items() if time.time() > info["expires"]]
         for t in dl_expired:
             del self._download_tokens[t]
+
+    @staticmethod
+    def _parse_stale_before(raw: str) -> Optional[str]:
+        """解析 stale_before：只取 YYYY-MM-DDTHH:MM:SS 前 19 位，格式不符则返回 None。"""
+        raw = (raw or "").strip()
+        if len(raw) < 19:
+            return None
+        head = raw[:19]
+        if not re.match(r"^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}$", head):
+            return None
+        return head
 
     @staticmethod
     def _parse_desc_max_len(raw: str) -> Optional[int]:
@@ -351,6 +363,7 @@ class WardrobeWebServer:
             lightweight = request.args.get("lightweight", "") == "1"
 
             desc_max_len = self._parse_desc_max_len(request.args.get("desc_max_len", ""))
+            stale_before = self._parse_stale_before(request.args.get("stale_before", ""))
 
             offset = (page - 1) * per_page
 
@@ -369,6 +382,7 @@ class WardrobeWebServer:
                     favorite=favorite if favorite in ("favorite", "like", "meh") else None,
                     ref_strength=ref_strength or None,
                     desc_max_len=desc_max_len,
+                    stale_before=stale_before,
                     sort_by=sort_by,
                     limit=per_page,
                     offset=offset,
@@ -383,6 +397,7 @@ class WardrobeWebServer:
                     favorite=favorite if favorite in ("favorite", "like", "meh") else None,
                     ref_strength=ref_strength or None,
                     desc_max_len=desc_max_len,
+                    stale_before=stale_before,
                 )
             elif lightweight:
                 images = await self.plugin.db.list_images_lightweight(
@@ -392,6 +407,7 @@ class WardrobeWebServer:
                     favorite=favorite if favorite in ("favorite", "like", "meh") else None,
                     ref_strength=ref_strength or None,
                     desc_max_len=desc_max_len,
+                    stale_before=stale_before,
                     sort_by=sort_by,
                     limit=per_page,
                     offset=offset,
@@ -403,6 +419,7 @@ class WardrobeWebServer:
                     favorite=favorite if favorite in ("favorite", "like", "meh") else None,
                     ref_strength=ref_strength or None,
                     desc_max_len=desc_max_len,
+                    stale_before=stale_before,
                 )
             else:
                 images = await self.plugin.db.list_images(
@@ -410,6 +427,7 @@ class WardrobeWebServer:
                     favorite=favorite if favorite in ("favorite", "like", "meh") else None,
                     ref_strength=ref_strength or None,
                     desc_max_len=desc_max_len,
+                    stale_before=stale_before,
                     sort_by=sort_by,
                     limit=per_page, offset=offset
                 )
@@ -419,6 +437,7 @@ class WardrobeWebServer:
                     favorite=favorite if favorite in ("favorite", "like", "meh") else None,
                     ref_strength=ref_strength or None,
                     desc_max_len=desc_max_len,
+                    stale_before=stale_before,
                 )
 
             result = {
@@ -748,6 +767,7 @@ class WardrobeWebServer:
             favorite = request.args.get("favorite", "")
             ref_strength = request.args.get("ref_strength", "")
             desc_max_len = self._parse_desc_max_len(request.args.get("desc_max_len", ""))
+            stale_before = self._parse_stale_before(request.args.get("stale_before", ""))
 
             style_list = [style] if style else None
             scene_list = [scene] if scene else None
@@ -763,6 +783,7 @@ class WardrobeWebServer:
                 favorite=favorite if favorite in ("favorite", "like", "meh") else None,
                 ref_strength=ref_strength or None,
                 desc_max_len=desc_max_len,
+                stale_before=stale_before,
             )
             return jsonify({"ids": ids})
 

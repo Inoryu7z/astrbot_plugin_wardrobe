@@ -135,6 +135,13 @@
       </select>
     </div>
     <div class="sidebar-section">
+      <h3 class="sidebar-heading">未重分析</h3>
+      <select id="staleFilter" class="sidebar-select">
+        <option value="">全部</option>
+        <option value="2026-09-20T16:00:00">9.21前存入且未改动</option>
+      </select>
+    </div>
+    <div class="sidebar-section">
       <h3 class="sidebar-heading">排序</h3>
       <select id="sortByFilter" class="sidebar-select">
         <option value="created_at">最新上传</option>
@@ -662,6 +669,6 @@
     </div>
   </div>
 
-<script src="/static/js/app.js?v=3.1.2"></script>
+<script src="/static/js/app.js?v=3.1.2b"></script>
 </body>
 </html>
