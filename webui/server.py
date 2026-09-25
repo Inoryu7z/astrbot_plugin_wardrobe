@@ -7,6 +7,7 @@ import tempfile
 import time
 import zipfile
 from pathlib import Path
+from typing import Optional
 
 import uvicorn
 from quart import (
@@ -80,6 +81,18 @@ class WardrobeWebServer:
         dl_expired = [t for t, info in self._download_tokens.items() if time.time() > info["expires"]]
         for t in dl_expired:
             del self._download_tokens[t]
+
+    @staticmethod
+    def _parse_desc_max_len(raw: str) -> Optional[int]:
+        """解析 desc_max_len 参数：正整数才生效，否则返回 None（不过滤）。"""
+        raw = (raw or "").strip()
+        if not raw:
+            return None
+        try:
+            value = int(raw)
+        except (TypeError, ValueError):
+            return None
+        return value if value > 0 else None
 
     def _register_download(self, file_path, download_name: str) -> str:
         """注册持久下载令牌，返回 token。文件存在期间均可重试下载（支持断点续传）。"""
@@ -337,6 +350,8 @@ class WardrobeWebServer:
             sort_by = request.args.get("sort_by", "created_at")
             lightweight = request.args.get("lightweight", "") == "1"
 
+            desc_max_len = self._parse_desc_max_len(request.args.get("desc_max_len", ""))
+
             offset = (page - 1) * per_page
 
             needs_search = style or scene or atmosphere or shot_size or (persona is not None) or category or (favorite in ("favorite", "like", "meh")) or ref_strength
@@ -353,6 +368,7 @@ class WardrobeWebServer:
                     shot_size=shot_size or None,
                     favorite=favorite if favorite in ("favorite", "like", "meh") else None,
                     ref_strength=ref_strength or None,
+                    desc_max_len=desc_max_len,
                     sort_by=sort_by,
                     limit=per_page,
                     offset=offset,
@@ -366,6 +382,7 @@ class WardrobeWebServer:
                     shot_size=shot_size or None,
                     favorite=favorite if favorite in ("favorite", "like", "meh") else None,
                     ref_strength=ref_strength or None,
+                    desc_max_len=desc_max_len,
                 )
             elif lightweight:
                 images = await self.plugin.db.list_images_lightweight(
@@ -374,6 +391,7 @@ class WardrobeWebServer:
                     persona=persona,
                     favorite=favorite if favorite in ("favorite", "like", "meh") else None,
                     ref_strength=ref_strength or None,
+                    desc_max_len=desc_max_len,
                     sort_by=sort_by,
                     limit=per_page,
                     offset=offset,
@@ -384,12 +402,14 @@ class WardrobeWebServer:
                     persona=persona,
                     favorite=favorite if favorite in ("favorite", "like", "meh") else None,
                     ref_strength=ref_strength or None,
+                    desc_max_len=desc_max_len,
                 )
             else:
                 images = await self.plugin.db.list_images(
                     category=category or None, shot_size=shot_size or None,
                     favorite=favorite if favorite in ("favorite", "like", "meh") else None,
                     ref_strength=ref_strength or None,
+                    desc_max_len=desc_max_len,
                     sort_by=sort_by,
                     limit=per_page, offset=offset
                 )
@@ -398,6 +418,7 @@ class WardrobeWebServer:
                     shot_size=shot_size or None,
                     favorite=favorite if favorite in ("favorite", "like", "meh") else None,
                     ref_strength=ref_strength or None,
+                    desc_max_len=desc_max_len,
                 )
 
             result = {
@@ -726,6 +747,7 @@ class WardrobeWebServer:
             shot_size = request.args.get("shot_size", "")
             favorite = request.args.get("favorite", "")
             ref_strength = request.args.get("ref_strength", "")
+            desc_max_len = self._parse_desc_max_len(request.args.get("desc_max_len", ""))
 
             style_list = [style] if style else None
             scene_list = [scene] if scene else None
@@ -740,6 +762,7 @@ class WardrobeWebServer:
                 shot_size=shot_size or None,
                 favorite=favorite if favorite in ("favorite", "like", "meh") else None,
                 ref_strength=ref_strength or None,
+                desc_max_len=desc_max_len,
             )
             return jsonify({"ids": ids})
 

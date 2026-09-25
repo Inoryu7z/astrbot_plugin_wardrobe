@@ -56,7 +56,7 @@
 
   let state={
     page:1, perPage:24, total:0,
-    category:'', persona:'', style:'', scene:'', shot_size:'', atmosphere:'', favorite:'', ref_strength:'', sort_by:'created_at',
+    category:'', persona:'', style:'', scene:'', shot_size:'', atmosphere:'', favorite:'', ref_strength:'', desc_max_len:'', sort_by:'created_at',
     searchQuery:'', batchMode:false,
     selectedIds:new Set(),
     currentImageId:null,
@@ -288,9 +288,9 @@
       if(state.searchQuery){
         url=`/api/search?q=${encodeURIComponent(state.searchQuery)}&persona=${encodeURIComponent(state.persona)}&category=${encodeURIComponent(state.category)}&favorite=${encodeURIComponent(state.favorite)}&limit=${state.perPage}`;
       }else if(state.sort_by==='random'){
-        url=`/api/images?page=1&per_page=500&category=${encodeURIComponent(state.category)}&persona=${encodeURIComponent(state.persona)}&style=${encodeURIComponent(state.style)}&scene=${encodeURIComponent(state.scene)}&shot_size=${encodeURIComponent(state.shot_size)}&atmosphere=${encodeURIComponent(state.atmosphere)}&favorite=${encodeURIComponent(state.favorite)}&ref_strength=${encodeURIComponent(state.ref_strength)}&sort_by=random&lightweight=1`;
+        url=`/api/images?page=1&per_page=500&category=${encodeURIComponent(state.category)}&persona=${encodeURIComponent(state.persona)}&style=${encodeURIComponent(state.style)}&scene=${encodeURIComponent(state.scene)}&shot_size=${encodeURIComponent(state.shot_size)}&atmosphere=${encodeURIComponent(state.atmosphere)}&favorite=${encodeURIComponent(state.favorite)}&ref_strength=${encodeURIComponent(state.ref_strength)}&sort_by=random&lightweight=1&desc_max_len=${encodeURIComponent(state.desc_max_len)}`;
       }else{
-        url=`/api/images?page=${state.page}&per_page=${state.perPage}&category=${encodeURIComponent(state.category)}&persona=${encodeURIComponent(state.persona)}&style=${encodeURIComponent(state.style)}&scene=${encodeURIComponent(state.scene)}&shot_size=${encodeURIComponent(state.shot_size)}&atmosphere=${encodeURIComponent(state.atmosphere)}&favorite=${encodeURIComponent(state.favorite)}&ref_strength=${encodeURIComponent(state.ref_strength)}&sort_by=${encodeURIComponent(state.sort_by)}&lightweight=1`;
+        url=`/api/images?page=${state.page}&per_page=${state.perPage}&category=${encodeURIComponent(state.category)}&persona=${encodeURIComponent(state.persona)}&style=${encodeURIComponent(state.style)}&scene=${encodeURIComponent(state.scene)}&shot_size=${encodeURIComponent(state.shot_size)}&atmosphere=${encodeURIComponent(state.atmosphere)}&favorite=${encodeURIComponent(state.favorite)}&ref_strength=${encodeURIComponent(state.ref_strength)}&sort_by=${encodeURIComponent(state.sort_by)}&lightweight=1&desc_max_len=${encodeURIComponent(state.desc_max_len)}`;
       }
 
       const resp=await api(url);
@@ -447,7 +447,7 @@
   async function preloadPage2AndOriginals(){
     if(!state.allLoaded){
       try{
-        const url=`/api/images?page=${state.page}&per_page=${state.perPage}&category=${encodeURIComponent(state.category)}&persona=${encodeURIComponent(state.persona)}&style=${encodeURIComponent(state.style)}&scene=${encodeURIComponent(state.scene)}&shot_size=${encodeURIComponent(state.shot_size)}&atmosphere=${encodeURIComponent(state.atmosphere)}&favorite=${encodeURIComponent(state.favorite)}&ref_strength=${encodeURIComponent(state.ref_strength)}&sort_by=${encodeURIComponent(state.sort_by)}&lightweight=1`;
+        const url=`/api/images?page=${state.page}&per_page=${state.perPage}&category=${encodeURIComponent(state.category)}&persona=${encodeURIComponent(state.persona)}&style=${encodeURIComponent(state.style)}&scene=${encodeURIComponent(state.scene)}&shot_size=${encodeURIComponent(state.shot_size)}&atmosphere=${encodeURIComponent(state.atmosphere)}&favorite=${encodeURIComponent(state.favorite)}&ref_strength=${encodeURIComponent(state.ref_strength)}&sort_by=${encodeURIComponent(state.sort_by)}&lightweight=1&desc_max_len=${encodeURIComponent(state.desc_max_len)}`;
         const resp=await api(url);
         if(resp&&resp.ok){
           const data=await resp.json();
@@ -462,7 +462,7 @@
   async function preloadNextPage(){
     if(state.allLoaded||state.preloadedPage2)return;
     try{
-      const url=`/api/images?page=${state.page}&per_page=${state.perPage}&category=${encodeURIComponent(state.category)}&persona=${encodeURIComponent(state.persona)}&style=${encodeURIComponent(state.style)}&scene=${encodeURIComponent(state.scene)}&shot_size=${encodeURIComponent(state.shot_size)}&atmosphere=${encodeURIComponent(state.atmosphere)}&favorite=${encodeURIComponent(state.favorite)}&ref_strength=${encodeURIComponent(state.ref_strength)}&sort_by=${encodeURIComponent(state.sort_by)}&lightweight=1`;
+      const url=`/api/images?page=${state.page}&per_page=${state.perPage}&category=${encodeURIComponent(state.category)}&persona=${encodeURIComponent(state.persona)}&style=${encodeURIComponent(state.style)}&scene=${encodeURIComponent(state.scene)}&shot_size=${encodeURIComponent(state.shot_size)}&atmosphere=${encodeURIComponent(state.atmosphere)}&favorite=${encodeURIComponent(state.favorite)}&ref_strength=${encodeURIComponent(state.ref_strength)}&sort_by=${encodeURIComponent(state.sort_by)}&lightweight=1&desc_max_len=${encodeURIComponent(state.desc_max_len)}`;
       const resp=await api(url);
       if(resp&&resp.ok){
         const data=await resp.json();
@@ -1063,7 +1063,7 @@
     btn.disabled=true;
     btn.textContent='加载中...';
     try{
-      let url=`/api/images/ids?category=${encodeURIComponent(state.category)}&persona=${encodeURIComponent(state.persona)}&style=${encodeURIComponent(state.style)}&scene=${encodeURIComponent(state.scene)}&shot_size=${encodeURIComponent(state.shot_size)}&atmosphere=${encodeURIComponent(state.atmosphere)}&favorite=${encodeURIComponent(state.favorite)}&ref_strength=${encodeURIComponent(state.ref_strength)}`;
+      let url=`/api/images/ids?category=${encodeURIComponent(state.category)}&persona=${encodeURIComponent(state.persona)}&style=${encodeURIComponent(state.style)}&scene=${encodeURIComponent(state.scene)}&shot_size=${encodeURIComponent(state.shot_size)}&atmosphere=${encodeURIComponent(state.atmosphere)}&favorite=${encodeURIComponent(state.favorite)}&ref_strength=${encodeURIComponent(state.ref_strength)}&desc_max_len=${encodeURIComponent(state.desc_max_len)}`;
       const resp=await api(url);
       if(!resp||!resp.ok){toast('获取图片列表失败','error');return;}
       const data=await resp.json();
@@ -2055,9 +2055,10 @@
 
   function _statsChartClick(filterKey,value){
     toggleStatsView(false);
-    state.style='';state.scene='';state.atmosphere='';state.shot_size='';state.ref_strength='';
+    state.style='';state.scene='';state.atmosphere='';state.shot_size='';state.ref_strength='';state.desc_max_len='';
     $('#styleFilter').value='';$('#sceneFilter').value='';
     $('#atmosphereFilter').value='';$('#shotSizeFilter').value='';$('#refStrengthFilter').value='';
+    if($('#descLenFilter'))$('#descLenFilter').value='';
     if(filterKey==='style'){state.style=value;$('#styleFilter').value=value;}
     else if(filterKey==='scene'){state.scene=value;$('#sceneFilter').value=value;}
     else if(filterKey==='atmosphere'){state.atmosphere=value;$('#atmosphereFilter').value=value;}
@@ -2566,6 +2567,13 @@
     $('#refStrengthFilter').addEventListener('change',e=>{
       state.ref_strength=e.target.value;state.page=1;state.allLoaded=false;loadImages(true);
     });
+
+    const _descLenSel=$('#descLenFilter');
+    if(_descLenSel){
+      _descLenSel.addEventListener('change',e=>{
+        state.desc_max_len=e.target.value;state.page=1;state.allLoaded=false;loadImages(true);
+      });
+    }
 
     $('#poolsBtn').addEventListener('click',()=>{$('#poolsModal').classList.remove('hidden');_poolsState.currentTab='global';loadPoolsModal();});
     $('#poolsModalClose').addEventListener('click',()=>{$('#poolsModal').classList.add('hidden');});

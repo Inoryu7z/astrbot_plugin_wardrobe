@@ -6,6 +6,7 @@ from pathlib import Path
 from typing import Any, Optional
 
 import aiosqlite
+from contextlib import asynccontextmanager
 
 from astrbot.api import logger
 
@@ -134,6 +135,21 @@ class WardrobeDatabase:
     def __init__(self, data_dir: Path):
         self.db_path = data_dir / "wardrobe.db"
         self._lock = asyncio.Lock()
+
+    @staticmethod
+    def _wb_charlen(value) -> int:
+        """SQL 自定义函数：按 Unicode 字符数计算长度（SQLite 内置 length() 只算字节）。"""
+        return len(value) if isinstance(value, str) else 0
+
+    @asynccontextmanager
+    async def _connect(self):
+        """建立连接并注册 wb_charlen() 自定义函数（用于按字符数过滤 description）。"""
+        db = await aiosqlite.connect(self.db_path)
+        try:
+            await db.create_function("wb_charlen", 1, WardrobeDatabase._wb_charlen)
+            yield db
+        finally:
+            await db.close()
 
     async def init(self):
         self.db_path.parent.mkdir(parents=True, exist_ok=True)
@@ -479,9 +495,14 @@ class WardrobeDatabase:
         keywords: Optional[list[str]] = None,
         favorite: Optional[str] = None,
         ref_strength: Optional[str] = None,
+        desc_max_len: Optional[int] = None,
     ) -> tuple[list[str], list[Any]]:
         conditions = []
         params: list[Any] = []
+
+        if desc_max_len is not None:
+            conditions.append("wb_charlen(COALESCE(description, '')) < ?")
+            params.append(int(desc_max_len))
 
         if category:
             conditions.append("category = ?")
@@ -569,6 +590,7 @@ class WardrobeDatabase:
         shot_size: Optional[str] = None,
         favorite: Optional[str] = None,
         ref_strength: Optional[str] = None,
+        desc_max_len: Optional[int] = None,
         sort_by: str = "created_at",
         limit: int = 20,
         offset: int = 0,
@@ -579,7 +601,7 @@ class WardrobeDatabase:
             pose_type=pose_type, body_focus=body_focus,
             persona=persona, exclude_persona=exclude_persona,
             shot_size=shot_size, favorite=favorite,
-            ref_strength=ref_strength,
+            ref_strength=ref_strength, desc_max_len=desc_max_len,
         )
 
         where_clause = ""
@@ -600,7 +622,7 @@ class WardrobeDatabase:
         else:
             order_clause = "created_at DESC, id DESC"
 
-        async with aiosqlite.connect(self.db_path) as db:
+        async with self._connect() as db:
             db.row_factory = aiosqlite.Row
             sql = f"SELECT * FROM images {where_clause} ORDER BY {order_clause} LIMIT ? OFFSET ?"
             async with db.execute(sql, params) as cursor:
@@ -622,6 +644,7 @@ class WardrobeDatabase:
         shot_size: Optional[str] = None,
         favorite: Optional[str] = None,
         ref_strength: Optional[str] = None,
+        desc_max_len: Optional[int] = None,
     ) -> int:
         conditions, params = self._build_search_conditions(
             category=category, exposure_level=exposure_level,
@@ -629,14 +652,14 @@ class WardrobeDatabase:
             pose_type=pose_type, body_focus=body_focus,
             persona=persona, exclude_persona=exclude_persona,
             shot_size=shot_size, favorite=favorite,
-            ref_strength=ref_strength,
+            ref_strength=ref_strength, desc_max_len=desc_max_len,
         )
 
         where_clause = ""
         if conditions:
             where_clause = "WHERE " + " AND ".join(conditions)
 
-        async with aiosqlite.connect(self.db_path) as db:
+        async with self._connect() as db:
             async with db.execute(f"SELECT COUNT(*) FROM images {where_clause}", params) as cursor:
                 return (await cursor.fetchone())[0]
 
@@ -904,12 +927,16 @@ class WardrobeDatabase:
         persona: Optional[str] = None,
         favorite: Optional[str] = None,
         ref_strength: Optional[str] = None,
+        desc_max_len: Optional[int] = None,
         sort_by: str = "created_at",
         limit: int = 50,
         offset: int = 0,
     ) -> list[dict[str, Any]]:
         conditions = []
         params: list[Any] = []
+        if desc_max_len is not None:
+            conditions.append("wb_charlen(COALESCE(description, '')) < ?")
+            params.append(int(desc_max_len))
         if category:
             conditions.append("category = ?")
             params.append(category)
@@ -942,7 +969,7 @@ class WardrobeDatabase:
             order_clause = "RANDOM()"
         else:
             order_clause = "created_at DESC, id DESC"
-        async with aiosqlite.connect(self.db_path) as db:
+        async with self._connect() as db:
             db.row_factory = aiosqlite.Row
             sql = f"SELECT * FROM images {where_clause} ORDER BY {order_clause} LIMIT ? OFFSET ?"
             async with db.execute(sql, params) as cursor:
@@ -958,12 +985,16 @@ class WardrobeDatabase:
         exclude_persona: str = "",
         favorite: Optional[str] = None,
         ref_strength: Optional[str] = None,
+        desc_max_len: Optional[int] = None,
         sort_by: str = "created_at",
         limit: int = 50,
         offset: int = 0,
     ) -> list[dict[str, Any]]:
         conditions = []
         params: list[Any] = []
+        if desc_max_len is not None:
+            conditions.append("wb_charlen(COALESCE(description, '')) < ?")
+            params.append(int(desc_max_len))
         if category:
             conditions.append("category = ?")
             params.append(category)
@@ -999,7 +1030,7 @@ class WardrobeDatabase:
             order_clause = "RANDOM()"
         else:
             order_clause = "created_at DESC, id DESC"
-        async with aiosqlite.connect(self.db_path) as db:
+        async with self._connect() as db:
             db.row_factory = aiosqlite.Row
             sql = f"SELECT id, category, style, persona, image_path, created_at, favorite, use_count, ref_strength, last_used_at FROM images {where_clause} ORDER BY {order_clause} LIMIT ? OFFSET ?"
             async with db.execute(sql, params) as cursor:
@@ -1049,15 +1080,17 @@ class WardrobeDatabase:
         shot_size: Optional[str] = None,
         favorite: Optional[str] = None,
         ref_strength: Optional[str] = None,
+        desc_max_len: Optional[int] = None,
     ) -> list[str]:
         conditions, params = self._build_search_conditions(
             category=category, style=style, scene=scene, atmosphere=atmosphere,
             persona=persona or "", shot_size=shot_size, favorite=favorite, ref_strength=ref_strength,
+            desc_max_len=desc_max_len,
         )
         where_clause = ""
         if conditions:
             where_clause = "WHERE " + " AND ".join(conditions)
-        async with aiosqlite.connect(self.db_path) as db:
+        async with self._connect() as db:
             sql = f"SELECT id FROM images {where_clause}"
             async with db.execute(sql, params) as cursor:
                 rows = await cursor.fetchall()
