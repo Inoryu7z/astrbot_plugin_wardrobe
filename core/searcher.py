@@ -1,6 +1,7 @@
 import asyncio
 import json
 import time
+from pathlib import Path
 from typing import Any, Optional
 
 from astrbot.api import logger
@@ -110,6 +111,36 @@ SEARCH_SELECT_SYSTEM_PROMPT = """# 角色
 # 规则
 1. 最多选择 {max_select} 张图片
 2. 匹配标准宽松：完全匹配、大部分匹配、语义可能相关的图片都应返回；只有完全不匹配才排除
+3. 宁可多返回也不要漏掉可能匹配的图片，空结果是最差体验
+4. 只输出 JSON，不要输出解释"""
+
+
+SEARCH_VISION_SELECT_SYSTEM_PROMPT = """# 角色
+你是图片选择助手。你会直接看到若干张候选图片，请从中选出符合用户需求的图片。
+
+# 任务
+只依据图片内容本身做判断，选出最符合用户需求的图片。不要依赖任何文字描述。
+
+# 输入方式
+图片按 1 开始依次编号（图1、图2……），用户消息里给出图号与图片 id 的对应关系。
+
+# 输出格式
+输出 JSON 对象：
+```json
+{{
+  "selected": [选中的图号, 用整数表示],
+  "reason": "选择理由"
+}}
+```
+
+# 选择策略（优先级从高到低）
+1. 用户点名了的具体要素：服装款式与颜色、姿势、场景、道具。点名某项时，该项不匹配即排除
+2. 整体观感与需求的相关程度
+3. 候选之间内容相近时，选画面更完整、更能看清主体的一张
+
+# 规则
+1. 最多选择 {max_select} 张，按匹配度从高到低排列图号
+2. 匹配标准宽松：完全匹配、大部分匹配、语义可能相关的都应返回，只有完全不匹配才排除
 3. 宁可多返回也不要漏掉可能匹配的图片，空结果是最差体验
 4. 只输出 JSON，不要输出解释"""
 
@@ -841,6 +872,126 @@ class ImageSearcher:
         if not providers:
             return candidates[:max_select]
 
+        selected = await self._select_by_vision(
+            user_query, candidates,
+            max_select=max_select,
+            providers=providers,
+            timeout_seconds=timeout_seconds,
+        )
+        if selected is not None:
+            return selected
+
+        logger.debug("[Wardrobe] 视觉精选不可用，回退文本精选（候选=%d）", len(candidates))
+        return await self._select_by_text(
+            user_query, candidates,
+            max_select=max_select,
+            providers=providers,
+            timeout_seconds=timeout_seconds,
+        )
+
+    async def _select_by_vision(
+        self,
+        user_query: str,
+        candidates: list[dict[str, Any]],
+        *,
+        max_select: int,
+        providers: list[str],
+        timeout_seconds: float,
+    ) -> Optional[list[dict[str, Any]]]:
+        """把候选缩略图交给取图模型看图选择。
+
+        取图模型看到的只有图片本身 + 图号↔id 映射，不带任何 description/属性字段——
+        取图的判断依据必须是画面，而不是二手的文字描述。
+
+        Returns:
+            成功返回选中的候选；模型不支持视觉 / 超时 / 解析失败 / 无可用图片时返回 None，
+            由调用方回退到文本精选。
+        """
+        store = getattr(self, "store", None)
+        if store is None:
+            return None
+
+        pairs: list[tuple[dict[str, Any], str]] = []
+        for c in candidates:
+            raw_path = str(c.get("image_path", "") or "")
+            if not raw_path:
+                continue
+            try:
+                thumb = await store.ensure_vision_thumbnail(raw_path)
+            except Exception as e:
+                logger.warning("[Wardrobe] 视觉缩略图获取失败: id=%s error=%s", c.get("id"), e)
+                thumb = store.get_image_path(raw_path)
+            p = Path(str(thumb))
+            if p.exists():
+                pairs.append((c, str(p)))
+
+        if not pairs:
+            return None
+        if len(pairs) <= max_select:
+            return [c for c, _ in pairs]
+
+        mapping = "\n".join(f"图{i} = {c['id']}" for i, (c, _) in enumerate(pairs, 1))
+        prompt = (
+            f"用户需求：{user_query}\n\n"
+            f"以下是 {len(pairs)} 张候选图片，图号与图片 id 的对应关系：\n{mapping}\n\n"
+            f"请只看图片内容，选出最符合需求的 {max_select} 张，返回图号。"
+        )
+        system = SEARCH_VISION_SELECT_SYSTEM_PROMPT.format(max_select=max_select)
+        image_urls = [path for _, path in pairs]
+
+        for provider_id in providers:
+            try:
+                llm_resp = await asyncio.wait_for(
+                    self.context.llm_generate(
+                        chat_provider_id=provider_id,
+                        prompt=prompt,
+                        system_prompt=system,
+                        image_urls=image_urls,
+                    ),
+                    timeout=timeout_seconds,
+                )
+                raw = (getattr(llm_resp, "completion_text", "") or "").strip()
+                result = parse_json_response(raw)
+                if not result:
+                    continue
+                picked = result.get("selected")
+                if picked is None:
+                    continue
+                if not isinstance(picked, list):
+                    picked = [picked]
+                idx_to_cand = {i: c for i, (c, _) in enumerate(pairs, 1)}
+                chosen: list[dict[str, Any]] = []
+                for item in picked:
+                    try:
+                        idx = int(item)
+                    except (TypeError, ValueError):
+                        continue
+                    cand = idx_to_cand.get(idx)
+                    if cand is not None and cand not in chosen:
+                        chosen.append(cand)
+                if not chosen:
+                    return []
+                logger.debug(
+                    "[Wardrobe] 视觉精选命中 %d/%d 张 provider=%s",
+                    len(chosen), len(pairs), provider_id,
+                )
+                return chosen[:max_select] if len(chosen) > max_select else chosen
+            except asyncio.TimeoutError:
+                logger.warning("[Wardrobe] 取图模型（视觉选择）超时 provider=%s", provider_id)
+            except Exception as e:
+                logger.warning("[Wardrobe] 取图模型（视觉选择）失败 provider=%s error=%s", provider_id, e)
+
+        return None
+
+    async def _select_by_text(
+        self,
+        user_query: str,
+        candidates: list[dict[str, Any]],
+        *,
+        max_select: int,
+        providers: list[str],
+        timeout_seconds: float,
+    ) -> list[dict[str, Any]]:
         candidates_info = []
         for c in candidates:
             info = {

@@ -8,6 +8,13 @@ from astrbot.api import logger
 
 from .utils import detect_image_mime, mime_to_ext
 
+# 供取图模型"看图"用的视觉缩略图：按【短边】定尺寸。
+# 原因：图库以竖图（自拍）为主，若按长边定尺寸，9:16 竖图长边 768 时横向只剩 424px，
+# 服装细节（图案、花纹、配饰）会糊掉——而区分度往往就在这些细节上。
+_VISION_THUMB_SHORT_EDGE = 768     # 短边目标值（不放大，只缩小）
+_VISION_THUMB_MAX_LONG_EDGE = 1536  # 长边兜底上限，避免超长图失控
+_VISION_THUMB_QUALITY = 88
+
 
 class ImageStore:
     def __init__(self, data_dir: Path):
@@ -91,6 +98,57 @@ class ImageStore:
             new_h = max(1, int(h * ratio))
             img = img.resize((new_w, new_h), Image.LANCZOS)
         img.save(str(thumb_path), "JPEG", quality=85)
+        return thumb_path
+
+    def get_vision_thumbnail_path(self, filename: str) -> Path:
+        return self.thumbnails_dir / (
+            Path(filename).stem + f"_v{_VISION_THUMB_SHORT_EDGE}.jpg"
+        )
+
+    async def ensure_vision_thumbnail(self, filename: str) -> Path:
+        """生成/复用供取图模型看图用的缩略图（短边 768，独立于 WebUI 的 400px 缩略图）。
+
+        与主缩略图分文件存放，避免覆盖已有缓存尺寸。失败时回退原图路径。
+        """
+        thumb_path = self.get_vision_thumbnail_path(filename)
+        if thumb_path.exists():
+            return thumb_path
+        orig_path = self.images_dir / filename
+        if not orig_path.exists():
+            return orig_path
+        try:
+            return await asyncio.to_thread(
+                self._generate_vision_thumbnail, orig_path, thumb_path
+            )
+        except Exception as e:
+            logger.warning("[Wardrobe] 视觉缩略图生成失败: %s error=%s", filename, e)
+            return orig_path
+
+    @staticmethod
+    def _vision_thumb_size(width: int, height: int) -> tuple[int, int]:
+        """按短边缩放（不放大），再用长边上限兜底。"""
+        short = min(width, height)
+        scale = 1.0
+        if short > _VISION_THUMB_SHORT_EDGE:
+            scale = _VISION_THUMB_SHORT_EDGE / short
+        w = max(1, int(width * scale))
+        h = max(1, int(height * scale))
+        if max(w, h) > _VISION_THUMB_MAX_LONG_EDGE:
+            s2 = _VISION_THUMB_MAX_LONG_EDGE / max(w, h)
+            w = max(1, int(w * s2))
+            h = max(1, int(h * s2))
+        return w, h
+
+    @staticmethod
+    def _generate_vision_thumbnail(orig_path: Path, thumb_path: Path) -> Path:
+        from PIL import Image
+
+        img = Image.open(str(orig_path)).convert("RGB")
+        w, h = img.size
+        new_w, new_h = ImageStore._vision_thumb_size(w, h)
+        if (new_w, new_h) != (w, h):
+            img = img.resize((new_w, new_h), Image.LANCZOS)
+        img.save(str(thumb_path), "JPEG", quality=_VISION_THUMB_QUALITY, optimize=True)
         return thumb_path
 
     @staticmethod
