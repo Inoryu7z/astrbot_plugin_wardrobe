@@ -127,12 +127,17 @@ class WardrobePlugin(Star):
         try:
             rerank_id = self._cfg("rerank_provider_id", "")
             if not rerank_id:
+                logger.info("[Wardrobe] 未配置重排序模型（rerank_provider_id 为空），按向量相似度排序")
                 return None
             provider = self.context.get_provider_by_id(rerank_id)
             if provider and isinstance(provider, RerankProvider):
-                logger.debug("[Wardrobe] 使用配置的 Rerank Provider: %s", rerank_id)
+                logger.info("[Wardrobe] 重排序已启用: %s", rerank_id)
                 return provider
-            logger.warning("[Wardrobe] Rerank Provider '%s' 未找到或类型不匹配", rerank_id)
+            logger.warning(
+                "[Wardrobe] 重排序未生效：Rerank Provider '%s' 未找到或类型不匹配"
+                "（该字段要填服务提供商列表里 Rerank 模型的 ID，不是显示名）",
+                rerank_id,
+            )
             return None
         except Exception as e:
             logger.warning("[Wardrobe] Rerank Provider 初始化失败: %s", e)

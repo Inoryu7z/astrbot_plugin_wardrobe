@@ -229,6 +229,9 @@ class WardrobeVectorSearcher:
         self.db = db
         self.plugin = plugin
         self.rerank_provider: Any = None
+        # 记录"上一次按哪个配置值尝试解析过重排序"：同一个值只试一次（避免每次检索刷告警），
+        # 配置值变了就重试 —— 用户后配的重排序不需要重载插件即可生效。
+        self._rerank_cfg_seen: str = ""
         self._faiss_db = None
         self._initialized = False
         self._id_map: dict[str, str] = {}
@@ -715,16 +718,42 @@ class WardrobeVectorSearcher:
         )
         return trimmed, trimmed_focus
 
+    def _refresh_rerank_provider(self) -> None:
+        """运行中补配重排序模型：配置改了不必重载插件，下一次检索就生效。
+
+        原先只在插件加载时解析一次实例 —— 用户加载后才配的话会一直"配了没反应"，
+        而且一行日志都没有（重排序成功/跳过全是 debug，默认日志级别看不见）。
+        这里按配置值变化重试一次；同一个值只尝试一次，失败不会每次检索都刷告警。
+        """
+        if self.plugin is None:
+            return
+        cfg = getattr(self.plugin, "_cfg", None)
+        if not callable(cfg):
+            return
+        rerank_id = str(cfg("rerank_provider_id", "") or "").strip()
+        if not rerank_id or rerank_id == self._rerank_cfg_seen:
+            return
+        self._rerank_cfg_seen = rerank_id
+        init = getattr(self.plugin, "_init_rerank_provider", None)
+        if callable(init):
+            self.rerank_provider = init()
+
     async def _rerank_results(
         self,
         query: str,
         candidates: list[tuple[str, float, str]],
     ) -> list[tuple[str, float]] | None:
         if not self.rerank_provider:
+            self._refresh_rerank_provider()
+        if not self.rerank_provider:
             return None
 
         rerank_min = int(self.plugin._cfg("rerank_min_candidates", 3) or 3) if self.plugin else 3
         if len(candidates) < rerank_min:
+            logger.debug(
+                "[Wardrobe] 候选%d张 < rerank_min_candidates=%d，跳过重排序",
+                len(candidates), rerank_min,
+            )
             return None
 
         rerank_top_k = int(self.plugin._cfg("rerank_top_k", 0) or 0) if self.plugin else 0
