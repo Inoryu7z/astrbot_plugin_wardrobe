@@ -130,6 +130,36 @@ _UPDATABLE_FIELDS = frozenset({
     "ai_comment",
 })
 
+# 「覆盖导入」允许被备份改写的字段：全部是分析产物（重分析后要同步到别的库的就是这些）。
+# 刻意**不含** favorite / use_count / daily_selfie_use_count / image_path / persona /
+# created_at / created_by —— 收藏与热度是本地状态、图片路径与人格是本地组织方式，
+# 不该被另一个库的备份改掉。
+_OVERWRITE_FIELDS = (
+    "category", "style", "clothing_type", "exposure_level", "scene", "atmosphere",
+    "pose_type", "body_orientation", "dynamic_level", "action_style", "shot_size",
+    "camera_angle", "expression", "color_tone", "composition", "background",
+    "description", "user_tags", "exposure_features", "key_features", "prop_objects",
+    "allure_features", "body_focus", "ref_strength", "ref_strength_reason",
+    "ai_prompt", "ai_comment", "updated_at",
+)
+_JSON_LIST_FIELDS = frozenset({
+    "style", "scene", "atmosphere", "action_style",
+    "exposure_features", "key_features", "prop_objects", "allure_features", "body_focus",
+})
+
+
+def overwrite_values(rec: dict[str, Any]) -> tuple:
+    """按 _OVERWRITE_FIELDS 取值并做与插入一致的 JSON 归一化。"""
+    vals: list[Any] = []
+    for f in _OVERWRITE_FIELDS:
+        v = rec.get(f)
+        if f in _JSON_LIST_FIELDS:
+            v = v if isinstance(v, str) else json.dumps(v or [], ensure_ascii=False)
+        elif v is None:
+            v = ""
+        vals.append(v)
+    return tuple(vals)
+
 
 class WardrobeDatabase:
     def __init__(self, data_dir: Path):
@@ -1132,19 +1162,43 @@ class WardrobeDatabase:
                 rows = await cursor.fetchall()
                 return [self._row_to_dict(row) for row in rows]
 
-    async def import_records(self, records: list[dict[str, Any]], skip_existing: bool = True) -> int:
+    async def import_records(
+        self,
+        records: list[dict[str, Any]],
+        skip_existing: bool = True,
+        overwrite: bool = False,
+    ) -> tuple[int, list[str]]:
+        """导入备份里的图片记录。
+
+        - 默认（skip_existing=True、overwrite=False）：已存在的 id **直接跳过**，字段一个都不动。
+        - overwrite=True：已存在的 id 用备份里的**分析结果**覆盖更新（见 `_OVERWRITE_FIELDS`），
+          收藏 / 热度 / 图片路径 / 人格 / 创建信息保留本地。
+
+        返回 (新增条数, 被覆盖的 id 列表)。调用方拿到列表后要把这些 id 从向量索引里摘掉重建，
+        否则检索用的还是旧描述（`index_existing_images()` 只补"不在映射里"的 id）。
+        """
         existing_ids = set()
-        if skip_existing:
+        if skip_existing or overwrite:
             async with aiosqlite.connect(self.db_path) as db:
                 async with db.execute("SELECT id FROM images") as cursor:
                     async for row in cursor:
                         existing_ids.add(row[0])
 
         imported = 0
+        overwritten: list[str] = []
+        update_sql = "UPDATE images SET " + ", ".join(f"{f} = ?" for f in _OVERWRITE_FIELDS) + " WHERE id = ?"
         async with self._lock:
             async with aiosqlite.connect(self.db_path) as db:
                 for rec in records:
-                    if skip_existing and rec.get("id") in existing_ids:
+                    rid = rec.get("id")
+                    if overwrite and rid in existing_ids:
+                        try:
+                            await db.execute(update_sql, overwrite_values(rec) + (rid,))
+                            overwritten.append(rid)
+                        except Exception as e:
+                            logger.debug("[Wardrobe] 覆盖记录失败: id=%s error=%s", rid, e)
+                        continue
+                    if skip_existing and rid in existing_ids:
                         continue
                     try:
                         await db.execute(
@@ -1200,7 +1254,9 @@ class WardrobeDatabase:
                     except Exception as e:
                         logger.debug("[Wardrobe] 导入记录跳过: id=%s error=%s", rec.get("id"), e)
                 await db.commit()
-        return imported
+        if overwritten:
+            logger.info("[Wardrobe] 覆盖导入: 更新%d条记录（收藏与热度保留本地）", len(overwritten))
+        return imported, overwritten
 
     @staticmethod
     def _row_to_dict(row: aiosqlite.Row) -> dict[str, Any]:

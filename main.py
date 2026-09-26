@@ -1171,20 +1171,10 @@ class WardrobePlugin(Star):
                     if not image_id:
                         continue
 
-                    ok = await self.db.delete_image(image_id)
+                    ok = await self._purge_image(image_id, img)
                     if not ok:
                         continue
 
-                    if img.get("image_path"):
-                        await self.store.delete_image(img["image_path"])
-
-                    if self.vector_searcher:
-                        try:
-                            await self.vector_searcher.remove_image(image_id)
-                        except Exception:
-                            pass
-
-                    await self._cleanup_videos_for_image(image_id)
                     deleted += 1
 
                 logger.debug("[Wardrobe] 无感清理: 删除了 %d 张超过30天的无感图片", deleted)
@@ -1910,6 +1900,38 @@ Args:
                     return str(val).strip()
         return None
 
+    async def _purge_image(self, image_id: str, image: dict | None = None) -> bool:
+        """删图的唯一入口：记录 + 图片文件 + **向量索引** + 关联视频。
+
+        四个删除入口（WebUI 单张、WebUI 批量、命令删、无感清理）都必须走这里。
+        以前每个入口各抄一份，WebUI 单张删除就漏了清向量索引 ——
+        留下"幽灵向量"：检索还会召回它，但记录已不存在，而且那张图永远不会被重新 embedding。
+
+        Args:
+            image: 已取到的记录（可选，省一次查询）。
+        """
+        if image is None:
+            image = await self.db.get_image(image_id)
+        if not image:
+            return False
+        if not await self.db.delete_image(image_id):
+            return False
+
+        if image.get("image_path"):
+            try:
+                await self.store.delete_image(image["image_path"])
+            except Exception as e:
+                logger.warning("[Wardrobe] 删除图片文件失败: %s", e)
+
+        if self.vector_searcher:
+            try:
+                await self.vector_searcher.remove_image(image_id)
+            except Exception as e:
+                logger.debug("[Wardrobe] 删除向量索引失败: id=%s error=%s", image_id, e)
+
+        await self._cleanup_videos_for_image(image_id)
+        return True
+
     async def _do_delete_image(self, image_id: str) -> str:
         await self._ensure_db()
 
@@ -1917,20 +1939,8 @@ Args:
         if not image:
             return f"未找到ID为 {image_id} 的图片"
 
-        deleted = await self.db.delete_image(image_id)
-        if not deleted:
+        if not await self._purge_image(image_id, image):
             return f"删除失败（ID: {image_id}）"
-
-        if image.get("image_path"):
-            await self.store.delete_image(image["image_path"])
-
-        if self.vector_searcher:
-            try:
-                await self.vector_searcher.remove_image(image_id)
-            except Exception:
-                pass
-
-        await self._cleanup_videos_for_image(image_id)
 
         return f"已删除图片（ID: {image_id}）"
 

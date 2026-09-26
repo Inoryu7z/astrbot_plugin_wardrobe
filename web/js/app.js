@@ -1530,6 +1530,7 @@
     const zone=$('#backupUploadZone');
     const fileInput=$('#backupFile');
     const importBtn=$('#backupImportBtn');
+    const overwriteInput=$('#backupOverwrite');
     let selectedBackupFiles=[];
 
     zone.addEventListener('click',()=>fileInput.click());
@@ -1570,19 +1571,25 @@
 
     importBtn.addEventListener('click',async()=>{
       if(!selectedBackupFiles.length)return;
-      if(!confirm('确定要恢复此备份？已有数据不会被覆盖，只会导入新数据。'))return;
+      const overwrite=!!(overwriteInput&&overwriteInput.checked);
+      const confirmText=overwrite
+        ?'确定要恢复此备份？已勾选「覆盖已存在的图片」：ID 相同的图会用备份里的分析结果覆盖更新，收藏与热度保留本地。'
+        :'确定要恢复此备份？已有数据不会被覆盖，只会导入新数据。';
+      if(!confirm(confirmText))return;
       importBtn.disabled=true;
       importBtn.textContent='正在恢复...';
       $('#backupStatus').textContent='上传并恢复中，请稍候...';
       try{
         const fd=new FormData();
         selectedBackupFiles.forEach(f=>fd.append('backup',f));
+        if(overwrite)fd.append('overwrite','1');
         const resp=await api('/api/backup/import',{method:'POST',body:fd});
         if(!resp){toast('恢复失败','error');$('#backupStatus').textContent='请求失败';return;}
         const data=await resp.json();
         if(data.success){
-          toast(`恢复成功！导入 ${data.imported} 条记录，${data.copied_files} 个图片文件`,'success');
-          $('#backupStatus').textContent=`导入 ${data.imported}/${data.total_in_backup} 条记录，${data.copied_files} 个图片文件`;
+          const ow=data.overwritten?`，覆盖 ${data.overwritten} 条`:'';
+          toast(`恢复成功！导入 ${data.imported} 条记录${ow}，${data.copied_files} 个图片文件`,'success');
+          $('#backupStatus').textContent=`导入 ${data.imported}/${data.total_in_backup} 条记录${ow}，${data.copied_files} 个图片文件`;
           state.page=1;state.allLoaded=false;loadImages(true);loadStats();
         }else{
           toast(data.error||'恢复失败','error');

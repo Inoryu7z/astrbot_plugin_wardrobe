@@ -468,12 +468,10 @@ class WardrobeWebServer:
             image = await self.plugin.db.get_image(image_id)
             if not image:
                 return jsonify({"error": "未找到图片"}), 404
-            deleted = await self.plugin.db.delete_image(image_id)
-            if deleted and image.get("image_path"):
-                await self.plugin.store.delete_image(image["image_path"])
-            if deleted:
-                await self.plugin._cleanup_videos_for_image(image_id)
-            return jsonify({"success": bool(deleted)})
+            # 走统一的删除入口（记录+文件+向量索引+视频）——
+            # 这里原先漏了清向量索引，会留下幽灵向量
+            ok = await self.plugin._purge_image(image_id, image)
+            return jsonify({"success": bool(ok)})
 
         @app.route("/api/images/<image_id>", methods=["PUT"])
         async def api_image_update(image_id):
@@ -666,18 +664,8 @@ class WardrobeWebServer:
             deleted_count = 0
             for image_id in ids:
                 image = await self.plugin.db.get_image(image_id)
-                if image:
-                    ok = await self.plugin.db.delete_image(image_id)
-                    if ok:
-                        deleted_count += 1
-                        if image.get("image_path"):
-                            await self.plugin.store.delete_image(image["image_path"])
-                        if self.plugin.vector_searcher:
-                            try:
-                                await self.plugin.vector_searcher.remove_image(image_id)
-                            except Exception:
-                                pass
-                        await self.plugin._cleanup_videos_for_image(image_id)
+                if image and await self.plugin._purge_image(image_id, image):
+                    deleted_count += 1
             return jsonify({"success": True, "deleted": deleted_count})
 
         @app.route("/api/images/batch-favorite", methods=["POST"])
@@ -1329,6 +1317,14 @@ class WardrobeWebServer:
                 if not uploaded_files:
                     return jsonify({"error": "未选择备份文件"}), 400
 
+                # 「覆盖已存在的图片」：勾选后按 id 命中就用备份里的分析结果覆盖更新
+                # （收藏 / 热度 / 图片路径 / 人格保留本地，见 database.import_records）
+                try:
+                    form = await request.form
+                except Exception:
+                    form = {}
+                overwrite = str(form.get("overwrite", "") or "").lower() in ("1", "true", "on", "yes")
+
                 file_info = []
                 for file in uploaded_files:
                     file_bytes = file.read()
@@ -1362,6 +1358,7 @@ class WardrobeWebServer:
                 file_info.sort(key=lambda x: (0 if x["type"] == "full" else 1, x["export_time"]))
 
                 total_imported = 0
+                total_overwritten = 0
                 total_copied_files = 0
                 total_imported_videos = 0
                 total_copied_videos = 0
@@ -1411,8 +1408,19 @@ class WardrobeWebServer:
                         await asyncio.to_thread(_copy_images, images_src, images_dst, records)
 
                     total_copied_files += copied_files
-                    imported = await self.plugin.db.import_records(records, skip_existing=True)
+                    imported, overwritten_ids = await self.plugin.db.import_records(
+                        records, skip_existing=True, overwrite=overwrite,
+                    )
                     total_imported += imported
+                    total_overwritten += len(overwritten_ids)
+                    # 被覆盖的记录描述变了 → 先从向量索引里摘掉，下面的 index_existing_images()
+                    # 才会用新描述重新 embedding（那个函数只补"不在映射里"的 id）
+                    if overwritten_ids and self.plugin.vector_searcher and self.plugin.vector_searcher.available:
+                        for wid in overwritten_ids:
+                            try:
+                                await self.plugin.vector_searcher.remove_image(wid)
+                            except Exception as e:
+                                logger.debug("[Wardrobe] 覆盖后清理向量失败: id=%s error=%s", wid, e)
 
                     videos_path = Path(tmp_dir) / "videos.json"
                     if videos_path.exists():
@@ -1486,17 +1494,18 @@ class WardrobeWebServer:
                         except Exception as e:
                             logger.warning("[Wardrobe] 备份恢复视频设置失败: %s", e)
 
-                if total_imported > 0 and self.plugin.vector_searcher and self.plugin.vector_searcher.available:
+                if (total_imported > 0 or total_overwritten > 0) and self.plugin.vector_searcher and self.plugin.vector_searcher.available:
                     try:
                         await self.plugin.vector_searcher.index_existing_images()
                         logger.debug("[Wardrobe] 备份恢复后向量索引重建完成")
                     except Exception as e:
                         logger.warning("[Wardrobe] 备份恢复后向量索引重建失败: %s", e)
 
-                logger.info("[Wardrobe] 备份恢复: 导入%d条图片记录, 复制%d个图片文件, 导入%d条视频记录, 复制%d个视频文件", total_imported, total_copied_files, total_imported_videos, total_copied_videos)
+                logger.info("[Wardrobe] 备份恢复: 导入%d条图片记录, 覆盖%d条, 复制%d个图片文件, 导入%d条视频记录, 复制%d个视频文件", total_imported, total_overwritten, total_copied_files, total_imported_videos, total_copied_videos)
                 return jsonify({
                     "success": True,
                     "imported": total_imported,
+                    "overwritten": total_overwritten,
                     "copied_files": total_copied_files,
                     "total_in_backup": total_in_backup,
                     "imported_videos": total_imported_videos,
