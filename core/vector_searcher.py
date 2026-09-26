@@ -145,6 +145,51 @@ def _expand_phrase(phrase: str) -> list[str]:
     return uniq
 
 
+# ============================================================================
+# 索引文本组装
+#
+# 字段顺序与标签必须与入库时（main.py:_index_to_vector）一致——rerank 是拿
+# query 与候选文档算相关度，字面命中项的文档若只给 description、向量命中项给
+# 完整拼接，两边的文档不同构，字面项在精排阶段会天然吃亏。
+# ============================================================================
+_DOC_TEXT_FIELDS: list[tuple[str, str, bool]] = [
+    ("description", "", False),
+    ("user_tags", "标签", False),
+    ("style", "风格", True),
+    ("clothing_type", "服装", False),
+    ("exposure_features", "暴露特征", True),
+    ("key_features", "关键特征", True),
+    ("prop_objects", "道具", True),
+    ("allure_features", "魅力特征", True),
+    ("body_focus", "身体焦点", True),
+]
+
+
+def _field_text(value: Any, is_list: bool) -> str:
+    """把字段值转成纯文本：SQLite 原始字符串（可能是 JSON 数组的字面量）与已解析的 list 都能吃。"""
+    if isinstance(value, (list, tuple)):
+        return " ".join(str(v) for v in value if v)
+    text = str(value or "").strip()
+    if is_list and text.startswith("[") and text.endswith("]"):
+        try:
+            parsed = json.loads(text)
+        except (json.JSONDecodeError, TypeError):
+            return text
+        if isinstance(parsed, list):
+            return " ".join(str(v) for v in parsed if v)
+    return text
+
+
+def _compose_doc_text(fields: dict[str, Any]) -> str:
+    """按入库时的顺序与标签拼出完整索引文本。"""
+    parts: list[str] = []
+    for key, label, is_list in _DOC_TEXT_FIELDS:
+        text = _field_text(fields.get(key, ""), is_list)
+        if text:
+            parts.append(f"{label}: {text}" if label else text)
+    return " ".join(parts)
+
+
 
 class WardrobeVectorSearcher:
     def __init__(
@@ -378,22 +423,36 @@ class WardrobeVectorSearcher:
                     processed_query, persona, exclude_persona, filter_no_persona
                 )
             except Exception as e:
-                logger.warning("[Wardrobe] 关键词召回失败（回退纯向量）: %s", e)
+                # 带上栈：字面路被自己的 except 吞掉过一次（P0 tuple 取负），
+                # 只留一行 warning 的话表面上"功能已上线"、实际整条失效，很难发现。
+                logger.warning("[Wardrobe] 关键词召回失败（回退纯向量）: %s", e, exc_info=True)
                 kw_scores = {}
 
             if kw_scores:
                 max_kw = max(v[0] for v in kw_scores.values()) or 1.0
+                kw_ratio: dict[str, float] = {}
                 merged: dict[str, tuple[float, str]] = {}
                 for wid, sim, content in filtered:
                     merged[wid] = (sim, content)
                 for wid, (ks, kw_content) in kw_scores.items():
-                    bonus = _KEYWORD_BONUS * (ks / max_kw)
+                    ratio = ks / max_kw
+                    kw_ratio[wid] = ratio
+                    bonus = _KEYWORD_BONUS * ratio
                     if wid in merged:
                         merged[wid] = (merged[wid][0] + bonus, merged[wid][1])
                     else:
-                        merged[wid] = (bonus, kw_content)
+                        # 只靠字面命中的图向量分低于阈值（它们本来就是被阈值挡掉才需要兜底），
+                        # 若直接拿 bonus 参与排序，会被任何一张过了阈值的向量命中压到底部，
+                        # 再被下面的截断丢掉——字面路等于白做。所以给它们与向量分同一量纲：
+                        # 以阈值作基准再加字面加成，既能参与竞争，也不会凭空盖过更贴的向量结果。
+                        merged[wid] = (min_similarity + bonus, kw_content)
                 filtered = [(wid, sim, content) for wid, (sim, content) in merged.items()]
-                filtered.sort(key=lambda x: x[1], reverse=True)
+                # 同分时按字面证据强弱定序：否则"向量分 + 弱字面加成"和"阈值 + 强字面加成"
+                # 打平时会靠字典插入顺序（向量项在前）决定胜负，字面命中又被挤掉。
+                filtered.sort(key=lambda x: (-x[1], -kw_ratio.get(x[0], 0.0)))
+                # 候选池回到 k 张的规模：字面路不再是不受 search_candidate_limit 约束的第二池子
+                if len(filtered) > k:
+                    filtered = filtered[:k]
 
             if not filtered:
                 return []
@@ -535,7 +594,9 @@ class WardrobeVectorSearcher:
                     df[t] += 1
             if hit:
                 row_hits[wid] = hit
-                row_content[wid] = str(row.get("description", "") or "")
+                # 送 rerank 的文档用与入库同构的完整文本（原先只取 description，
+                # 与向量命中项的文档不同构，字面项在精排阶段天然吃亏）
+                row_content[wid] = _compose_doc_text(row)
 
         if not row_hits:
             return {}
@@ -569,7 +630,7 @@ class WardrobeVectorSearcher:
         # 会叠加出可观分数，盖过真正稀有的特征词——这一刀把它们压下去。
         if len(representatives) > _KEYWORD_MAX_TERMS:
             ranked_terms = sorted(
-                representatives, key=lambda t: -(math.log(n / (df[t] + 1)), len(t))
+                representatives, key=lambda t: (-math.log(n / (df[t] + 1)), -len(t))
             )
             representatives = set(ranked_terms[:_KEYWORD_MAX_TERMS])
 
@@ -665,34 +726,7 @@ class WardrobeVectorSearcher:
             rec = await self.db.get_image(wardrobe_id)
             if not rec:
                 return ""
-            text_parts = []
-            desc = rec.get("description", "")
-            if desc:
-                text_parts.append(desc)
-            tags = rec.get("user_tags", "")
-            if tags:
-                text_parts.append(f"标签: {tags}")
-            style_val = rec.get("style", "")
-            if isinstance(style_val, list):
-                style_val = " ".join(str(v) for v in style_val if v)
-            if style_val:
-                text_parts.append(f"风格: {style_val}")
-            clothing = rec.get("clothing_type", "")
-            if clothing:
-                text_parts.append(f"服装: {clothing}")
-            for field, label in [
-                ("exposure_features", "暴露特征"),
-                ("key_features", "关键特征"),
-                ("prop_objects", "道具"),
-                ("allure_features", "魅力特征"),
-                ("body_focus", "身体焦点"),
-            ]:
-                val = rec.get(field, "")
-                if isinstance(val, list):
-                    val = " ".join(str(v) for v in val if v)
-                if val:
-                    text_parts.append(f"{label}: {val}")
-            return " ".join(text_parts)
+            return _compose_doc_text(rec)
         except Exception:
             return ""
 

@@ -116,13 +116,13 @@ SEARCH_SELECT_SYSTEM_PROMPT = """# 角色
 
 
 SEARCH_VISION_SELECT_SYSTEM_PROMPT = """# 角色
-你是图片选择助手。你会直接看到若干张候选图片，请从中选出符合用户需求的图片。
+你是图片选择助手。你会直接看到若干张候选图片，并拿到每张图的用户标签，请从中选出符合用户需求的图片。
 
 # 任务
-只依据图片内容本身做判断，选出最符合用户需求的图片。不要依赖任何文字描述。
+判断依据是图片画面本身，外加**用户标签**——用户标签是用户本人对该图的标注，记的可能是画面上无法辨认的信息（如 cos 的角色名、作品名），必须采纳。
 
 # 输入方式
-图片按 1 开始依次编号（图1、图2……），用户消息里给出图号与图片 id 的对应关系。
+图片按 1 开始依次编号（图1、图2……），用户消息里给出图号、图片 id 与用户标签的对应关系。
 
 # 输出格式
 输出 JSON 对象：
@@ -134,15 +134,28 @@ SEARCH_VISION_SELECT_SYSTEM_PROMPT = """# 角色
 ```
 
 # 选择策略（优先级从高到低）
-1. 用户点名了的具体要素：服装款式与颜色、姿势、场景、道具。点名某项时，该项不匹配即排除
-2. 整体观感与需求的相关程度
-3. 候选之间内容相近时，选画面更完整、更能看清主体的一张
+1. 用户标签：用户本人标注，与画面判断冲突时以用户标签为准
+2. 用户点名的具体要素：服装款式与颜色、姿势、场景、道具、手部动作。点名某项时，该项不匹配即排除
+3. 整体观感与需求的相关程度
+4. 候选之间内容相近时，选画面更完整、更能看清主体的一张
 
 # 规则
 1. 最多选择 {max_select} 张，按匹配度从高到低排列图号
-2. 匹配标准宽松：完全匹配、大部分匹配、语义可能相关的都应返回，只有完全不匹配才排除
-3. 宁可多返回也不要漏掉可能匹配的图片，空结果是最差体验
-4. 只输出 JSON，不要输出解释"""
+2. 只选真正符合需求的图片：没有一张符合时返回空数组（"selected": []），不要为了凑数而挑不匹配的图片
+3. 只输出 JSON，不要输出解释"""
+
+
+def _vision_map_line(idx: int, cand: dict[str, Any]) -> str:
+    """视觉精选的「图号 ↔ id ↔ 用户标签」映射行。
+
+    user_tags 是视觉判断里唯一的文字例外（用户拍板）：它是用户本人对图片的标注，
+    可能记着画面上无法辨认的信息（cos 的角色名等）。其余字段仍不进视觉精选。
+    """
+    line = f"图{idx} = {cand['id']}"
+    tags = str(cand.get("user_tags", "") or "").strip()
+    if tags:
+        line += f" | 用户标签: {tags}"
+    return line
 
 
 # 喜爱程度对"有效热度"的折扣系数：同一热度下优先选喜爱的图。
@@ -939,11 +952,14 @@ class ImageSearcher:
         if len(pairs) <= max_select:
             return [c for c, _ in pairs]
 
-        mapping = "\n".join(f"图{i} = {c['id']}" for i, (c, _) in enumerate(pairs, 1))
+        mapping = "\n".join(
+            _vision_map_line(i, c) for i, (c, _) in enumerate(pairs, 1)
+        )
         prompt = (
             f"用户需求：{user_query}\n\n"
-            f"以下是 {len(pairs)} 张候选图片，图号与图片 id 的对应关系：\n{mapping}\n\n"
-            f"请只看图片内容，选出最符合需求的 {max_select} 张，返回图号。"
+            f"以下是 {len(pairs)} 张候选图片，图号、图片 id 与用户标签的对应关系：\n{mapping}\n\n"
+            f"请依据图片画面选出最符合需求的 {max_select} 张，返回图号；"
+            f"没有任何一张符合时返回空数组。"
         )
         system = SEARCH_VISION_SELECT_SYSTEM_PROMPT.format(max_select=max_select)
         image_urls = [path for _, path in pairs]
@@ -968,6 +984,14 @@ class ImageSearcher:
                     continue
                 if not isinstance(picked, list):
                     picked = [picked]
+                # 模型回空数组 = "没有一张符合"，这是有效判断，直接采信（用户拍板：
+                # 没找到就是没找到），既不回退文本精选、也不为凑数硬挑一张。
+                if not picked:
+                    logger.debug(
+                        "[Wardrobe] 视觉精选判定无匹配: 候选%d张 provider=%s",
+                        len(pairs), provider_id,
+                    )
+                    return []
                 # 模型可能回图号（整数），也可能直接回图片 id 字符串，两种都接受
                 idx_to_cand = {i: c for i, (c, _) in enumerate(pairs, 1)}
                 id_to_cand = {str(c["id"]): c for c, _ in pairs}
@@ -982,8 +1006,13 @@ class ImageSearcher:
                         cand = id_to_cand.get(str(item).strip())
                     if cand is not None and cand not in chosen:
                         chosen.append(cand)
+                # 有选择却一条都解析不出来（编号越界 / 幻觉 id / 格式错）：输出不可用，
+                # 属于失败而非"没找到"，交给调用方回退文本精选。
                 if not chosen:
-                    return []
+                    logger.warning(
+                        "[Wardrobe] 视觉精选返回的图号/ID 全部无法解析，转文本精选: %r", picked,
+                    )
+                    continue
                 logger.debug(
                     "[Wardrobe] 视觉精选命中 %d/%d 张 provider=%s",
                     len(chosen), len(pairs), provider_id,

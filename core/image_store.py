@@ -57,6 +57,10 @@ class ImageStore:
         thumb_path = self.get_thumbnail_path(filename)
         if thumb_path.exists():
             await asyncio.to_thread(thumb_path.unlink)
+        # 视觉精选用的 _v768.jpg 是同名独立缓存，不一起删就变成孤儿文件
+        vision_thumb_path = self.get_vision_thumbnail_path(filename)
+        if vision_thumb_path.exists():
+            await asyncio.to_thread(vision_thumb_path.unlink)
         return deleted
 
     async def read_image_bytes(self, filename: str) -> bytes | None:
