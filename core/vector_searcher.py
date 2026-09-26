@@ -36,6 +36,8 @@ _FOCUS_WEIGHT = 1.3
 #    该特征在库里高频 → IDF 低 → 被降权"的倒帮忙。
 # 2. IDF 只作为【区分度加成】，且有上限、有 df 下限（df 太小的词多半是噪声/错字）。
 # 3. 字面命中项不受 min_similarity 阈值限制，保底进入候选池。
+# 4. query 里「重点是X」声明的焦点特征命中时给【满额加成】——焦点是调用方写明的意图，
+#    不依赖全库词频；用 df 判"稀有"会随用户越收越多而自己失效（用户偏好特征必然高频）。
 # ============================================================================
 _KEYWORD_ENABLED = True
 
@@ -188,6 +190,29 @@ def _compose_doc_text(fields: dict[str, Any]) -> str:
         if text:
             parts.append(f"{label}: {text}" if label else text)
     return " ".join(parts)
+
+
+def _focus_terms(focus_text: str) -> list[str]:
+    """把「重点是X」里的 X 展开成焦点词元（含 X 本身）。
+
+    焦点是调用方声明的"本次核心视觉焦点"，命中它就给满额字面加成——它是**意图**，
+    不依赖全库词频，所以不会因为库里的图越收越多而自己失效（df 型稀有度判定会）。
+    纯虚词/量词不作数：复用切词同一张停用词表，不另设阈值。
+    """
+    text = (focus_text or "").strip()
+    if len(text) < 2 or text in _TERM_STOPWORDS:
+        return []
+    out = [text]
+    for t in _expand_phrase(text):
+        if len(t) >= 2 and t not in _TERM_STOPWORDS:
+            out.append(t)
+    seen: set[str] = set()
+    uniq: list[str] = []
+    for t in out:
+        if t not in seen:
+            seen.add(t)
+            uniq.append(t)
+    return uniq
 
 
 
@@ -419,14 +444,15 @@ class WardrobeVectorSearcher:
             # 字面路：细粒度特征在长描述里会被向量稀释甚至被阈值砍掉，
             # 这里用确定性匹配把命中的图保底送进候选池（不受 min_similarity 限制）。
             try:
-                kw_scores = await self._keyword_recall(
-                    processed_query, persona, exclude_persona, filter_no_persona
+                kw_scores, focus_hits = await self._keyword_recall(
+                    processed_query, persona, exclude_persona, filter_no_persona,
+                    focus_text=focus_term,
                 )
             except Exception as e:
                 # 带上栈：字面路被自己的 except 吞掉过一次（P0 tuple 取负），
                 # 只留一行 warning 的话表面上"功能已上线"、实际整条失效，很难发现。
                 logger.warning("[Wardrobe] 关键词召回失败（回退纯向量）: %s", e, exc_info=True)
-                kw_scores = {}
+                kw_scores, focus_hits = {}, set()
 
             if kw_scores:
                 max_kw = max(v[0] for v in kw_scores.values()) or 1.0
@@ -437,7 +463,11 @@ class WardrobeVectorSearcher:
                 for wid, (ks, kw_content) in kw_scores.items():
                     ratio = ks / max_kw
                     kw_ratio[wid] = ratio
-                    bonus = _KEYWORD_BONUS * ratio
+                    # 命中「重点是X」里声明的焦点特征 → 满额加成，不再按比例缩水。
+                    # 理由：X 是调用方写明的"本次核心视觉焦点"，是意图而不是统计推断，
+                    # 所以按比例归一化（会被泛词抬高分母）在这里没有意义，也会随图库内容漂移。
+                    # 其余命中仍按"该图字面分 / 最高字面分"给分，泛词自然只拿到很小的一份。
+                    bonus = _KEYWORD_BONUS if wid in focus_hits else _KEYWORD_BONUS * ratio
                     if wid in merged:
                         merged[wid] = (merged[wid][0] + bonus, merged[wid][1])
                     else:
@@ -529,17 +559,21 @@ class WardrobeVectorSearcher:
         persona: Optional[str],
         exclude_persona: str,
         filter_no_persona: bool,
-    ) -> dict[str, tuple[float, str]]:
-        """字面关键词召回，返回 {wardrobe_id: (关键词分, 文档文本)}。
+        focus_text: str = "",
+    ) -> tuple[dict[str, tuple[float, str]], set[str]]:
+        """字面关键词召回。
+
+        返回 (命中图 -> (关键词分, 文档文本), 命中「重点是X」焦点的图 id 集合)。
+        焦点单独回传，是因为它的加成规则与普通字面命中不同（见 search 的融合段）。
 
         与向量路互补：向量负责语义，字面负责细粒度特征的确定性命中。
-        任何异常都返回空 dict，调用方回退为纯向量结果，不影响取图。
+        任何异常都返回 ({}, set())，调用方回退为纯向量结果，不影响取图。
         """
         if not _KEYWORD_ENABLED:
-            return {}
+            return {}, set()
         phrases = _extract_query_terms(query)
         if not phrases:
-            return {}
+            return {}, set()
         candidates: list[str] = []
         for p in phrases:
             candidates.extend(_expand_phrase(p))
@@ -547,7 +581,7 @@ class WardrobeVectorSearcher:
         terms = [c for c in candidates if not (c in seen_c or seen_c.add(c))]
         db = self.db or (getattr(self.plugin, "db", None) if self.plugin else None)
         if db is None:
-            return {}
+            return {}, set()
 
         fields = [f for f, _ in _KEYWORD_FIELD_WEIGHTS]
         cols = ", ".join(["id"] + fields)
@@ -572,15 +606,17 @@ class WardrobeVectorSearcher:
                     rows = [dict(r) for r in await cur.fetchall()]
         except Exception as e:
             logger.warning("[Wardrobe] 关键词召回查询失败: %s", e)
-            return {}
+            return {}, set()
 
         if not rows:
-            return {}
+            return {}, set()
 
         # 第一轮：统计每个候选词元的命中数 df，并记录每张图命中了哪些词元、字段权重之和
         df: dict[str, int] = {t: 0 for t in terms}
         row_hits: dict[str, dict[str, float]] = {}
         row_content: dict[str, str] = {}
+        focus_hits: set[str] = set()
+        focus_terms = _focus_terms(focus_text)
         for row in rows:
             wid = str(row.get("id", "") or "")
             if not wid:
@@ -597,9 +633,15 @@ class WardrobeVectorSearcher:
                 # 送 rerank 的文档用与入库同构的完整文本（原先只取 description，
                 # 与向量命中项的文档不同构，字面项在精排阶段天然吃亏）
                 row_content[wid] = _compose_doc_text(row)
+            # 焦点命中独立于 df/词元筛选：它是调用方声明的意图，只要文本里出现就算，
+            # 不参与"稀有度"判定，也不会被 _KEYWORD_MAX_TERMS 那刀切掉。
+            if focus_terms and any(
+                ft in texts[f] for ft in focus_terms for f, _ in _KEYWORD_FIELD_WEIGHTS
+            ):
+                focus_hits.add(wid)
 
         if not row_hits:
-            return {}
+            return {}, focus_hits
 
         n = max(1, len(rows))
 
@@ -624,7 +666,7 @@ class WardrobeVectorSearcher:
             representatives.update(picked)
 
         if not representatives:
-            return {}
+            return {}, focus_hits
 
         # 只保留区分度最高的若干个词元：query 里的泛词（服装/照片/风格/动作）各自成词后
         # 会叠加出可观分数，盖过真正稀有的特征词——这一刀把它们压下去。
@@ -662,15 +704,16 @@ class WardrobeVectorSearcher:
                 scores[wid] = (score, row_content.get(wid, ""))
 
         if not scores:
-            return {}
+            return {}, focus_hits
 
         ranked = sorted(scores.items(), key=lambda kv: kv[1][0], reverse=True)
         trimmed = dict(ranked[:_KEYWORD_MAX_ITEMS])
+        trimmed_focus = {wid for wid in focus_hits if wid in trimmed}
         logger.debug(
-            "[Wardrobe] 关键词召回: 词元%d个 命中%d张 并入%d张",
-            len(terms), len(scores), len(trimmed),
+            "[Wardrobe] 关键词召回: 词元%d个 命中%d张 并入%d张 焦点命中%d张",
+            len(terms), len(scores), len(trimmed), len(trimmed_focus),
         )
-        return trimmed
+        return trimmed, trimmed_focus
 
     async def _rerank_results(
         self,
