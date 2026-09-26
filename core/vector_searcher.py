@@ -1,4 +1,5 @@
 import json
+import math
 import os
 import re
 import time
@@ -22,6 +23,127 @@ except ImportError:
 _FOCUS_PREFIX_RE = re.compile(r"^重点是(.+?)[。.]")
 # 焦点路召回的 similarity 加权倍数（让焦点匹配的图更易进入候选池）
 _FOCUS_WEIGHT = 1.3
+
+# ============================================================================
+# 关键词召回（字面路）
+#
+# 存在理由：向量检索把整段描述压成一个向量，细粒度特征（某个手势、某个配饰）
+# 在长描述里被稀释，短 query 与其算相似度还过不了 min_similarity 阈值——
+# 结果就是"语义相近但特征不对"的图占满候选池。字面匹配是确定性的，用来兜这个底。
+#
+# 设计要点：
+# 1. 命中即给【基础分】，基础分只按字段权重算，**与词频无关**——避免"用户偏好导致
+#    该特征在库里高频 → IDF 低 → 被降权"的倒帮忙。
+# 2. IDF 只作为【区分度加成】，且有上限、有 df 下限（df 太小的词多半是噪声/错字）。
+# 3. 字面命中项不受 min_similarity 阈值限制，保底进入候选池。
+# ============================================================================
+_KEYWORD_ENABLED = True
+
+# 字段权重：命中即按此给基础分（用户标注 > 魅力特征 > 关键特征 > 其余）
+# 说明：allure_features 权重高于 key_features——多数取图诉求是冲着这个字段去的。
+_KEYWORD_FIELD_WEIGHTS: list[tuple[str, float]] = [
+    ("user_tags", 4.0),
+    ("allure_features", 3.5),
+    ("key_features", 3.0),
+    ("exposure_features", 1.5),
+    ("body_focus", 1.5),
+    ("prop_objects", 1.5),
+    ("description", 1.0),
+    ("clothing_type", 0.5),
+    ("style", 0.5),
+]
+_KEYWORD_BASE_WEIGHT = 1.0     # 基础分系数
+_KEYWORD_BASE_FLOOR = 0.2      # 基础分的 df 折扣下限：泛词可以打折，但不许打到 0
+                               # （否则用户偏好的高频特征会被降到跟没命中一样，帮倒忙）
+_KEYWORD_IDF_WEIGHT = 1.0      # 区分度加成系数
+_KEYWORD_IDF_MAX = 3.0         # IDF 上限，防止极稀有噪声词被抬上天
+_KEYWORD_MIN_DF = 2            # 命中数低于此值不享受 IDF 加成（多半是噪声）
+_KEYWORD_BONUS = 0.5           # 字面分归一化后可加成的最大相似度
+_KEYWORD_MAX_TERMS = 6         # 全局只保留区分度最高的词元数（压泛词、控开销）
+_KEYWORD_TERMS_PER_IMAGE = 3   # 每张图最多累计几个词元
+_KEYWORD_TERM_DECAY = (1.0, 0.5, 0.25)  # 第 2、3 个词元边际衰减：
+                               # 否则"命中一堆泛词"的图会靠数量盖过"命中一个稀有特征"的图；
+                               # 保留多个高价值词（如同时命中三个条件）的累加优势
+_KEYWORD_MAX_ITEMS = 30        # 最多把多少张字面命中图并入候选
+
+# jieba 是 AstrBot 框架自带依赖（backend/app/requirements.txt: jieba>=0.42.1），
+# 不需要写进本插件 requirements；但依然 try 包一层，取不到时回退到子串滑窗。
+try:
+    import logging as _std_logging
+
+    import jieba
+
+    jieba.setLogLevel(_std_logging.ERROR)
+    _JIEBA_AVAILABLE = True
+except Exception:  # pragma: no cover
+    jieba = None
+    _JIEBA_AVAILABLE = False
+
+# 纯虚词/量词才进停用词表；泛词（cosplay、风格等）交给 IDF 自动降权，不手工列
+_TERM_STOPWORDS = {
+    "一张", "一个", "一张图", "照片", "图片", "画面", "这张", "那种", "这种",
+    "的", "了", "和", "与", "有", "在", "是", "这", "那", "也", "都", "要",
+    "我", "你", "她", "他", "它", "请", "给", "来", "去", "上", "下", "里",
+}
+_TERM_SPLIT_RE = re.compile(r"[，。、；：！？,.!?;:\s（）()\[\]【】《》\"'“”…·]+")
+_CJK_RE = re.compile(r"[\u4e00-\u9fff]")
+
+
+def _extract_query_terms(query: str) -> list[str]:
+    """按标点把 query 切成短语（虚词短语丢弃）。
+
+    不在这里做滑窗——子串展开放到召回阶段按 df 筛选后再做，
+    否则"重点是cosplay的服装"会被切成"是cos""lay的"这类垃圾片段，
+    其中恰好在图库里出现过的那些会白白堆高无关图的分数。
+    """
+    if not query:
+        return []
+    out: list[str] = []
+    seen: set[str] = set()
+    for seg in _TERM_SPLIT_RE.split(query):
+        seg = seg.strip()
+        if len(seg) < 2 or seg in _TERM_STOPWORDS or seg in seen:
+            continue
+        seen.add(seg)
+        out.append(seg)
+    return out
+
+
+def _expand_phrase(phrase: str) -> list[str]:
+    """把一个短语展开成候选词元，按可靠性排序：短语本身 > jieba 分词 > 纯中文子串。
+
+    jieba 优先：它能正确切出"竖中指手势"→"中指"、"超薄白丝"→"超薄/白丝"这类词，
+    比盲切子串准得多（jieba 是 AstrBot 框架自带依赖，云端可用）。
+    子串滑窗只作兜底，覆盖 jieba 切不出来的新词/领域词（如某些服饰术语）。
+    df=0 的候选会在召回阶段自然淘汰。
+    """
+    out: list[str] = [phrase]
+    if _JIEBA_AVAILABLE and jieba is not None:
+        try:
+            for w in jieba.lcut_for_search(phrase):
+                w = w.strip()
+                if len(w) < 2 or w in _TERM_STOPWORDS:
+                    continue
+                out.append(w)
+        except Exception:
+            pass
+    for n in (4, 3, 2):
+        if n >= len(phrase):
+            continue
+        for i in range(len(phrase) - n + 1):
+            sub = phrase[i:i + n]
+            if sub in _TERM_STOPWORDS:
+                continue
+            if all(_CJK_RE.match(ch) for ch in sub):
+                out.append(sub)
+    seen: set[str] = set()
+    uniq: list[str] = []
+    for c in out:
+        if c not in seen:
+            seen.add(c)
+            uniq.append(c)
+    return uniq
+
 
 
 class WardrobeVectorSearcher:
@@ -249,6 +371,30 @@ class WardrobeVectorSearcher:
                         main_count, len(focus_filtered), len(filtered), focus_term,
                     )
 
+            # 字面路：细粒度特征在长描述里会被向量稀释甚至被阈值砍掉，
+            # 这里用确定性匹配把命中的图保底送进候选池（不受 min_similarity 限制）。
+            try:
+                kw_scores = await self._keyword_recall(
+                    processed_query, persona, exclude_persona, filter_no_persona
+                )
+            except Exception as e:
+                logger.warning("[Wardrobe] 关键词召回失败（回退纯向量）: %s", e)
+                kw_scores = {}
+
+            if kw_scores:
+                max_kw = max(v[0] for v in kw_scores.values()) or 1.0
+                merged: dict[str, tuple[float, str]] = {}
+                for wid, sim, content in filtered:
+                    merged[wid] = (sim, content)
+                for wid, (ks, kw_content) in kw_scores.items():
+                    bonus = _KEYWORD_BONUS * (ks / max_kw)
+                    if wid in merged:
+                        merged[wid] = (merged[wid][0] + bonus, merged[wid][1])
+                    else:
+                        merged[wid] = (bonus, kw_content)
+                filtered = [(wid, sim, content) for wid, (sim, content) in merged.items()]
+                filtered.sort(key=lambda x: x[1], reverse=True)
+
             if not filtered:
                 return []
 
@@ -317,6 +463,153 @@ class WardrobeVectorSearcher:
             doc_content = doc_data.get("content", "")
             filtered.append((wid, result.similarity, doc_content))
         return filtered
+
+    async def _keyword_recall(
+        self,
+        query: str,
+        persona: Optional[str],
+        exclude_persona: str,
+        filter_no_persona: bool,
+    ) -> dict[str, tuple[float, str]]:
+        """字面关键词召回，返回 {wardrobe_id: (关键词分, 文档文本)}。
+
+        与向量路互补：向量负责语义，字面负责细粒度特征的确定性命中。
+        任何异常都返回空 dict，调用方回退为纯向量结果，不影响取图。
+        """
+        if not _KEYWORD_ENABLED:
+            return {}
+        phrases = _extract_query_terms(query)
+        if not phrases:
+            return {}
+        candidates: list[str] = []
+        for p in phrases:
+            candidates.extend(_expand_phrase(p))
+        seen_c: set[str] = set()
+        terms = [c for c in candidates if not (c in seen_c or seen_c.add(c))]
+        db = self.db or (getattr(self.plugin, "db", None) if self.plugin else None)
+        if db is None:
+            return {}
+
+        fields = [f for f, _ in _KEYWORD_FIELD_WEIGHTS]
+        cols = ", ".join(["id"] + fields)
+        conds: list[str] = []
+        params: list[Any] = []
+        if filter_no_persona:
+            conds.append("(persona = '' OR persona IS NULL)")
+        elif persona:
+            conds.append("persona = ?")
+            params.append(persona)
+        if exclude_persona:
+            conds.append("persona != ?")
+            params.append(exclude_persona)
+        where = ("WHERE " + " AND ".join(conds)) if conds else ""
+
+        try:
+            import aiosqlite
+
+            async with aiosqlite.connect(db.db_path) as conn:
+                conn.row_factory = aiosqlite.Row
+                async with conn.execute(f"SELECT {cols} FROM images {where}", params) as cur:
+                    rows = [dict(r) for r in await cur.fetchall()]
+        except Exception as e:
+            logger.warning("[Wardrobe] 关键词召回查询失败: %s", e)
+            return {}
+
+        if not rows:
+            return {}
+
+        # 第一轮：统计每个候选词元的命中数 df，并记录每张图命中了哪些词元、字段权重之和
+        df: dict[str, int] = {t: 0 for t in terms}
+        row_hits: dict[str, dict[str, float]] = {}
+        row_content: dict[str, str] = {}
+        for row in rows:
+            wid = str(row.get("id", "") or "")
+            if not wid:
+                continue
+            texts = {f: str(row.get(f, "") or "") for f, _ in _KEYWORD_FIELD_WEIGHTS}
+            hit: dict[str, float] = {}
+            for t in terms:
+                fs = sum(w for f, w in _KEYWORD_FIELD_WEIGHTS if t in texts[f])
+                if fs > 0:
+                    hit[t] = fs
+                    df[t] += 1
+            if hit:
+                row_hits[wid] = hit
+                row_content[wid] = str(row.get("description", "") or "")
+
+        if not row_hits:
+            return {}
+
+        n = max(1, len(rows))
+
+        # 每个短语只保留一个代表词元：优先短语本身（最精确），
+        # 短语整体命中不了时才退到 df 最大的子串。避免同一特征被多个子串重复计分。
+        representatives: set[str] = set()
+        for p in phrases:
+            if df.get(p, 0) > 0:
+                representatives.add(p)
+                continue
+            cands = [c for c in _expand_phrase(p) if c != p and df.get(c, 0) > 0]
+            if not cands:
+                continue
+            # jieba 可能切出多个有效词（"超薄"/"白丝"），都保留；
+            # 只有"命中同一批图（df 相同）且互为子串"的才剔除，避免同一特征重复计分。
+            ordered = sorted(cands, key=lambda c: (-df[c], -len(c)))
+            picked: list[str] = []
+            for c in ordered:
+                if any(c in other and df[c] == df[other] for other in picked):
+                    continue
+                picked.append(c)
+            representatives.update(picked)
+
+        if not representatives:
+            return {}
+
+        # 只保留区分度最高的若干个词元：query 里的泛词（服装/照片/风格/动作）各自成词后
+        # 会叠加出可观分数，盖过真正稀有的特征词——这一刀把它们压下去。
+        if len(representatives) > _KEYWORD_MAX_TERMS:
+            ranked_terms = sorted(
+                representatives, key=lambda t: -(math.log(n / (df[t] + 1)), len(t))
+            )
+            representatives = set(ranked_terms[:_KEYWORD_MAX_TERMS])
+
+        # 第二轮：基础分（按 df 打折、有下限）+ 封顶的 IDF 加成
+        scores: dict[str, tuple[float, str]] = {}
+        for wid, hit in row_hits.items():
+            contributions: list[float] = []
+            for t, fs in hit.items():
+                if t not in representatives:
+                    continue
+                d = df.get(t, 0)
+                # 基础分：命中就给，但按 df 打折——否则"服装/照片/风格"这类泛词
+                # 各自贡献一点、叠加起来会盖过真正稀有的特征词。打折有下限，
+                # 保证高频偏好特征仍有可观分数（不至于被打成没命中）。
+                df_factor = max(_KEYWORD_BASE_FLOOR, 1.0 - (d / n))
+                contrib = fs * _KEYWORD_BASE_WEIGHT * df_factor
+                if d >= _KEYWORD_MIN_DF:
+                    idf = math.log(n / (d + 1))
+                    contrib += _KEYWORD_IDF_WEIGHT * min(_KEYWORD_IDF_MAX, max(0.0, idf))
+                contributions.append(contrib)
+            if not contributions:
+                continue
+            contributions.sort(reverse=True)
+            score = 0.0
+            for i, c in enumerate(contributions[:_KEYWORD_TERMS_PER_IMAGE]):
+                decay = _KEYWORD_TERM_DECAY[i] if i < len(_KEYWORD_TERM_DECAY) else _KEYWORD_TERM_DECAY[-1]
+                score += c * decay
+            if score > 0:
+                scores[wid] = (score, row_content.get(wid, ""))
+
+        if not scores:
+            return {}
+
+        ranked = sorted(scores.items(), key=lambda kv: kv[1][0], reverse=True)
+        trimmed = dict(ranked[:_KEYWORD_MAX_ITEMS])
+        logger.debug(
+            "[Wardrobe] 关键词召回: 词元%d个 命中%d张 并入%d张",
+            len(terms), len(scores), len(trimmed),
+        )
+        return trimmed
 
     async def _rerank_results(
         self,
