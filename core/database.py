@@ -1136,11 +1136,13 @@ class WardrobeDatabase:
         ref_strength: Optional[str] = None,
         desc_max_len: Optional[int] = None,
         stale_before: Optional[str] = None,
+        exclude_persona: str = "",
     ) -> list[str]:
         conditions, params = self._build_search_conditions(
             category=category, style=style, scene=scene, atmosphere=atmosphere,
             persona=persona or "", shot_size=shot_size, favorite=favorite, ref_strength=ref_strength,
             desc_max_len=desc_max_len, stale_before=stale_before,
+            exclude_persona=exclude_persona,
         )
         where_clause = ""
         if conditions:

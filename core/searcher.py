@@ -34,6 +34,14 @@ def _is_cosplay_style(record: dict[str, Any]) -> bool:
     return any(_COSPLAY_STYLE_KEYWORD in str(v).lower() for v in values if v)
 
 
+def _style_matches(record: dict[str, Any], keyword: str) -> bool:
+    """记录的 style 字段是否含指定关键词（子串语义，与 DB LIKE 过滤一致）。"""
+    style = record.get("style", "")
+    values = style if isinstance(style, (list, tuple, set)) else [style]
+    kw = str(keyword or "").lower()
+    return bool(kw) and any(kw in str(v).lower() for v in values if v)
+
+
 SEARCH_PARSE_SYSTEM_PROMPT = """# 角色
 你是图片检索意图解析助手。根据用户的自然语言描述，生成结构化的查询条件。
 
@@ -303,6 +311,7 @@ class ImageSearcher:
         prioritize_unused: bool = False,
         min_similarity: float | None = None,
         daily_selfie_mode: bool = False,
+        direct_style: str = "",
         persona_scope: str = "",
         deprioritize_ids: Optional[list[str]] = None,
     ) -> tuple[list[dict[str, Any]], dict[str, Any]]:
@@ -315,7 +324,38 @@ class ImageSearcher:
             if _recall_k and _recall_k > candidate_limit:
                 candidate_limit = int(_recall_k)
 
-        if self.vector_searcher and self.vector_searcher.available and exclude_current_persona and current_persona:
+        # 风格直取（免向量召回）：补拍指定 direct_style（如 cosplay）时，
+        # 直接按风格拉全量候选走冷梯队，query 与向量召回和选图彻底无关。
+        # 语义依据：cos 场景由参考图决定，query 里的场景词不得影响选到哪张图；
+        # 且纯风格 query 进向量召回本就无匹配意义。
+        # 排序不含相似度维度，冷梯队退化为「热度 → 最近使用」，纯确定性取图。
+        recall_bypassed = False
+        if daily_selfie_mode and direct_style:
+            async def _pull_direct(persona_filter: Optional[str], exclude: str = "") -> list[dict]:
+                ids = await self.db.get_ids_by_filter(
+                    style=[direct_style], persona=persona_filter, exclude_persona=exclude,
+                )
+                records = await self.db.get_records_by_ids(ids) if ids else []
+                return [c for c in records if _style_matches(c, direct_style)]
+
+            # 人格规则复刻向量路径：no_persona_only 只取无人格图且不回退；
+            # 其他模式无人格池空时回退「排除当前人格」的全量池
+            candidates = await _pull_direct("", current_persona)
+            if candidates:
+                meta["searched_persona"] = ""
+            else:
+                if persona_mode == "no_persona_only":
+                    logger.debug("[Wardrobe] 风格直取无候选图片（no_persona_only 不回退）")
+                    return [], meta
+                candidates = await _pull_direct(None, current_persona)
+                if candidates:
+                    meta["searched_persona"] = f"非{current_persona}" if current_persona else ""
+                    meta["persona_mismatch"] = True
+                else:
+                    logger.debug("[Wardrobe] 风格直取无候选图片（含回退）")
+                    return [], meta
+            recall_bypassed = True
+        elif self.vector_searcher and self.vector_searcher.available and exclude_current_persona and current_persona:
             if persona_mode == "no_persona_only":
                 candidates = await self._vector_search(user_query, k=candidate_limit, persona="", min_similarity=min_similarity)
                 logger.debug(
@@ -472,8 +512,10 @@ class ImageSearcher:
                     return [], meta
             else:
                 # 先并入冷图配额席位，保证极冷门/低相似度图也有机会进池
+                # 风格直取模式下跳过：候选已是该风格全量池，不存在池外更冷的图，
+                # 且席位合并依赖向量召回，与「免召回」语义冲突
                 _seats = _DAILY_SELFIE_COLD_SEATS
-                if _seats > 0 and candidates:
+                if _seats > 0 and candidates and not recall_bypassed:
                     candidates = await self._merge_cold_seats(
                         user_query, candidates, current_persona, _seats
                     )

@@ -1987,6 +1987,7 @@ Args:
         self, query: str, current_persona: str = "",
         min_similarity: float | None = None,
         daily_selfie_mode: bool = False,
+        direct_style: str = "",
     ) -> Optional[dict]:
         await self._ensure_db()
         await self._ensure_vector_searcher()
@@ -2023,6 +2024,7 @@ Args:
             prioritize_unused=bool(self._cfg("search_prioritize_unused", False)),
             min_similarity=min_similarity,
             daily_selfie_mode=daily_selfie_mode,
+            direct_style=direct_style,
         )
 
         if not results:
