@@ -48,7 +48,7 @@ _MIGRATION_STATE_FILE = "migration_state.json"
     "astrbot_plugin_wardrobe",
     "Inoryu7z",
     "图片衣柜管理插件，支持智能分类、语义检索和参考图接口",
-    "3.1.5",
+    "3.2.0",
 )
 class WardrobePlugin(Star):
     def __init__(self, context: Context, config: AstrBotConfig = None):
@@ -330,6 +330,10 @@ class WardrobePlugin(Star):
             need_reanalyze = []
             need_ref_strength_backfill = []
             for rec in records:
+                # 跳过「未分析」的图（批量存图勾选了跳过分析，analyzed=0）：
+                # 这些图由用户自己在 WebUI 挑时间重分析，不参与启动自动重分析
+                if not rec.get("analyzed", 1):
+                    continue
                 exp = rec.get("exposure_features", [])
                 key = rec.get("key_features", [])
                 prop = rec.get("prop_objects", [])
@@ -1391,6 +1395,7 @@ Args:
         created_by: str = "",
         user_description: str = "",
         ai_prompt: str = "",
+        skip_analysis: bool = False,
     ) -> tuple:
         await self._ensure_db()
 
@@ -1410,6 +1415,46 @@ Args:
 
         if user_description and len(user_description) > _MAX_DESCRIPTION_LEN:
             user_description = user_description[:_MAX_DESCRIPTION_LEN]
+
+        # 批量存图可选「跳过模型分析」（v3.2.0）：只存图，不调模型，analyzed=0。
+        # 用户之后在 WebUI 筛「未分析」自行挑时间重新分析；启动自动重分析会跳过这类图。
+        if skip_analysis:
+            filename = await self.store.save_image(image_bytes)
+            image_id = await self.db.add_image(
+                category="人物",  # 默认分类，分析后由模型纠正
+                style=[],
+                clothing_type="",
+                exposure_level="",
+                scene=[],
+                atmosphere=[],
+                pose_type="",
+                body_orientation="",
+                dynamic_level="",
+                action_style=[],
+                shot_size="",
+                camera_angle="",
+                expression="",
+                color_tone="",
+                composition="",
+                background="",
+                description=user_description,
+                user_tags=user_description,
+                exposure_features=[],
+                key_features=[],
+                prop_objects=[],
+                allure_features=[],
+                body_focus=[],
+                image_path=filename,
+                created_by=created_by,
+                persona=persona,
+                file_hash=file_hash,
+                ref_strength="style",
+                ref_strength_reason="",
+                ai_prompt=ai_prompt,
+                analyzed=0,
+            )
+            # 不建向量索引（无分析内容可索引）；后续「重新分析」成功后会补建
+            return image_id, None, None
 
         primary = str(self._cfg("save_provider_id", "") or "").strip()
         secondary = str(self._cfg("save_secondary_provider_id", "") or "").strip()

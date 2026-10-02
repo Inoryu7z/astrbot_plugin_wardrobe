@@ -47,7 +47,8 @@ CREATE TABLE IF NOT EXISTS images (
     ref_strength TEXT DEFAULT 'style',
     ref_strength_reason TEXT DEFAULT '',
     last_used_at TEXT DEFAULT '',
-    ai_prompt TEXT DEFAULT ''
+    ai_prompt TEXT DEFAULT '',
+    analyzed INTEGER DEFAULT 1
 );
 """
 
@@ -128,6 +129,7 @@ _UPDATABLE_FIELDS = frozenset({
     "daily_selfie_use_count",
     "ai_prompt",
     "ai_comment",
+    "analyzed",
 })
 
 # 「覆盖导入」允许被备份改写的字段：全部是分析产物（重分析后要同步到别的库的就是这些）。
@@ -204,6 +206,7 @@ class WardrobeDatabase:
                     ("daily_selfie_use_count", "INTEGER DEFAULT 0"),
                     ("ai_prompt", "TEXT DEFAULT ''"),
                     ("ai_comment", "TEXT DEFAULT ''"),
+                    ("analyzed", "INTEGER DEFAULT 1"),
                 ]:
                     try:
                         await db.execute(f"ALTER TABLE images ADD COLUMN {col} {default}")
@@ -290,6 +293,7 @@ class WardrobeDatabase:
         ref_strength_reason: str = "",
         ai_prompt: str = "",
         ai_comment: str = "",
+        analyzed: int = 1,
     ) -> str:
         now = datetime.now(timezone.utc).isoformat()
         image_id = str(uuid.uuid4())
@@ -302,8 +306,8 @@ class WardrobeDatabase:
                         dynamic_level, action_style, shot_size, camera_angle,
                         expression, color_tone, composition, background,
                         description, user_tags, exposure_features, key_features, prop_objects, allure_features, body_focus,
-                        persona, image_path, created_at, updated_at, created_by, favorite, use_count, file_hash, ref_strength, ref_strength_reason, ai_prompt, ai_comment
-                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+                        persona, image_path, created_at, updated_at, created_by, favorite, use_count, file_hash, ref_strength, ref_strength_reason, ai_prompt, ai_comment, analyzed
+                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
                     (
                         image_id,
                         category,
@@ -341,6 +345,7 @@ class WardrobeDatabase:
                         ref_strength_reason,
                         ai_prompt,
                         ai_comment,
+                        int(analyzed),
                     ),
                 )
                 await db.commit()
@@ -526,21 +531,20 @@ class WardrobeDatabase:
         favorite: Optional[str] = None,
         ref_strength: Optional[str] = None,
         desc_max_len: Optional[int] = None,
-        stale_before: Optional[str] = None,
+        unanalyzed: Optional[bool] = None,
     ) -> tuple[list[str], list[Any]]:
         conditions = []
         params: list[Any] = []
 
-        if desc_max_len is not None:
-            conditions.append("wb_charlen(COALESCE(description, '')) < ?")
-            params.append(int(desc_max_len))
+        # 【暂时停用 2026-10-02】描述长度筛选：功能保留但不再启用，前端入口已注释（index.html「描述长度」）。
+        # 恢复时取消下面注释，并恢复 index.html / app.js 中的 descLenFilter 相关代码。
+        # if desc_max_len is not None:
+        #     conditions.append("wb_charlen(COALESCE(description, '')) < ?")
+        #     params.append(int(desc_max_len))
 
-        if stale_before:
-            # 临时筛选：存入时间早于阈值，且此后属性再没被写过（未重分析）
-            conditions.append("substr(COALESCE(created_at, ''), 1, 19) < ?")
-            params.append(stale_before)
-            conditions.append("substr(COALESCE(updated_at, ''), 1, 19) < ?")
-            params.append(stale_before)
+        if unanalyzed:
+            # 仅看未分析的图（批量存图时勾选了「跳过模型分析」，analyzed=0）
+            conditions.append("COALESCE(analyzed, 1) = 0")
 
         if category:
             conditions.append("category = ?")
@@ -629,7 +633,7 @@ class WardrobeDatabase:
         favorite: Optional[str] = None,
         ref_strength: Optional[str] = None,
         desc_max_len: Optional[int] = None,
-        stale_before: Optional[str] = None,
+        unanalyzed: Optional[bool] = None,
         sort_by: str = "created_at",
         limit: int = 20,
         offset: int = 0,
@@ -641,7 +645,7 @@ class WardrobeDatabase:
             persona=persona, exclude_persona=exclude_persona,
             shot_size=shot_size, favorite=favorite,
             ref_strength=ref_strength, desc_max_len=desc_max_len,
-            stale_before=stale_before,
+            unanalyzed=unanalyzed,
         )
 
         where_clause = ""
@@ -685,7 +689,7 @@ class WardrobeDatabase:
         favorite: Optional[str] = None,
         ref_strength: Optional[str] = None,
         desc_max_len: Optional[int] = None,
-        stale_before: Optional[str] = None,
+        unanalyzed: Optional[bool] = None,
     ) -> int:
         conditions, params = self._build_search_conditions(
             category=category, exposure_level=exposure_level,
@@ -694,7 +698,7 @@ class WardrobeDatabase:
             persona=persona, exclude_persona=exclude_persona,
             shot_size=shot_size, favorite=favorite,
             ref_strength=ref_strength, desc_max_len=desc_max_len,
-            stale_before=stale_before,
+            unanalyzed=unanalyzed,
         )
 
         where_clause = ""
@@ -970,21 +974,20 @@ class WardrobeDatabase:
         favorite: Optional[str] = None,
         ref_strength: Optional[str] = None,
         desc_max_len: Optional[int] = None,
-        stale_before: Optional[str] = None,
+        unanalyzed: Optional[bool] = None,
         sort_by: str = "created_at",
         limit: int = 50,
         offset: int = 0,
     ) -> list[dict[str, Any]]:
         conditions = []
         params: list[Any] = []
-        if desc_max_len is not None:
-            conditions.append("wb_charlen(COALESCE(description, '')) < ?")
-            params.append(int(desc_max_len))
-        if stale_before:
-            conditions.append("substr(COALESCE(created_at, ''), 1, 19) < ?")
-            params.append(stale_before)
-            conditions.append("substr(COALESCE(updated_at, ''), 1, 19) < ?")
-            params.append(stale_before)
+        # 【暂时停用 2026-10-02】描述长度筛选：保留参数与代码，条件不再生效（同 _build_search_conditions）。
+        # if desc_max_len is not None:
+        #     conditions.append("wb_charlen(COALESCE(description, '')) < ?")
+        #     params.append(int(desc_max_len))
+        if unanalyzed:
+            # 仅看未分析的图（analyzed=0）
+            conditions.append("COALESCE(analyzed, 1) = 0")
         if category:
             conditions.append("category = ?")
             params.append(category)
@@ -1034,21 +1037,20 @@ class WardrobeDatabase:
         favorite: Optional[str] = None,
         ref_strength: Optional[str] = None,
         desc_max_len: Optional[int] = None,
-        stale_before: Optional[str] = None,
+        unanalyzed: Optional[bool] = None,
         sort_by: str = "created_at",
         limit: int = 50,
         offset: int = 0,
     ) -> list[dict[str, Any]]:
         conditions = []
         params: list[Any] = []
-        if desc_max_len is not None:
-            conditions.append("wb_charlen(COALESCE(description, '')) < ?")
-            params.append(int(desc_max_len))
-        if stale_before:
-            conditions.append("substr(COALESCE(created_at, ''), 1, 19) < ?")
-            params.append(stale_before)
-            conditions.append("substr(COALESCE(updated_at, ''), 1, 19) < ?")
-            params.append(stale_before)
+        # 【暂时停用 2026-10-02】描述长度筛选：保留参数与代码，条件不再生效（同 _build_search_conditions）。
+        # if desc_max_len is not None:
+        #     conditions.append("wb_charlen(COALESCE(description, '')) < ?")
+        #     params.append(int(desc_max_len))
+        if unanalyzed:
+            # 仅看未分析的图（analyzed=0）
+            conditions.append("COALESCE(analyzed, 1) = 0")
         if category:
             conditions.append("category = ?")
             params.append(category)
@@ -1135,13 +1137,13 @@ class WardrobeDatabase:
         favorite: Optional[str] = None,
         ref_strength: Optional[str] = None,
         desc_max_len: Optional[int] = None,
-        stale_before: Optional[str] = None,
+        unanalyzed: Optional[bool] = None,
         exclude_persona: str = "",
     ) -> list[str]:
         conditions, params = self._build_search_conditions(
             category=category, style=style, scene=scene, atmosphere=atmosphere,
             persona=persona or "", shot_size=shot_size, favorite=favorite, ref_strength=ref_strength,
-            desc_max_len=desc_max_len, stale_before=stale_before,
+            desc_max_len=desc_max_len, unanalyzed=unanalyzed,
             exclude_persona=exclude_persona,
         )
         where_clause = ""

@@ -127,6 +127,8 @@
         <option value="reimagine">🔄 重构</option>
       </select>
     </div>
+    <!-- 【暂时停用 2026-10-02】描述长度筛选：功能保留但不再启用。恢复时取消注释，并恢复 app.js 中 descLenFilter 相关代码 -->
+    <!--
     <div class="sidebar-section">
       <h3 class="sidebar-heading">描述长度</h3>
       <select id="descLenFilter" class="sidebar-select">
@@ -134,11 +136,12 @@
         <option value="500">描述 &lt; 500字</option>
       </select>
     </div>
+    -->
     <div class="sidebar-section">
-      <h3 class="sidebar-heading">未重分析</h3>
-      <select id="staleFilter" class="sidebar-select">
+      <h3 class="sidebar-heading">分析状态</h3>
+      <select id="unanalyzedFilter" class="sidebar-select">
         <option value="">全部</option>
-        <option value="2026-09-20T16:00:00">9.21前存入且未改动</option>
+        <option value="1">⏳ 未分析</option>
       </select>
     </div>
     <div class="sidebar-section">
@@ -503,6 +506,12 @@
       <label class="upload-label">描述（可选）</label>
       <input type="text" id="uploadDescription" class="login-input" placeholder="输入图片描述，如服装名称、特征等">
     </div>
+    <div class="upload-options">
+      <label class="filter-item" style="display:flex;align-items:center;gap:8px;cursor:pointer;">
+        <input type="checkbox" id="uploadSkipAnalysis">
+        <span class="filter-label">跳过模型分析（存入后稍后自行「重新分析」）</span>
+      </label>
+    </div>
     <button class="btn btn-accent btn-block" id="uploadSubmit" disabled>保存到衣橱</button>
     <div id="uploadStatus" class="upload-status"></div>
     <div class="upload-progress hidden" id="uploadProgress">
@@ -673,6 +682,6 @@
     </div>
   </div>
 
-<script src="/static/js/app.js?v=3.1.5"></script>
+<script src="/static/js/app.js?v=3.2.0"></script>
 </body>
 </html>

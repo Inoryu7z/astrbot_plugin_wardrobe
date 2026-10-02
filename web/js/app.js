@@ -56,7 +56,7 @@
 
   let state={
     page:1, perPage:24, total:0,
-    category:'', persona:'', style:'', scene:'', shot_size:'', atmosphere:'', favorite:'', ref_strength:'', desc_max_len:'', stale_before:'', sort_by:'created_at',
+    category:'', persona:'', style:'', scene:'', shot_size:'', atmosphere:'', favorite:'', ref_strength:'', desc_max_len:'', unanalyzed:'', sort_by:'created_at',
     searchQuery:'', batchMode:false,
     selectedIds:new Set(),
     currentImageId:null,
@@ -288,9 +288,9 @@
       if(state.searchQuery){
         url=`/api/search?q=${encodeURIComponent(state.searchQuery)}&persona=${encodeURIComponent(state.persona)}&category=${encodeURIComponent(state.category)}&favorite=${encodeURIComponent(state.favorite)}&limit=${state.perPage}`;
       }else if(state.sort_by==='random'){
-        url=`/api/images?page=1&per_page=500&category=${encodeURIComponent(state.category)}&persona=${encodeURIComponent(state.persona)}&style=${encodeURIComponent(state.style)}&scene=${encodeURIComponent(state.scene)}&shot_size=${encodeURIComponent(state.shot_size)}&atmosphere=${encodeURIComponent(state.atmosphere)}&favorite=${encodeURIComponent(state.favorite)}&ref_strength=${encodeURIComponent(state.ref_strength)}&sort_by=random&lightweight=1&desc_max_len=${encodeURIComponent(state.desc_max_len)}&stale_before=${encodeURIComponent(state.stale_before)}`;
+        url=`/api/images?page=1&per_page=500&category=${encodeURIComponent(state.category)}&persona=${encodeURIComponent(state.persona)}&style=${encodeURIComponent(state.style)}&scene=${encodeURIComponent(state.scene)}&shot_size=${encodeURIComponent(state.shot_size)}&atmosphere=${encodeURIComponent(state.atmosphere)}&favorite=${encodeURIComponent(state.favorite)}&ref_strength=${encodeURIComponent(state.ref_strength)}&sort_by=random&lightweight=1&desc_max_len=${encodeURIComponent(state.desc_max_len)}&unanalyzed=${encodeURIComponent(state.unanalyzed)}`;
       }else{
-        url=`/api/images?page=${state.page}&per_page=${state.perPage}&category=${encodeURIComponent(state.category)}&persona=${encodeURIComponent(state.persona)}&style=${encodeURIComponent(state.style)}&scene=${encodeURIComponent(state.scene)}&shot_size=${encodeURIComponent(state.shot_size)}&atmosphere=${encodeURIComponent(state.atmosphere)}&favorite=${encodeURIComponent(state.favorite)}&ref_strength=${encodeURIComponent(state.ref_strength)}&sort_by=${encodeURIComponent(state.sort_by)}&lightweight=1&desc_max_len=${encodeURIComponent(state.desc_max_len)}&stale_before=${encodeURIComponent(state.stale_before)}`;
+        url=`/api/images?page=${state.page}&per_page=${state.perPage}&category=${encodeURIComponent(state.category)}&persona=${encodeURIComponent(state.persona)}&style=${encodeURIComponent(state.style)}&scene=${encodeURIComponent(state.scene)}&shot_size=${encodeURIComponent(state.shot_size)}&atmosphere=${encodeURIComponent(state.atmosphere)}&favorite=${encodeURIComponent(state.favorite)}&ref_strength=${encodeURIComponent(state.ref_strength)}&sort_by=${encodeURIComponent(state.sort_by)}&lightweight=1&desc_max_len=${encodeURIComponent(state.desc_max_len)}&unanalyzed=${encodeURIComponent(state.unanalyzed)}`;
       }
 
       const resp=await api(url);
@@ -447,7 +447,7 @@
   async function preloadPage2AndOriginals(){
     if(!state.allLoaded){
       try{
-        const url=`/api/images?page=${state.page}&per_page=${state.perPage}&category=${encodeURIComponent(state.category)}&persona=${encodeURIComponent(state.persona)}&style=${encodeURIComponent(state.style)}&scene=${encodeURIComponent(state.scene)}&shot_size=${encodeURIComponent(state.shot_size)}&atmosphere=${encodeURIComponent(state.atmosphere)}&favorite=${encodeURIComponent(state.favorite)}&ref_strength=${encodeURIComponent(state.ref_strength)}&sort_by=${encodeURIComponent(state.sort_by)}&lightweight=1&desc_max_len=${encodeURIComponent(state.desc_max_len)}&stale_before=${encodeURIComponent(state.stale_before)}`;
+        const url=`/api/images?page=${state.page}&per_page=${state.perPage}&category=${encodeURIComponent(state.category)}&persona=${encodeURIComponent(state.persona)}&style=${encodeURIComponent(state.style)}&scene=${encodeURIComponent(state.scene)}&shot_size=${encodeURIComponent(state.shot_size)}&atmosphere=${encodeURIComponent(state.atmosphere)}&favorite=${encodeURIComponent(state.favorite)}&ref_strength=${encodeURIComponent(state.ref_strength)}&sort_by=${encodeURIComponent(state.sort_by)}&lightweight=1&desc_max_len=${encodeURIComponent(state.desc_max_len)}&unanalyzed=${encodeURIComponent(state.unanalyzed)}`;
         const resp=await api(url);
         if(resp&&resp.ok){
           const data=await resp.json();
@@ -462,7 +462,7 @@
   async function preloadNextPage(){
     if(state.allLoaded||state.preloadedPage2)return;
     try{
-      const url=`/api/images?page=${state.page}&per_page=${state.perPage}&category=${encodeURIComponent(state.category)}&persona=${encodeURIComponent(state.persona)}&style=${encodeURIComponent(state.style)}&scene=${encodeURIComponent(state.scene)}&shot_size=${encodeURIComponent(state.shot_size)}&atmosphere=${encodeURIComponent(state.atmosphere)}&favorite=${encodeURIComponent(state.favorite)}&ref_strength=${encodeURIComponent(state.ref_strength)}&sort_by=${encodeURIComponent(state.sort_by)}&lightweight=1&desc_max_len=${encodeURIComponent(state.desc_max_len)}&stale_before=${encodeURIComponent(state.stale_before)}`;
+      const url=`/api/images?page=${state.page}&per_page=${state.perPage}&category=${encodeURIComponent(state.category)}&persona=${encodeURIComponent(state.persona)}&style=${encodeURIComponent(state.style)}&scene=${encodeURIComponent(state.scene)}&shot_size=${encodeURIComponent(state.shot_size)}&atmosphere=${encodeURIComponent(state.atmosphere)}&favorite=${encodeURIComponent(state.favorite)}&ref_strength=${encodeURIComponent(state.ref_strength)}&sort_by=${encodeURIComponent(state.sort_by)}&lightweight=1&desc_max_len=${encodeURIComponent(state.desc_max_len)}&unanalyzed=${encodeURIComponent(state.unanalyzed)}`;
       const resp=await api(url);
       if(resp&&resp.ok){
         const data=await resp.json();
@@ -1063,7 +1063,7 @@
     btn.disabled=true;
     btn.textContent='加载中...';
     try{
-      let url=`/api/images/ids?category=${encodeURIComponent(state.category)}&persona=${encodeURIComponent(state.persona)}&style=${encodeURIComponent(state.style)}&scene=${encodeURIComponent(state.scene)}&shot_size=${encodeURIComponent(state.shot_size)}&atmosphere=${encodeURIComponent(state.atmosphere)}&favorite=${encodeURIComponent(state.favorite)}&ref_strength=${encodeURIComponent(state.ref_strength)}&desc_max_len=${encodeURIComponent(state.desc_max_len)}&stale_before=${encodeURIComponent(state.stale_before)}`;
+      let url=`/api/images/ids?category=${encodeURIComponent(state.category)}&persona=${encodeURIComponent(state.persona)}&style=${encodeURIComponent(state.style)}&scene=${encodeURIComponent(state.scene)}&shot_size=${encodeURIComponent(state.shot_size)}&atmosphere=${encodeURIComponent(state.atmosphere)}&favorite=${encodeURIComponent(state.favorite)}&ref_strength=${encodeURIComponent(state.ref_strength)}&desc_max_len=${encodeURIComponent(state.desc_max_len)}&unanalyzed=${encodeURIComponent(state.unanalyzed)}`;
       const resp=await api(url);
       if(!resp||!resp.ok){toast('获取图片列表失败','error');return;}
       const data=await resp.json();
@@ -1368,6 +1368,7 @@
         fd.append('image',selectedFiles[0]);
         fd.append('persona',$('#uploadPersona').value);
         fd.append('description',$('#uploadDescription').value);
+        fd.append('analyze',$('#uploadSkipAnalysis').checked?'0':'1');
         try{
           const resp=await api('/api/images/upload',{method:'POST',body:fd});
           if(!resp){toast('上传失败','error');$('#uploadStatus').textContent='请求失败';submitBtn.disabled=false;return;}
@@ -1381,7 +1382,7 @@
             return;
           }
           if(data.success){
-            toast('上传成功，正在分析...','success');
+            toast($('#uploadSkipAnalysis').checked?'上传成功（未分析，可稍后批量「重新分析」）':'上传成功，正在分析...','success');
             $('#uploadModal').classList.add('hidden');
             resetUpload();
             setTimeout(()=>{state.page=1;state.allLoaded=false;loadImages(true);loadStats();},2000);
@@ -1403,6 +1404,7 @@
 
         const persona=$('#uploadPersona').value;
         const description=$('#uploadDescription').value;
+        const skipAnalysis=$('#uploadSkipAnalysis').checked;
         const files=[...selectedFiles];
 
         state.batchUploading=true;
@@ -1410,7 +1412,7 @@
         state.batchOps=files.map((f,i)=>({id:f.name,type:'upload',file:f,status:'pending'}));
 
         $('#uploadModal').classList.add('hidden');
-        toast(`开始批量上传 ${files.length} 张图片`,'info');
+        toast(`开始批量上传 ${files.length} 张图片${skipAnalysis?'（跳过分析）':''}`,'info');
         updateBatchOpsPanel();
 
         const uploadPromises=[];
@@ -1427,6 +1429,7 @@
               fd.append('image',files[i]);
               fd.append('persona',persona);
               fd.append('description',description);
+              fd.append('analyze',skipAnalysis?'0':'1');
               const resp=await api('/api/images/upload',{method:'POST',body:fd});
               if(resp&&typeof resp.json==='function'&&!resp.error){
                 const data=await resp.json();
@@ -1479,6 +1482,7 @@
     function resetUpload(){
       selectedFiles=[];
       fileInput.value='';
+      const skipChk=$('#uploadSkipAnalysis');if(skipChk)skipChk.checked=false;
       preview.classList.add('hidden');
       fileList.classList.add('hidden');
       fileList.innerHTML='';
@@ -2062,11 +2066,11 @@
 
   function _statsChartClick(filterKey,value){
     toggleStatsView(false);
-    state.style='';state.scene='';state.atmosphere='';state.shot_size='';state.ref_strength='';state.desc_max_len='';state.stale_before='';
+    state.style='';state.scene='';state.atmosphere='';state.shot_size='';state.ref_strength='';state.desc_max_len='';state.unanalyzed='';
     $('#styleFilter').value='';$('#sceneFilter').value='';
     $('#atmosphereFilter').value='';$('#shotSizeFilter').value='';$('#refStrengthFilter').value='';
     if($('#descLenFilter'))$('#descLenFilter').value='';
-    if($('#staleFilter'))$('#staleFilter').value='';
+    $('#unanalyzedFilter').value='';
     if(filterKey==='style'){state.style=value;$('#styleFilter').value=value;}
     else if(filterKey==='scene'){state.scene=value;$('#sceneFilter').value=value;}
     else if(filterKey==='atmosphere'){state.atmosphere=value;$('#atmosphereFilter').value=value;}
@@ -2576,19 +2580,17 @@
       state.ref_strength=e.target.value;state.page=1;state.allLoaded=false;loadImages(true);
     });
 
-    const _descLenSel=$('#descLenFilter');
-    if(_descLenSel){
-      _descLenSel.addEventListener('change',e=>{
-        state.desc_max_len=e.target.value;state.page=1;state.allLoaded=false;loadImages(true);
-      });
-    }
+    // 【暂时停用 2026-10-02】描述长度筛选：功能保留但不再启用，index.html 中入口已注释。恢复时取消下面注释。
+    // const _descLenSel=$('#descLenFilter');
+    // if(_descLenSel){
+    //   _descLenSel.addEventListener('change',e=>{
+    //     state.desc_max_len=e.target.value;state.page=1;state.allLoaded=false;loadImages(true);
+    //   });
+    // }
 
-    const _staleSel=$('#staleFilter');
-    if(_staleSel){
-      _staleSel.addEventListener('change',e=>{
-        state.stale_before=e.target.value;state.page=1;state.allLoaded=false;loadImages(true);
-      });
-    }
+    $('#unanalyzedFilter').addEventListener('change',e=>{
+      state.unanalyzed=e.target.value;state.page=1;state.allLoaded=false;loadImages(true);
+    });
 
     $('#poolsBtn').addEventListener('click',()=>{$('#poolsModal').classList.remove('hidden');_poolsState.currentTab='global';loadPoolsModal();});
     $('#poolsModalClose').addEventListener('click',()=>{$('#poolsModal').classList.add('hidden');});

@@ -1,7 +1,6 @@
 import asyncio
 import json
 import os
-import re
 import secrets
 import shutil
 import tempfile
@@ -82,17 +81,6 @@ class WardrobeWebServer:
         dl_expired = [t for t, info in self._download_tokens.items() if time.time() > info["expires"]]
         for t in dl_expired:
             del self._download_tokens[t]
-
-    @staticmethod
-    def _parse_stale_before(raw: str) -> Optional[str]:
-        """解析 stale_before：只取 YYYY-MM-DDTHH:MM:SS 前 19 位，格式不符则返回 None。"""
-        raw = (raw or "").strip()
-        if len(raw) < 19:
-            return None
-        head = raw[:19]
-        if not re.match(r"^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}$", head):
-            return None
-        return head
 
     @staticmethod
     def _parse_desc_max_len(raw: str) -> Optional[int]:
@@ -363,7 +351,7 @@ class WardrobeWebServer:
             lightweight = request.args.get("lightweight", "") == "1"
 
             desc_max_len = self._parse_desc_max_len(request.args.get("desc_max_len", ""))
-            stale_before = self._parse_stale_before(request.args.get("stale_before", ""))
+            unanalyzed = request.args.get("unanalyzed", "") == "1"
 
             offset = (page - 1) * per_page
 
@@ -382,7 +370,7 @@ class WardrobeWebServer:
                     favorite=favorite if favorite in ("favorite", "like", "meh") else None,
                     ref_strength=ref_strength or None,
                     desc_max_len=desc_max_len,
-                    stale_before=stale_before,
+                    unanalyzed=unanalyzed,
                     sort_by=sort_by,
                     limit=per_page,
                     offset=offset,
@@ -397,7 +385,7 @@ class WardrobeWebServer:
                     favorite=favorite if favorite in ("favorite", "like", "meh") else None,
                     ref_strength=ref_strength or None,
                     desc_max_len=desc_max_len,
-                    stale_before=stale_before,
+                    unanalyzed=unanalyzed,
                 )
             elif lightweight:
                 images = await self.plugin.db.list_images_lightweight(
@@ -407,7 +395,7 @@ class WardrobeWebServer:
                     favorite=favorite if favorite in ("favorite", "like", "meh") else None,
                     ref_strength=ref_strength or None,
                     desc_max_len=desc_max_len,
-                    stale_before=stale_before,
+                    unanalyzed=unanalyzed,
                     sort_by=sort_by,
                     limit=per_page,
                     offset=offset,
@@ -419,7 +407,7 @@ class WardrobeWebServer:
                     favorite=favorite if favorite in ("favorite", "like", "meh") else None,
                     ref_strength=ref_strength or None,
                     desc_max_len=desc_max_len,
-                    stale_before=stale_before,
+                    unanalyzed=unanalyzed,
                 )
             else:
                 images = await self.plugin.db.list_images(
@@ -427,7 +415,7 @@ class WardrobeWebServer:
                     favorite=favorite if favorite in ("favorite", "like", "meh") else None,
                     ref_strength=ref_strength or None,
                     desc_max_len=desc_max_len,
-                    stale_before=stale_before,
+                    unanalyzed=unanalyzed,
                     sort_by=sort_by,
                     limit=per_page, offset=offset
                 )
@@ -437,7 +425,7 @@ class WardrobeWebServer:
                     favorite=favorite if favorite in ("favorite", "like", "meh") else None,
                     ref_strength=ref_strength or None,
                     desc_max_len=desc_max_len,
-                    stale_before=stale_before,
+                    unanalyzed=unanalyzed,
                 )
 
             result = {
@@ -602,6 +590,9 @@ class WardrobeWebServer:
                 if user_description:
                     update_data["user_tags"] = user_description
 
+                # 分析完成，标记为已分析（批量存图跳过分析的图 analyzed=0，此处翻转为 1）
+                update_data["analyzed"] = 1
+
                 await self.plugin.db.update_image(image_id, **update_data)
                 logger.debug("[Wardrobe] 重新分析完成: id=%s 分类=%s",
                             image_id, attrs.get("category", ""))
@@ -755,7 +746,7 @@ class WardrobeWebServer:
             favorite = request.args.get("favorite", "")
             ref_strength = request.args.get("ref_strength", "")
             desc_max_len = self._parse_desc_max_len(request.args.get("desc_max_len", ""))
-            stale_before = self._parse_stale_before(request.args.get("stale_before", ""))
+            unanalyzed = request.args.get("unanalyzed", "") == "1"
 
             style_list = [style] if style else None
             scene_list = [scene] if scene else None
@@ -771,7 +762,7 @@ class WardrobeWebServer:
                 favorite=favorite if favorite in ("favorite", "like", "meh") else None,
                 ref_strength=ref_strength or None,
                 desc_max_len=desc_max_len,
-                stale_before=stale_before,
+                unanalyzed=unanalyzed,
             )
             return jsonify({"ids": ids})
 
@@ -935,14 +926,17 @@ class WardrobeWebServer:
                 persona = form.get("persona", "")
                 persona = self.plugin._resolve_persona(persona)
                 description = form.get("description", "")
+                # 勾选「跳过模型分析」时 analyze=0：只存图不入分析，用户稍后自行重分析（v3.2.0）
+                skip_analysis = form.get("analyze", "1") in ("0", "false", "False")
 
                 max_size = 20  # 与 main.py _MAX_IMAGE_SIZE_MB 保持一致
                 if len(image_bytes) > max_size * 1024 * 1024:
                     return jsonify({"error": f"图片过大，限制{max_size}MB"}), 400
 
-                logger.debug("[Wardrobe] WebUI上传图片: 大小=%.2fKB 人格=%s 描述=%s", len(image_bytes) / 1024, persona or "无", description or "无")
+                logger.debug("[Wardrobe] WebUI上传图片: 大小=%.2fKB 人格=%s 描述=%s 跳过分析=%s", len(image_bytes) / 1024, persona or "无", description or "无", skip_analysis)
                 image_id, attrs, duplicate = await self.plugin._save_image_from_bytes(
-                    image_bytes, persona=persona, created_by="webui", user_description=description
+                    image_bytes, persona=persona, created_by="webui", user_description=description,
+                    skip_analysis=skip_analysis
                 )
 
                 if duplicate:
