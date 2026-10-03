@@ -2033,6 +2033,7 @@ Args:
         min_similarity: float | None = None,
         daily_selfie_mode: bool = False,
         direct_style: str = "",
+        exclude_style_keywords: tuple[str, ...] = (),
     ) -> Optional[dict]:
         await self._ensure_db()
         await self._ensure_vector_searcher()
@@ -2070,6 +2071,7 @@ Args:
             min_similarity=min_similarity,
             daily_selfie_mode=daily_selfie_mode,
             direct_style=direct_style,
+            exclude_style_keywords=exclude_style_keywords,
         )
 
         if not results:

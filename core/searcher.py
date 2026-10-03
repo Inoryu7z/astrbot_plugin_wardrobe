@@ -312,6 +312,7 @@ class ImageSearcher:
         min_similarity: float | None = None,
         daily_selfie_mode: bool = False,
         direct_style: str = "",
+        exclude_style_keywords: Optional[tuple[str, ...]] = (),
         persona_scope: str = "",
         deprioritize_ids: Optional[list[str]] = None,
     ) -> tuple[list[dict[str, Any]], dict[str, Any]]:
@@ -462,6 +463,26 @@ class ImageSearcher:
             )
             if restrict_cosplay:
                 candidates = [c for c in candidates if _is_cosplay_style(c)]
+
+        # 风格排除（与 restrict_cosplay 对称）：调用方指定 exclude_style_keywords 时，
+        # 召回候选剔除命中这些风格的图。补拍非 cosplay 条目传 ("cosplay",)——
+        # cos 图只准被 cosplay 条目全保留使用，绝不允许被非 cosplay 条目
+        # 以 reimagine 身份改场景出图（「cos 图被改场景」的根源）。
+        # 排除在 use_count 注入 / cold seats / 冷梯队之前，被排除图不计热度、不占席位。
+        exclude_style_keywords = exclude_style_keywords or ()
+        if exclude_style_keywords:
+            before_exclude = len(candidates)
+            candidates = [
+                c for c in candidates
+                if not any(_style_matches(c, kw) for kw in exclude_style_keywords)
+            ]
+            logger.debug(
+                "[Wardrobe] 风格排除 %s：%d -> %d 张",
+                ",".join(exclude_style_keywords), before_exclude, len(candidates),
+            )
+            if not candidates:
+                logger.debug("[Wardrobe] 风格排除后无候选图片")
+                return [], meta
 
         # 按当前人格注入 use_count（按人格独立热度）
         # current_persona 为空时（空人格）不记热度，use_count 保持 0
