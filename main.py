@@ -2111,6 +2111,9 @@ Args:
             "image_id": best["id"],
             "ref_strength": best.get("ref_strength", "style"),
             "user_tags": best.get("user_tags", ""),
+            # style 透传：aiimg 补拍按参考图自身 style 标签做图片层 cos 判定
+            #（标签含 "cosplay" 即铁律全保留，与条目风格无关），缺省空串不劣化
+            "style": best.get("style", ""),
         }
 
     async def _ensure_vector_searcher(self):
