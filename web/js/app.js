@@ -50,13 +50,13 @@
     {key:'ai_prompt',label:'AI提示词',type:'textarea',hideIfEmpty:true,hint:'由 aiimg 插件生成该图时所用的提示词'},
     {key:'ai_comment',label:'AI点评',type:'textarea',hideIfEmpty:true,readonly:true,hint:'由评论模型生成的图片点评'},
     {key:'persona',label:'人格',type:'text'},
-    {key:'favorite',label:'收藏',type:'select',options:['none','favorite','like','meh']},
+    {key:'favorite',label:'收藏',type:'select',options:['none','favorite','like']},
     {key:'use_count',label:'热度',type:'number',min:0,readonly:true},
   ];
 
   let state={
     page:1, perPage:24, total:0,
-    category:'', persona:'', style:'', scene:'', shot_size:'', atmosphere:'', favorite:'', ref_strength:'', desc_max_len:'', unanalyzed:'', sort_by:'created_at',
+    category:'', persona:'', style:'', scene:'', shot_size:'', atmosphere:'', favorite:'', perfect:false, ref_strength:'', desc_max_len:'', unanalyzed:'', sort_by:'created_at',
     searchQuery:'', batchMode:false,
     selectedIds:new Set(),
     currentImageId:null,
@@ -286,11 +286,11 @@
     }else{
       let url;
       if(state.searchQuery){
-        url=`/api/search?q=${encodeURIComponent(state.searchQuery)}&persona=${encodeURIComponent(state.persona)}&category=${encodeURIComponent(state.category)}&favorite=${encodeURIComponent(state.favorite)}&limit=${state.perPage}`;
+        url=`/api/search?q=${encodeURIComponent(state.searchQuery)}&persona=${encodeURIComponent(state.persona)}&category=${encodeURIComponent(state.category)}&favorite=${encodeURIComponent(state.favorite)}&perfect=${state.perfect?1:''}&limit=${state.perPage}`;
       }else if(state.sort_by==='random'){
-        url=`/api/images?page=1&per_page=500&category=${encodeURIComponent(state.category)}&persona=${encodeURIComponent(state.persona)}&style=${encodeURIComponent(state.style)}&scene=${encodeURIComponent(state.scene)}&shot_size=${encodeURIComponent(state.shot_size)}&atmosphere=${encodeURIComponent(state.atmosphere)}&favorite=${encodeURIComponent(state.favorite)}&ref_strength=${encodeURIComponent(state.ref_strength)}&sort_by=random&lightweight=1&desc_max_len=${encodeURIComponent(state.desc_max_len)}&unanalyzed=${encodeURIComponent(state.unanalyzed)}`;
+        url=`/api/images?page=1&per_page=500&category=${encodeURIComponent(state.category)}&persona=${encodeURIComponent(state.persona)}&style=${encodeURIComponent(state.style)}&scene=${encodeURIComponent(state.scene)}&shot_size=${encodeURIComponent(state.shot_size)}&atmosphere=${encodeURIComponent(state.atmosphere)}&favorite=${encodeURIComponent(state.favorite)}&perfect=${state.perfect?1:''}&ref_strength=${encodeURIComponent(state.ref_strength)}&sort_by=random&lightweight=1&desc_max_len=${encodeURIComponent(state.desc_max_len)}&unanalyzed=${encodeURIComponent(state.unanalyzed)}`;
       }else{
-        url=`/api/images?page=${state.page}&per_page=${state.perPage}&category=${encodeURIComponent(state.category)}&persona=${encodeURIComponent(state.persona)}&style=${encodeURIComponent(state.style)}&scene=${encodeURIComponent(state.scene)}&shot_size=${encodeURIComponent(state.shot_size)}&atmosphere=${encodeURIComponent(state.atmosphere)}&favorite=${encodeURIComponent(state.favorite)}&ref_strength=${encodeURIComponent(state.ref_strength)}&sort_by=${encodeURIComponent(state.sort_by)}&lightweight=1&desc_max_len=${encodeURIComponent(state.desc_max_len)}&unanalyzed=${encodeURIComponent(state.unanalyzed)}`;
+        url=`/api/images?page=${state.page}&per_page=${state.perPage}&category=${encodeURIComponent(state.category)}&persona=${encodeURIComponent(state.persona)}&style=${encodeURIComponent(state.style)}&scene=${encodeURIComponent(state.scene)}&shot_size=${encodeURIComponent(state.shot_size)}&atmosphere=${encodeURIComponent(state.atmosphere)}&favorite=${encodeURIComponent(state.favorite)}&perfect=${state.perfect?1:''}&ref_strength=${encodeURIComponent(state.ref_strength)}&sort_by=${encodeURIComponent(state.sort_by)}&lightweight=1&desc_max_len=${encodeURIComponent(state.desc_max_len)}&unanalyzed=${encodeURIComponent(state.unanalyzed)}`;
       }
 
       const resp=await api(url);
@@ -381,11 +381,12 @@
       const card=document.createElement('div');
       card.className='image-card';
       card.dataset.id=img.id;
+      if(img.perfect)card.dataset.perfect='1';
       card.dataset.aspectRatio=aspectRatio;
       card.style.gridRowEnd='span '+height;
       card.style.containIntrinsicSize='auto '+height+'px';
       const personaText=img.persona?`<div class="image-card-persona">${esc(img.persona)}</div>`:'';
-      const favIcon=img.favorite==='favorite'?'❤️':img.favorite==='like'?'👍':img.favorite==='meh'?'😐':'';
+      const favIcon=img.perfect?'❤️⭐':img.favorite==='favorite'?'❤️':img.favorite==='like'?'👍':'';
       const favMark=favIcon?`<div class="image-card-fav">${favIcon}</div>`:'';
       const useCount=img.use_count?`<span class="image-card-uses">🔥${img.use_count}</span>`:'';
       const lastUsed=img.last_used_at?`<span class="image-card-last-used">🕐${_fmtRelative(img.last_used_at)}</span>`:'';
@@ -447,7 +448,7 @@
   async function preloadPage2AndOriginals(){
     if(!state.allLoaded){
       try{
-        const url=`/api/images?page=${state.page}&per_page=${state.perPage}&category=${encodeURIComponent(state.category)}&persona=${encodeURIComponent(state.persona)}&style=${encodeURIComponent(state.style)}&scene=${encodeURIComponent(state.scene)}&shot_size=${encodeURIComponent(state.shot_size)}&atmosphere=${encodeURIComponent(state.atmosphere)}&favorite=${encodeURIComponent(state.favorite)}&ref_strength=${encodeURIComponent(state.ref_strength)}&sort_by=${encodeURIComponent(state.sort_by)}&lightweight=1&desc_max_len=${encodeURIComponent(state.desc_max_len)}&unanalyzed=${encodeURIComponent(state.unanalyzed)}`;
+        const url=`/api/images?page=${state.page}&per_page=${state.perPage}&category=${encodeURIComponent(state.category)}&persona=${encodeURIComponent(state.persona)}&style=${encodeURIComponent(state.style)}&scene=${encodeURIComponent(state.scene)}&shot_size=${encodeURIComponent(state.shot_size)}&atmosphere=${encodeURIComponent(state.atmosphere)}&favorite=${encodeURIComponent(state.favorite)}&perfect=${state.perfect?1:''}&ref_strength=${encodeURIComponent(state.ref_strength)}&sort_by=${encodeURIComponent(state.sort_by)}&lightweight=1&desc_max_len=${encodeURIComponent(state.desc_max_len)}&unanalyzed=${encodeURIComponent(state.unanalyzed)}`;
         const resp=await api(url);
         if(resp&&resp.ok){
           const data=await resp.json();
@@ -462,7 +463,7 @@
   async function preloadNextPage(){
     if(state.allLoaded||state.preloadedPage2)return;
     try{
-      const url=`/api/images?page=${state.page}&per_page=${state.perPage}&category=${encodeURIComponent(state.category)}&persona=${encodeURIComponent(state.persona)}&style=${encodeURIComponent(state.style)}&scene=${encodeURIComponent(state.scene)}&shot_size=${encodeURIComponent(state.shot_size)}&atmosphere=${encodeURIComponent(state.atmosphere)}&favorite=${encodeURIComponent(state.favorite)}&ref_strength=${encodeURIComponent(state.ref_strength)}&sort_by=${encodeURIComponent(state.sort_by)}&lightweight=1&desc_max_len=${encodeURIComponent(state.desc_max_len)}&unanalyzed=${encodeURIComponent(state.unanalyzed)}`;
+      const url=`/api/images?page=${state.page}&per_page=${state.perPage}&category=${encodeURIComponent(state.category)}&persona=${encodeURIComponent(state.persona)}&style=${encodeURIComponent(state.style)}&scene=${encodeURIComponent(state.scene)}&shot_size=${encodeURIComponent(state.shot_size)}&atmosphere=${encodeURIComponent(state.atmosphere)}&favorite=${encodeURIComponent(state.favorite)}&perfect=${state.perfect?1:''}&ref_strength=${encodeURIComponent(state.ref_strength)}&sort_by=${encodeURIComponent(state.sort_by)}&lightweight=1&desc_max_len=${encodeURIComponent(state.desc_max_len)}&unanalyzed=${encodeURIComponent(state.unanalyzed)}`;
       const resp=await api(url);
       if(resp&&resp.ok){
         const data=await resp.json();
@@ -512,7 +513,7 @@
       renderDetailFields(cached,false);
       const metaRO=$('#modalMetaReadonly');
       metaRO.innerHTML=`<span>ID: ${esc(cached.id)}</span><span>创建时间: ${esc(cached.created_at||'未知')}</span>`;
-      updateFavoriteBtns(cached.favorite||'none');
+      updateFavoriteBtns(cached.favorite||'none',cached.perfect);
       updateRefStrengthBtns(cached.ref_strength||'style', cached.ref_strength_reason||'');
       updateEditButtons();
       updateNavArrows();
@@ -544,7 +545,7 @@
         renderDetailFields(img,false);
         const metaRO=$('#modalMetaReadonly');
         metaRO.innerHTML=`<span>ID: ${esc(img.id)}</span><span>创建时间: ${esc(img.created_at||'未知')}</span>`;
-        updateFavoriteBtns(img.favorite||'none');
+        updateFavoriteBtns(img.favorite||'none',img.perfect);
         updateRefStrengthBtns(img.ref_strength||'style', img.ref_strength_reason||'');
         updateEditButtons();
       }
@@ -574,16 +575,16 @@
     await showDetail(newId);
   }
 
-  function updateFavoriteBtns(fav){
+  function updateFavoriteBtns(fav,perfect){
     const favBtn=$('#favFavoriteBtn');
     const likeBtn=$('#favLikeBtn');
-    const mehBtn=$('#favMehBtn');
+    const perfectBtn=$('#favPerfectBtn');
     favBtn.textContent=fav==='favorite'?'❤️':'🤍';
     likeBtn.textContent=fav==='like'?'👍🏻':'👍';
-    mehBtn.textContent=fav==='meh'?'😶':'😐';
+    perfectBtn.textContent=perfect?'⭐':'☆';
     favBtn.classList.toggle('active-favorite',fav==='favorite');
     likeBtn.classList.toggle('active-like',fav==='like');
-    mehBtn.classList.toggle('active-meh',fav==='meh');
+    perfectBtn.classList.toggle('active-perfect',!!perfect);
   }
 
   async function toggleFavorite(value){
@@ -598,9 +599,32 @@
     const result=await resp.json();
     if(result.success){
       state.currentImageData.favorite=newFav;
+      // 收藏降级/取消会把完美一起清掉，以服务端回传的最终状态为准
+      state.currentImageData.perfect=result.perfect?1:0;
       state.detailCache.set(state.currentImageId,state.currentImageData);
-      updateFavoriteBtns(newFav);
-      toast(newFav==='none'?'已取消':newFav==='favorite'?'已收藏':newFav==='like'?'已标记喜欢':'已标记无感','success');
+      updateFavoriteBtns(newFav,state.currentImageData.perfect);
+      toast(newFav==='none'?'已取消':newFav==='favorite'?'已收藏':'已标记喜欢','success');
+    }else{
+      toast(result.error||'操作失败','error');
+    }
+  }
+
+  async function togglePerfect(){
+    if(!state.currentImageId)return;
+    const next=state.currentImageData?.perfect?0:1;
+    const resp=await api(`/api/images/${state.currentImageId}/perfect`,{
+      method:'PATCH',
+      json:{perfect:next},
+    });
+    if(!resp){toast('操作失败','error');return;}
+    const result=await resp.json();
+    if(result.success){
+      // 打完美会在服务端顺带补上收藏，两份状态都取回，前端不自己推断
+      state.currentImageData.perfect=result.perfect?1:0;
+      state.currentImageData.favorite=result.favorite||state.currentImageData.favorite;
+      state.detailCache.set(state.currentImageId,state.currentImageData);
+      updateFavoriteBtns(state.currentImageData.favorite,state.currentImageData.perfect);
+      toast(next?'已标记为完美':'已取消完美','success');
     }else{
       toast(result.error||'操作失败','error');
     }
@@ -835,8 +859,7 @@
           let hint='';
           if(fav==='favorite')hint=' (收藏-3 → 有效热度 '+(val-3)+')';
           else if(fav==='like')hint=' (喜欢-1 → 有效热度 '+(val-1)+')';
-          else if(fav==='meh')hint=' (无感+0)';
-          valWrap.innerHTML=`<span class="field-value-text">🔥${val!=null?val:0}${hint}</span>`;
+                    valWrap.innerHTML=`<span class="field-value-text">🔥${val!=null?val:0}${hint}</span>`;
         }else if(def.type==='textarea'){
           // 长文本字段（描述/AI提示词/AI点评）用专门的长文本块渲染，保留换行、字号更大、内容完整展示
           valWrap.innerHTML=val?`<div class="field-text-block">${esc(String(val))}</div>`:'<span class="field-empty">-</span>';
@@ -971,12 +994,35 @@
       toast('请先选择图片','warning');
       return;
     }
-    const labels={favorite:'收藏',like:'喜欢',meh:'无感',none:'取消标记'};
+    const labels={favorite:'收藏',like:'喜欢',none:'取消标记'};
     const label=labels[value]||value;
     if(!confirm(`确定将选中的 ${state.selectedIds.size} 张图片标记为「${label}」？`))return;
     const resp=await api('/api/images/batch-favorite',{
       method:'POST',
       json:{ids:[...state.selectedIds],favorite:value}
+    });
+    if(!resp)return;
+    const data=await resp.json();
+    if(data.success){
+      toast(`已将 ${data.updated} 张图片标记为「${label}」`,'success');
+      state.selectedIds.clear();
+      updateBatchUI();
+      state.page=1;state.allLoaded=false;loadImages(true);loadStats();
+    }else{
+      toast(data.error||'操作失败','error');
+    }
+  }
+
+  async function batchPerfect(perfect){
+    if(state.selectedIds.size===0){
+      toast('请先选择图片','warning');
+      return;
+    }
+    const label=perfect?'完美':'取消完美';
+    if(!confirm(`确定将选中的 ${state.selectedIds.size} 张图片标记为「${label}」？打完美会一并设为收藏。`))return;
+    const resp=await api('/api/images/batch-perfect',{
+      method:'POST',
+      json:{ids:[...state.selectedIds],perfect:perfect}
     });
     if(!resp)return;
     const data=await resp.json();
@@ -1063,7 +1109,7 @@
     btn.disabled=true;
     btn.textContent='加载中...';
     try{
-      let url=`/api/images/ids?category=${encodeURIComponent(state.category)}&persona=${encodeURIComponent(state.persona)}&style=${encodeURIComponent(state.style)}&scene=${encodeURIComponent(state.scene)}&shot_size=${encodeURIComponent(state.shot_size)}&atmosphere=${encodeURIComponent(state.atmosphere)}&favorite=${encodeURIComponent(state.favorite)}&ref_strength=${encodeURIComponent(state.ref_strength)}&desc_max_len=${encodeURIComponent(state.desc_max_len)}&unanalyzed=${encodeURIComponent(state.unanalyzed)}`;
+      let url=`/api/images/ids?category=${encodeURIComponent(state.category)}&persona=${encodeURIComponent(state.persona)}&style=${encodeURIComponent(state.style)}&scene=${encodeURIComponent(state.scene)}&shot_size=${encodeURIComponent(state.shot_size)}&atmosphere=${encodeURIComponent(state.atmosphere)}&favorite=${encodeURIComponent(state.favorite)}&perfect=${state.perfect?1:''}&ref_strength=${encodeURIComponent(state.ref_strength)}&desc_max_len=${encodeURIComponent(state.desc_max_len)}&unanalyzed=${encodeURIComponent(state.unanalyzed)}`;
       const resp=await api(url);
       if(!resp||!resp.ok){toast('获取图片列表失败','error');return;}
       const data=await resp.json();
@@ -2228,7 +2274,7 @@
     const items=[
       {icon:'❤️',label:'收藏',action:()=>quickFavorite(id,'favorite')},
       {icon:'👍',label:'喜欢',action:()=>quickFavorite(id,'like')},
-      {icon:'😐',label:'无感',action:()=>quickFavorite(id,'meh')},
+      {icon:'⭐',label:'完美',action:()=>quickPerfect(id)},
       {icon:'🎨',label:'切换参考强度',action:()=>quickRefStrength(id)},
       {icon:'🎭',label:'切换cosplay标记',action:()=>quickToggleCosplay(id)},
       {icon:'🏷️',label:'编辑用户标签',action:()=>quickEditUserTags(id,e.clientX,e.clientY)},
@@ -2350,28 +2396,54 @@
     const result=await resp.json();
     if(result.success){
       const newFav=result.favorite||value;
-      toast(newFav===value?'已'+ (value==='favorite'?'收藏':value==='like'?'标记喜欢':'标记无感'):'已取消','success');
+      // 收藏降级/取消会连带清掉完美，状态以服务端回传为准
+      const newPerfect=result.perfect?1:0;
+      toast(newFav===value?'已'+ (value==='favorite'?'收藏':'标记喜欢'):'已取消','success');
       if(state.currentImageId===id){
         state.currentImageData.favorite=newFav;
+        state.currentImageData.perfect=newPerfect;
         state.detailCache.set(id,state.currentImageData);
-        updateFavoriteBtns(newFav);
+        updateFavoriteBtns(newFav,newPerfect);
       }
-      updateCardFavInGrid(id,newFav);
+      updateCardFavInGrid(id,newFav,newPerfect);
     }else{
       toast(result.error||'操作失败','error');
     }
   }
 
-  function updateCardFavInGrid(id,fav){
+  async function quickPerfect(id){
+    const card=document.querySelector(`.image-card[data-id="${id}"]`);
+    const next=card&&card.dataset.perfect==='1'?0:1;
+    const resp=await api(`/api/images/${id}/perfect`,{method:'PATCH',json:{perfect:next}});
+    if(!resp){toast('操作失败','error');return;}
+    const result=await resp.json();
+    if(result.success){
+      const newPerfect=result.perfect?1:0;
+      const newFav=result.favorite||'favorite';
+      toast(next?'已标记为完美':'已取消完美','success');
+      if(state.currentImageId===id){
+        state.currentImageData.favorite=newFav;
+        state.currentImageData.perfect=newPerfect;
+        state.detailCache.set(id,state.currentImageData);
+        updateFavoriteBtns(newFav,newPerfect);
+      }
+      updateCardFavInGrid(id,newFav,newPerfect);
+    }else{
+      toast(result.error||'操作失败','error');
+    }
+  }
+
+  function updateCardFavInGrid(id,fav,perfect){
     const card=document.querySelector(`.image-card[data-id="${id}"]`);
     if(!card)return;
+    if(perfect)card.dataset.perfect='1';else delete card.dataset.perfect;
     let favMark=card.querySelector('.image-card-fav');
     if(!favMark){
       favMark=document.createElement('div');
       favMark.className='image-card-fav';
       card.appendChild(favMark);
     }
-    favMark.textContent=fav==='favorite'?'❤️':fav==='like'?'👍':fav==='meh'?'😐':'';
+    favMark.textContent=perfect?'❤️⭐':fav==='favorite'?'❤️':fav==='like'?'👍':'';
   }
 
   async function quickToggleCosplay(id){
@@ -2572,6 +2644,13 @@
       });
     });
 
+    const perfectOnlyFilter=$('#perfectOnlyFilter');
+    if(perfectOnlyFilter){
+      perfectOnlyFilter.addEventListener('change',()=>{
+        state.perfect=perfectOnlyFilter.checked;state.page=1;state.allLoaded=false;loadImages(true);
+      });
+    }
+
     $('#sortByFilter').addEventListener('change',e=>{
       state.sort_by=e.target.value;state.page=1;state.allLoaded=false;loadImages(true);
     });
@@ -2712,6 +2791,13 @@
         batchFavorite(fav);
       });
     });
+    document.querySelectorAll('.batch-fav-item[data-perfect]').forEach(btn=>{
+      btn.addEventListener('click',()=>{
+        const perfect=btn.dataset.perfect==='1'?1:0;
+        $('#batchFavDropdown').classList.add('hidden');
+        batchPerfect(perfect);
+      });
+    });
     document.querySelectorAll('.batch-fav-item[data-add-style]').forEach(btn=>{
       btn.addEventListener('click',()=>{
         const styleName=btn.dataset.addStyle;
@@ -2822,7 +2908,7 @@
     $('#modalSaveBtn').addEventListener('click',saveEdit);
     $('#favFavoriteBtn').addEventListener('click',()=>toggleFavorite('favorite'));
     $('#favLikeBtn').addEventListener('click',()=>toggleFavorite('like'));
-    $('#favMehBtn').addEventListener('click',()=>toggleFavorite('meh'));
+    $('#favPerfectBtn').addEventListener('click',()=>togglePerfect());
     $('#refStrengthBtn').addEventListener('click',()=>toggleRefStrengthDropdown());
     document.addEventListener('click',(e)=>{
       const wrap=$('.rs-dropdown-wrap');

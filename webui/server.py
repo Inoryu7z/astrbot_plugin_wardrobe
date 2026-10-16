@@ -290,7 +290,7 @@ class WardrobeWebServer:
             dist = await self.plugin.db.get_tag_distribution(
                 category=category or None,
                 persona=persona or None,
-                favorite=favorite if favorite in ("favorite", "like", "meh") else None,
+                favorite=favorite if favorite in ("favorite", "like") else None,
             )
 
             try:
@@ -326,7 +326,7 @@ class WardrobeWebServer:
             timeline = await self.plugin.db.get_timeline(
                 category=category or None,
                 persona=persona or None,
-                favorite=favorite if favorite in ("favorite", "like", "meh") else None,
+                favorite=favorite if favorite in ("favorite", "like") else None,
             )
             return jsonify(timeline)
 
@@ -349,13 +349,14 @@ class WardrobeWebServer:
             ref_strength = request.args.get("ref_strength", "")
             sort_by = request.args.get("sort_by", "created_at")
             lightweight = request.args.get("lightweight", "") == "1"
+            perfect = request.args.get("perfect", "") == "1"
 
             desc_max_len = self._parse_desc_max_len(request.args.get("desc_max_len", ""))
             unanalyzed = request.args.get("unanalyzed", "") == "1"
 
             offset = (page - 1) * per_page
 
-            needs_search = style or scene or atmosphere or shot_size or (persona is not None) or category or (favorite in ("favorite", "like", "meh")) or ref_strength
+            needs_search = style or scene or atmosphere or shot_size or (persona is not None) or category or (favorite in ("favorite", "like")) or perfect or ref_strength
             if needs_search:
                 style_list = [style] if style else None
                 scene_list = [scene] if scene else None
@@ -367,10 +368,11 @@ class WardrobeWebServer:
                     scene=scene_list,
                     atmosphere=atmosphere_list,
                     shot_size=shot_size or None,
-                    favorite=favorite if favorite in ("favorite", "like", "meh") else None,
+                    favorite=favorite if favorite in ("favorite", "like") else None,
                     ref_strength=ref_strength or None,
                     desc_max_len=desc_max_len,
                     unanalyzed=unanalyzed,
+                    perfect=perfect or None,
                     sort_by=sort_by,
                     limit=per_page,
                     offset=offset,
@@ -382,20 +384,22 @@ class WardrobeWebServer:
                     scene=scene_list,
                     atmosphere=atmosphere_list,
                     shot_size=shot_size or None,
-                    favorite=favorite if favorite in ("favorite", "like", "meh") else None,
+                    favorite=favorite if favorite in ("favorite", "like") else None,
                     ref_strength=ref_strength or None,
                     desc_max_len=desc_max_len,
                     unanalyzed=unanalyzed,
+                    perfect=perfect or None,
                 )
             elif lightweight:
                 images = await self.plugin.db.list_images_lightweight(
                     category=category or None,
                     shot_size=shot_size or None,
                     persona=persona,
-                    favorite=favorite if favorite in ("favorite", "like", "meh") else None,
+                    favorite=favorite if favorite in ("favorite", "like") else None,
                     ref_strength=ref_strength or None,
                     desc_max_len=desc_max_len,
                     unanalyzed=unanalyzed,
+                    perfect=perfect or None,
                     sort_by=sort_by,
                     limit=per_page,
                     offset=offset,
@@ -404,28 +408,31 @@ class WardrobeWebServer:
                     category=category or None,
                     shot_size=shot_size or None,
                     persona=persona,
-                    favorite=favorite if favorite in ("favorite", "like", "meh") else None,
+                    favorite=favorite if favorite in ("favorite", "like") else None,
                     ref_strength=ref_strength or None,
                     desc_max_len=desc_max_len,
                     unanalyzed=unanalyzed,
+                    perfect=perfect or None,
                 )
             else:
                 images = await self.plugin.db.list_images(
                     category=category or None, shot_size=shot_size or None,
-                    favorite=favorite if favorite in ("favorite", "like", "meh") else None,
+                    favorite=favorite if favorite in ("favorite", "like") else None,
                     ref_strength=ref_strength or None,
                     desc_max_len=desc_max_len,
                     unanalyzed=unanalyzed,
+                    perfect=perfect or None,
                     sort_by=sort_by,
                     limit=per_page, offset=offset
                 )
                 total = await self.plugin.db.search_count(
                     category=category or None,
                     shot_size=shot_size or None,
-                    favorite=favorite if favorite in ("favorite", "like", "meh") else None,
+                    favorite=favorite if favorite in ("favorite", "like") else None,
                     ref_strength=ref_strength or None,
                     desc_max_len=desc_max_len,
                     unanalyzed=unanalyzed,
+                    perfect=perfect or None,
                 )
 
             result = {
@@ -667,14 +674,29 @@ class WardrobeWebServer:
             fav = data.get("favorite", "none")
             if not ids:
                 return jsonify({"error": "未指定图片"}), 400
-            if fav not in ("favorite", "like", "meh", "none"):
-                return jsonify({"error": "无效的收藏值，应为 favorite/like/meh/none"}), 400
+            if fav not in ("favorite", "like", "none"):
+                return jsonify({"error": "无效的收藏值，应为 favorite/like/none"}), 400
             updated = 0
             for image_id in ids:
                 ok = await self.plugin.db.update_image(image_id, favorite=fav)
                 if ok:
                     updated += 1
             return jsonify({"success": True, "updated": updated, "favorite": fav})
+
+        @app.route("/api/images/batch-perfect", methods=["POST"])
+        async def api_images_batch_perfect():
+            await self.plugin._ensure_db()
+            data = await request.get_json(silent=True) or {}
+            ids = data.get("ids", [])
+            perfect = 1 if data.get("perfect") else 0
+            if not ids:
+                return jsonify({"error": "未指定图片"}), 400
+            updated = 0
+            for image_id in ids:
+                ok = await self.plugin.db.update_image(image_id, perfect=perfect)
+                if ok:
+                    updated += 1
+            return jsonify({"success": True, "updated": updated, "perfect": perfect})
 
         @app.route("/api/images/batch-clear-use-count", methods=["POST"])
         async def api_images_batch_clear_use_count():
@@ -759,7 +781,7 @@ class WardrobeWebServer:
                 scene=scene_list,
                 atmosphere=atmosphere_list,
                 shot_size=shot_size or None,
-                favorite=favorite if favorite in ("favorite", "like", "meh") else None,
+                favorite=favorite if favorite in ("favorite", "like") else None,
                 ref_strength=ref_strength or None,
                 desc_max_len=desc_max_len,
                 unanalyzed=unanalyzed,
@@ -1085,11 +1107,36 @@ class WardrobeWebServer:
 
             data = await request.get_json(silent=True) or {}
             fav = data.get("favorite", "none")
-            if fav not in ("favorite", "like", "meh", "none"):
-                return jsonify({"error": "无效的收藏值，应为 favorite/like/meh/none"}), 400
+            if fav not in ("favorite", "like", "none"):
+                return jsonify({"error": "无效的收藏值，应为 favorite/like/none"}), 400
 
             await self.plugin.db.update_image(image_id, favorite=fav)
-            return jsonify({"success": True, "favorite": fav})
+            # 收藏降级/取消会连带清掉完美（完美只建立在收藏之上），回传最终状态给前端
+            fresh = await self.plugin.db.get_image(image_id)
+            return jsonify({
+                "success": True,
+                "favorite": fav,
+                "perfect": int((fresh or {}).get("perfect", 0) or 0),
+            })
+
+        @app.route("/api/images/<image_id>/perfect", methods=["PATCH"])
+        async def api_image_perfect(image_id):
+            await self.plugin._ensure_db()
+            image = await self.plugin.db.get_image(image_id)
+            if not image:
+                return jsonify({"error": "未找到图片"}), 404
+
+            data = await request.get_json(silent=True) or {}
+            perfect = 1 if data.get("perfect") else 0
+
+            await self.plugin.db.update_image(image_id, perfect=perfect)
+            # 打完美会在库里顺带补上收藏，回传两份状态，前端不用自己推断
+            fresh = await self.plugin.db.get_image(image_id)
+            return jsonify({
+                "success": True,
+                "perfect": int((fresh or {}).get("perfect", 0) or 0),
+                "favorite": (fresh or {}).get("favorite", "none"),
+            })
 
         @app.route("/api/search")
         async def api_search():
@@ -1102,6 +1149,7 @@ class WardrobeWebServer:
                 persona = persona or None
             category = request.args.get("category", "")
             favorite = request.args.get("favorite", "")
+            perfect = request.args.get("perfect", "") == "1"
             limit = min(100, max(1, int(request.args.get("limit", 50))))
 
             if not query:
@@ -1122,7 +1170,7 @@ class WardrobeWebServer:
                             if img:
                                 if category and img.get("category") != category:
                                     continue
-                                if favorite in ("favorite", "like", "meh") and img.get("favorite") != favorite:
+                                if favorite in ("favorite", "like") and img.get("favorite") != favorite:
                                     continue
                                 img["_similarity"] = similarity
                                 vec_results.append(img)
@@ -1130,6 +1178,8 @@ class WardrobeWebServer:
                 except Exception as e:
                     logger.warning("[Wardrobe] WebUI搜索向量检索失败: %s", e)
 
+            if perfect:
+                vec_results = [r for r in vec_results if r.get("perfect")]
             if vec_results:
                 return jsonify({"images": vec_results})
 
@@ -1141,6 +1191,8 @@ class WardrobeWebServer:
                 exclude_persona=exclude_persona or None,
                 limit=limit,
             )
+            if perfect:
+                results = [r for r in results if r.get("perfect")]
             logger.debug("[Wardrobe] WebUI搜索LIKE检索: %d张 query=%s", len(results), query[:50])
             return jsonify({"images": results})
 

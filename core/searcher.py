@@ -152,6 +152,84 @@ SEARCH_VISION_SELECT_SYSTEM_PROMPT = """# 角色
 2. 只选真正符合需求的图片：没有一张符合时返回空数组（"selected": []），不要为了凑数而挑不匹配的图片
 3. 只输出 JSON，不要输出解释"""
 
+# 打分版：只在「拍照取参考图」路径启用。模型多选一张并给每张打匹配分，
+# 由代码按「匹配分 + 完美权重」定夺最终返回哪张——偏好决策不交给模型做，
+# 模型只输出它真正能判断的东西（这张图有多符合需求）。
+# 「完美」标签在最终决策里占的权重 w：最终分 = (匹配分/最高分)*(1-w) + 完美标记*w。
+# w 直接换算成反超门槛：完美图要拿到最高分的 (1-2w)/(1-w) 才能赢过最佳图。
+# w=0.25 → 门槛 67%，即差一截就认输，不会被强行采用。
+# 常量必须定义在使用它的函数之前：_apply_perfect_weight 把它当默认参数，
+# 默认参数在 def 执行时求值，放后面会直接 NameError（插件加载失败）。
+_PERFECT_WEIGHT = 0.25
+
+# 完美图自身得分的绝对下限：低于此分不享受加权。
+# 上面的门槛是相对最高分的比值，没有绝对下限——最佳图只有 60 分时，
+# 40 分的完美图也能反超。加这道下限后，"模型自己都觉得不行"的完美图拿不到加权。
+# 取值 70 = 打分提示词里「大致符合」档的下限。
+_PERFECT_SCORE_FLOOR = 70.0
+
+SEARCH_VISION_SELECT_SCORED_SYSTEM_PROMPT = """# 角色
+你是图片选择助手。你会直接看到若干张候选图片，并拿到每张图的用户标签，请从中选出符合用户需求的图片，并给每张选中图打一个匹配分。
+
+# 任务
+判断依据是图片画面本身，外加**用户标签**——用户标签是用户本人对该图的标注，记的可能是画面上无法辨认的信息（如 cos 的角色名、作品名），必须采纳。
+
+# 输入方式
+图片按 1 开始依次编号（图1、图2……），用户消息里给出图号、图片 id 与用户标签的对应关系。
+
+# 输出格式
+输出 JSON 对象：
+```json
+{{
+  "selected": [{{"index": 图号（整数）, "score": 匹配分（0-100 整数）}}],
+  "reason": "选择理由"
+}}
+```
+
+# 匹配分
+匹配分表达这张图在本次候选中与用户需求的贴合程度：高度贴合 90-100，大致符合 70-89，明显不如其他候选 50-69。分数只描述贴合程度，不代表你希望它被采用。
+
+# 选择策略（优先级从高到低）
+1. 用户标签：用户本人标注，与画面判断冲突时以用户标签为准
+2. 用户点名的具体要素：服装款式与颜色、姿势、场景、道具、手部动作。点名某项时，该项不匹配即排除
+3. 整体观感与需求的相关程度
+4. 候选之间内容相近时，选画面更完整、更能看清主体的一张
+
+# 规则
+1. 最多选择 {max_select} 张，按匹配分从高到低排列
+2. 只选真正符合需求的图片：没有一张符合时返回空数组（"selected": []），不要为了凑数而挑不匹配的图片
+3. 只输出 JSON，不要输出解释"""
+
+
+def _apply_perfect_weight(
+    scored: list[tuple[dict[str, Any], float]],
+    max_select: int,
+    weight: float = _PERFECT_WEIGHT,
+    floor: float = _PERFECT_SCORE_FLOOR,
+) -> list[dict[str, Any]]:
+    """把模型的匹配分与「完美」标记合成最终分并重排。
+
+    最终分 = (匹配分 / 本次最高匹配分) * (1 - w) + 完美标记 * w
+
+    用比值而非原始分，模型的打分尺度再怎么漂移都不影响权重；完美图拿不到
+    最高分的 (1-2w)/(1-w) 就赢不了。另有一道绝对下限：完美图自身得分低于
+    floor 时不给那份权重——比值是相对的，最佳图整体偏低时会把不合格的完美图
+    也抬上来，绝对下限堵的就是这个洞。
+    """
+    if not scored:
+        return []
+    top = max(s for _, s in scored)
+    if top <= 0:
+        top = 1.0
+    ranked = sorted(
+        scored,
+        key=lambda t: -(
+            (t[1] / top) * (1.0 - weight)
+            + (weight if (t[0].get("perfect") and t[1] >= floor) else 0.0)
+        ),
+    )
+    return [c for c, _ in ranked[:max_select]]
+
 
 def _vision_map_line(idx: int, cand: dict[str, Any]) -> str:
     """视觉精选的「图号 ↔ id ↔ 用户标签」映射行。
@@ -315,8 +393,11 @@ class ImageSearcher:
         exclude_style_keywords: Optional[tuple[str, ...]] = (),
         persona_scope: str = "",
         deprioritize_ids: Optional[list[str]] = None,
+        reference_mode: bool = False,
     ) -> tuple[list[dict[str, Any]], dict[str, Any]]:
         meta = {"persona_mismatch": False, "searched_persona": persona, "persona_scope": "global"}
+        # 完美加权只对「拍照取参考图」生效：补拍走确定性冷梯队，普通取图不受影响
+        _prefer_perfect = reference_mode and not daily_selfie_mode
 
         # 补拍召回扩池：拉大候选数量，让更多相关但低热度/未用图进入候选池。
         # 这里只放宽候选数量，不改相似度阈值。
@@ -358,7 +439,7 @@ class ImageSearcher:
             recall_bypassed = True
         elif self.vector_searcher and self.vector_searcher.available and exclude_current_persona and current_persona:
             if persona_mode == "no_persona_only":
-                candidates = await self._vector_search(user_query, k=candidate_limit, persona="", min_similarity=min_similarity)
+                candidates = await self._vector_search(user_query, k=candidate_limit, persona="", min_similarity=min_similarity, prefer_perfect=_prefer_perfect)
                 logger.debug(
                     "[Wardrobe] 向量检索（no_persona_only）: %d张 persona=无人格",
                     len(candidates),
@@ -370,7 +451,7 @@ class ImageSearcher:
                     logger.debug("[Wardrobe] 无人格池无结果，no_persona_only模式不回退其他人格")
                     return [], meta
             else:
-                candidates = await self._vector_search(user_query, k=candidate_limit, persona="", min_similarity=min_similarity)
+                candidates = await self._vector_search(user_query, k=candidate_limit, persona="", min_similarity=min_similarity, prefer_perfect=_prefer_perfect)
                 logger.debug(
                     "[Wardrobe] 向量检索（fallback_other优先无人格）: %d张 persona=无人格",
                     len(candidates),
@@ -379,7 +460,7 @@ class ImageSearcher:
                     candidates = self._sort_by_favorite(candidates)
                     meta["searched_persona"] = ""
                 else:
-                    candidates = await self._vector_search(user_query, k=candidate_limit, exclude_persona=current_persona, min_similarity=min_similarity)
+                    candidates = await self._vector_search(user_query, k=candidate_limit, exclude_persona=current_persona, min_similarity=min_similarity, prefer_perfect=_prefer_perfect)
                     logger.debug(
                         "[Wardrobe] 向量检索（fallback_other回退）: %d张 exclude=%s",
                         len(candidates), current_persona,
@@ -410,6 +491,7 @@ class ImageSearcher:
                 persona=persona,
                 current_persona=current_persona,
                 persona_scope=persona_scope,
+                prefer_perfect=_prefer_perfect,
             )
             meta.update(scope_meta)
             logger.debug(
@@ -591,6 +673,7 @@ class ImageSearcher:
                 primary_provider_id=primary_provider_id,
                 secondary_provider_id=secondary_provider_id,
                 timeout_seconds=timeout_seconds,
+                weighted=_prefer_perfect,
             )
 
         if deprioritize_ids and len(selected) > 1:
@@ -712,6 +795,7 @@ class ImageSearcher:
         persona: str = "",
         current_persona: str = "",
         persona_scope: str = "",
+        prefer_perfect: bool = False,
     ) -> tuple[list[dict[str, Any]], dict[str, Any]]:
         """按人格范围做向量检索。persona_scope 为空时沿用传入的 persona（旧行为）。"""
         meta: dict[str, Any] = {}
@@ -719,7 +803,7 @@ class ImageSearcher:
 
         if scope == "other":
             # 别人的：无人格池优先，没有再排除当前人格后检索
-            candidates = await self._vector_search(user_query, k=k, persona="", min_similarity=min_similarity)
+            candidates = await self._vector_search(user_query, k=k, persona="", min_similarity=min_similarity, prefer_perfect=prefer_perfect)
             if candidates:
                 meta["searched_persona"] = ""
                 meta["persona_scope"] = "other"
@@ -728,6 +812,7 @@ class ImageSearcher:
                 candidates = await self._vector_search(
                     user_query, k=k, persona=None,
                     exclude_persona=current_persona, min_similarity=min_similarity,
+                    prefer_perfect=prefer_perfect,
                 )
                 if candidates:
                     meta["searched_persona"] = f"非{current_persona}"
@@ -737,30 +822,30 @@ class ImageSearcher:
             return [], meta
 
         if scope == "global":
-            candidates = await self._vector_search(user_query, k=k, persona=None, min_similarity=min_similarity)
+            candidates = await self._vector_search(user_query, k=k, persona=None, min_similarity=min_similarity, prefer_perfect=prefer_perfect)
             meta["searched_persona"] = "全局"
             meta["persona_scope"] = "global"
             return candidates, meta
 
         if scope == "self":
             target = current_persona or persona
-            candidates = await self._vector_search(user_query, k=k, persona=target, min_similarity=min_similarity)
+            candidates = await self._vector_search(user_query, k=k, persona=target, min_similarity=min_similarity, prefer_perfect=prefer_perfect)
             meta["searched_persona"] = target or "全局"
             meta["persona_scope"] = "self"
             return candidates, meta
 
         if scope == "named" and persona:
-            candidates = await self._vector_search(user_query, k=k, persona=persona, min_similarity=min_similarity)
+            candidates = await self._vector_search(user_query, k=k, persona=persona, min_similarity=min_similarity, prefer_perfect=prefer_perfect)
             meta["searched_persona"] = persona
             meta["persona_scope"] = "named"
             return candidates, meta
 
-        candidates = await self._vector_search(user_query, k=k, persona=persona, min_similarity=min_similarity)
+        candidates = await self._vector_search(user_query, k=k, persona=persona, min_similarity=min_similarity, prefer_perfect=prefer_perfect)
         meta["searched_persona"] = persona or "全局"
         meta["persona_scope"] = "vector"
         return candidates, meta
 
-    async def _vector_search(self, user_query: str, k: int, persona: Optional[str] = None, exclude_persona: str = "", min_similarity: float | None = None) -> list[dict[str, Any]]:
+    async def _vector_search(self, user_query: str, k: int, persona: Optional[str] = None, exclude_persona: str = "", min_similarity: float | None = None, prefer_perfect: bool = False) -> list[dict[str, Any]]:
         if not self.vector_searcher or not self.vector_searcher.available:
             logger.debug("[Wardrobe] 向量检索不可用: vector_searcher=%s available=%s",
                         self.vector_searcher is not None,
@@ -775,6 +860,7 @@ class ImageSearcher:
             persona=persona,
             exclude_persona=exclude_persona,
             min_similarity=min_similarity,
+            prefer_perfect=prefer_perfect,
         )
         if not wardrobe_results:
             logger.debug("[Wardrobe] 向量检索无结果: query=%s", user_query[:100])
@@ -943,6 +1029,7 @@ class ImageSearcher:
         primary_provider_id: str,
         secondary_provider_id: str,
         timeout_seconds: float,
+        weighted: bool = False,
     ) -> list[dict[str, Any]]:
         providers = [p for p in [primary_provider_id, secondary_provider_id] if p.strip()]
         if not providers:
@@ -953,6 +1040,7 @@ class ImageSearcher:
             max_select=max_select,
             providers=providers,
             timeout_seconds=timeout_seconds,
+            weighted=weighted,
         )
         if selected is not None:
             return selected
@@ -973,6 +1061,7 @@ class ImageSearcher:
         max_select: int,
         providers: list[str],
         timeout_seconds: float,
+        weighted: bool = False,
     ) -> Optional[list[dict[str, Any]]]:
         """把候选缩略图交给取图模型看图选择。
 
@@ -1018,13 +1107,18 @@ class ImageSearcher:
         mapping = "\n".join(
             _vision_map_line(i, c) for i, (c, _) in enumerate(pairs, 1)
         )
+        # 打分模式多要一张：多出来的这张是给代码做加权比较的候选，不是要多返回一张
+        ask = max_select + 1 if weighted else max_select
         prompt = (
             f"用户需求：{user_query}\n\n"
             f"以下是 {len(pairs)} 张候选图片，图号、图片 id 与用户标签的对应关系：\n{mapping}\n\n"
-            f"请依据图片画面选出最符合需求的 {max_select} 张，返回图号；"
+            f"请依据图片画面选出最符合需求的 {ask} 张，返回图号；"
             f"没有任何一张符合时返回空数组。"
         )
-        system = SEARCH_VISION_SELECT_SYSTEM_PROMPT.format(max_select=max_select)
+        if weighted:
+            system = SEARCH_VISION_SELECT_SCORED_SYSTEM_PROMPT.format(max_select=ask)
+        else:
+            system = SEARCH_VISION_SELECT_SYSTEM_PROMPT.format(max_select=max_select)
         image_urls = [path for _, path in pairs]
 
         for provider_id in providers:
@@ -1059,16 +1153,28 @@ class ImageSearcher:
                 idx_to_cand = {i: c for i, (c, _) in enumerate(pairs, 1)}
                 id_to_cand = {str(c["id"]): c for c, _ in pairs}
                 chosen: list[dict[str, Any]] = []
+                scored: list[tuple[dict[str, Any], float]] = []
                 for item in picked:
+                    raw_index = item
+                    score = 0.0
+                    if isinstance(item, dict):
+                        raw_index = item.get("index", item.get("idx"))
+                        try:
+                            score = float(item.get("score", 0) or 0)
+                        except (TypeError, ValueError):
+                            score = 0.0
+                        # 夹到 0-100：异常分值会直接扭曲比例权重
+                        score = max(0.0, min(100.0, score))
                     cand = None
                     try:
-                        cand = idx_to_cand.get(int(item))
+                        cand = idx_to_cand.get(int(raw_index))
                     except (TypeError, ValueError):
                         cand = None
                     if cand is None:
-                        cand = id_to_cand.get(str(item).strip())
+                        cand = id_to_cand.get(str(raw_index).strip())
                     if cand is not None and cand not in chosen:
                         chosen.append(cand)
+                        scored.append((cand, score))
                 # 有选择却一条都解析不出来（编号越界 / 幻觉 id / 格式错）：输出不可用，
                 # 属于失败而非"没找到"，交给调用方回退文本精选。
                 if not chosen:
@@ -1080,6 +1186,16 @@ class ImageSearcher:
                     "[Wardrobe] 视觉精选命中 %d/%d 张 provider=%s",
                     len(chosen), len(pairs), provider_id,
                 )
+                # 打分模式：模型一张分都没打（回了旧格式或分全 0）时不加权，
+                # 否则会退化成"有完美图就直接取它"，比设计意图强得多。
+                if weighted and any(s > 0 for _, s in scored):
+                    weighted_pick = _apply_perfect_weight(scored, max_select)
+                    logger.debug(
+                        "[Wardrobe] 完美加权后取 %d 张: %s",
+                        len(weighted_pick),
+                        [(c.get("id"), round(s), bool(c.get("perfect"))) for c, s in scored],
+                    )
+                    return weighted_pick
                 return chosen[:max_select] if len(chosen) > max_select else chosen
             except asyncio.TimeoutError:
                 logger.warning("[Wardrobe] 取图模型（视觉选择）超时 provider=%s", provider_id)

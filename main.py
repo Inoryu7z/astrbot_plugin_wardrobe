@@ -48,7 +48,7 @@ _MIGRATION_STATE_FILE = "migration_state.json"
     "astrbot_plugin_wardrobe",
     "Inoryu7z",
     "图片衣柜管理插件，支持智能分类、语义检索和参考图接口",
-    "3.2.0",
+    "3.2.3",
 )
 class WardrobePlugin(Star):
     def __init__(self, context: Context, config: AstrBotConfig = None):
@@ -1153,41 +1153,6 @@ class WardrobePlugin(Star):
                 logger.error("[Wardrobe] 视频保留策略任务异常: %s", e)
                 await asyncio.sleep(3600)
 
-    async def _meh_cleanup_loop(self):
-        while True:
-            try:
-                now = datetime.now()
-                target = now.replace(hour=5, minute=30, second=0, microsecond=0)
-                if target <= now:
-                    target += timedelta(days=1)
-                wait_seconds = (target - now).total_seconds()
-                logger.debug("[Wardrobe] 无感清理: 下次清理在 %.1f 小时后", wait_seconds / 3600)
-                await asyncio.sleep(wait_seconds)
-
-                await self._ensure_db()
-                expired = await self.db.get_expired_meh_images(max_age_days=30)
-                if not expired:
-                    continue
-
-                deleted = 0
-                for img in expired:
-                    image_id = img.get("id", "")
-                    if not image_id:
-                        continue
-
-                    ok = await self._purge_image(image_id, img)
-                    if not ok:
-                        continue
-
-                    deleted += 1
-
-                logger.debug("[Wardrobe] 无感清理: 删除了 %d 张超过30天的无感图片", deleted)
-            except asyncio.CancelledError:
-                return
-            except Exception as e:
-                logger.error("[Wardrobe] 无感清理任务异常: %s", e)
-                await asyncio.sleep(3600)
-
     async def _ensure_all_thumbnails(self):
         try:
             await self._ensure_db()
@@ -1297,7 +1262,6 @@ class WardrobePlugin(Star):
         self._spawn_bg_task(self._ensure_all_thumbnails())
         self._spawn_bg_task(self._weekly_daily_selfie_decay_loop())
         self._spawn_bg_task(self._video_retention_loop())
-        self._spawn_bg_task(self._meh_cleanup_loop())
 
     @on_llm_tool_respond()
     async def on_aiimg_tool_respond(self, event: AstrMessageEvent, tool, tool_args, tool_result):
@@ -1948,7 +1912,7 @@ Args:
     async def _purge_image(self, image_id: str, image: dict | None = None) -> bool:
         """删图的唯一入口：记录 + 图片文件 + **向量索引** + 关联视频。
 
-        四个删除入口（WebUI 单张、WebUI 批量、命令删、无感清理）都必须走这里。
+        三个删除入口（WebUI 单张、WebUI 批量、命令删）都必须走这里。
         以前每个入口各抄一份，WebUI 单张删除就漏了清向量索引 ——
         留下"幽灵向量"：检索还会召回它，但记录已不存在，而且那张图永远不会被重新 embedding。
 
@@ -2072,6 +2036,8 @@ Args:
             daily_selfie_mode=daily_selfie_mode,
             direct_style=direct_style,
             exclude_style_keywords=exclude_style_keywords,
+            # 拍照取参考图：只有这条路径给「完美」标签加权（召回加分 + 选图打分混合）
+            reference_mode=True,
         )
 
         if not results:

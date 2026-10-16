@@ -6,7 +6,7 @@
 <title>衣橱图鉴</title>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link href="https://fonts.googleapis.com/css2?family=Fredoka:wght@400;500;600;700&family=Nunito:wght@300;400;500;600;700&display=swap" rel="stylesheet">
-<link rel="stylesheet" href="/static/css/style.css?v=3.0.7d">
+<link rel="stylesheet" href="/static/css/style.css?v=3.2.3">
 <script src="https://cdn.jsdelivr.net/npm/echarts@5.5.1/dist/echarts.min.js"></script>
 </head>
 <body>
@@ -115,7 +115,7 @@
         <label class="filter-item"><input type="radio" name="favorite" value="" checked><span class="filter-label">全部</span></label>
         <label class="filter-item"><input type="radio" name="favorite" value="favorite"><span class="filter-label">❤️ 收藏</span></label>
         <label class="filter-item"><input type="radio" name="favorite" value="like"><span class="filter-label">👍 喜欢</span></label>
-        <label class="filter-item"><input type="radio" name="favorite" value="meh"><span class="filter-label">😐 无感</span></label>
+        <label class="filter-item"><input type="checkbox" id="perfectOnlyFilter"><span class="filter-label">⭐ 仅完美</span></label>
       </div>
     </div>
     <div class="sidebar-section">
@@ -178,7 +178,8 @@
         <div class="batch-fav-dropdown hidden" id="batchFavDropdown">
           <button class="batch-fav-item" data-fav="favorite">❤️ 收藏</button>
           <button class="batch-fav-item" data-fav="like">👍 喜欢</button>
-          <button class="batch-fav-item" data-fav="meh">😐 无感</button>
+          <button class="batch-fav-item" data-perfect="1">⭐ 完美</button>
+          <button class="batch-fav-item" data-perfect="0">取消完美</button>
           <button class="batch-fav-item" data-fav="none">取消标记</button>
           <button class="batch-fav-item" data-add-style="cosplay">🎭 打上cosplay标签</button>
           <div class="batch-fav-divider"></div>
@@ -215,7 +216,6 @@
           <option value="">全部</option>
           <option value="favorite">仅收藏</option>
           <option value="like">仅喜欢</option>
-          <option value="meh">仅无感</option>
         </select>
         <button class="btn btn-ghost btn-sm" id="statsBackBtn">← 返回图库</button>
       </div>
@@ -388,7 +388,7 @@
             <div class="favorite-btns" id="favoriteBtns">
               <button class="btn btn-fav" id="favFavoriteBtn" title="收藏">🤍</button>
               <button class="btn btn-fav" id="favLikeBtn" title="喜欢">👍</button>
-              <button class="btn btn-fav" id="favMehBtn" title="无感">😐</button>
+              <button class="btn btn-fav" id="favPerfectBtn" title="完美">⭐</button>
             </div>
             <button class="btn btn-accent btn-sm hidden" id="modalSaveBtn">保存修改</button>
             <button class="btn btn-secondary btn-sm" id="modalEditBtn">编辑</button>
@@ -682,6 +682,6 @@
     </div>
   </div>
 
-<script src="/static/js/app.js?v=3.2.0"></script>
+<script src="/static/js/app.js?v=3.2.3"></script>
 </body>
 </html>

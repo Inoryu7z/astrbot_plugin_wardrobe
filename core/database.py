@@ -42,6 +42,7 @@ CREATE TABLE IF NOT EXISTS images (
     persona TEXT DEFAULT '',
     created_by TEXT DEFAULT '',
     favorite TEXT DEFAULT 'none',
+    perfect INTEGER DEFAULT 0,
     use_count INTEGER DEFAULT 0,
     file_hash TEXT DEFAULT '',
     ref_strength TEXT DEFAULT 'style',
@@ -58,6 +59,7 @@ CREATE INDEX IF NOT EXISTS idx_exposure_level ON images(exposure_level);
 CREATE INDEX IF NOT EXISTS idx_style ON images(style);
 CREATE INDEX IF NOT EXISTS idx_scene ON images(scene);
 CREATE INDEX IF NOT EXISTS idx_favorite ON images(favorite);
+CREATE INDEX IF NOT EXISTS idx_perfect ON images(perfect);
 CREATE INDEX IF NOT EXISTS idx_file_hash ON images(file_hash);
 """
 
@@ -123,7 +125,7 @@ _UPDATABLE_FIELDS = frozenset({
     "dynamic_level", "action_style", "shot_size", "camera_angle",
     "expression", "color_tone", "composition", "background",
     "description", "user_tags", "exposure_features", "key_features", "prop_objects", "allure_features", "body_focus",
-    "image_path", "updated_at", "favorite", "file_hash",
+    "image_path", "updated_at", "favorite", "perfect", "file_hash",
     "ref_strength",
     "ref_strength_reason",
     "daily_selfie_use_count",
@@ -207,6 +209,7 @@ class WardrobeDatabase:
                     ("ai_prompt", "TEXT DEFAULT ''"),
                     ("ai_comment", "TEXT DEFAULT ''"),
                     ("analyzed", "INTEGER DEFAULT 1"),
+                    ("perfect", "INTEGER DEFAULT 0"),
                 ]:
                     try:
                         await db.execute(f"ALTER TABLE images ADD COLUMN {col} {default}")
@@ -235,6 +238,11 @@ class WardrobeDatabase:
                 await self._run_migration(db, "v2_9_4_use_count_resync", [
                     "UPDATE images SET use_count = COALESCE((SELECT SUM(use_count) FROM image_usage WHERE image_usage.image_id = images.id), 0)",
                     "UPDATE images SET last_used_at = COALESCE((SELECT MAX(last_used_at) FROM image_usage WHERE image_usage.image_id = images.id), '')",
+                ])
+
+                # v3.2.3 迁移：停用「无感」标记，存量 meh 一律置为无标记
+                await self._run_migration(db, "v3_2_3_drop_meh", [
+                    "UPDATE images SET favorite = 'none' WHERE COALESCE(favorite, 'none') = 'meh'",
                 ])
 
                 await db.commit()
@@ -375,9 +383,23 @@ class WardrobeDatabase:
                     return None
                 return self._row_to_dict(row)
 
+    async def get_perfect_ids(self) -> set[str]:
+        """打了「完美」标记的图片 id 集合（取图加权时用）。"""
+        async with aiosqlite.connect(self.db_path) as db:
+            async with db.execute(
+                "SELECT id FROM images WHERE COALESCE(perfect, 0) = 1"
+            ) as cursor:
+                return {row[0] async for row in cursor}
+
     async def update_image(self, image_id: str, **kwargs) -> bool:
         if not kwargs:
             return False
+        # 完美标签联动：完美只建立在收藏之上（先收藏才能打完美）。
+        # 打完美自动补收藏；收藏被降级或取消时，完美跟着清掉——前提没了，标记不成立。
+        if kwargs.get("perfect"):
+            kwargs["favorite"] = "favorite"
+        elif "favorite" in kwargs and kwargs["favorite"] != "favorite":
+            kwargs["perfect"] = 0
         kwargs["updated_at"] = datetime.now(timezone.utc).isoformat()
         sets = []
         values = []
@@ -532,6 +554,7 @@ class WardrobeDatabase:
         ref_strength: Optional[str] = None,
         desc_max_len: Optional[int] = None,
         unanalyzed: Optional[bool] = None,
+        perfect: Optional[bool] = None,
     ) -> tuple[list[str], list[Any]]:
         conditions = []
         params: list[Any] = []
@@ -588,9 +611,12 @@ class WardrobeDatabase:
                 params.append(f'%{WardrobeDatabase._escape_like(v)}%')
             conditions.append(f"({' OR '.join(bf_conds)})")
 
-        if favorite and favorite in ("favorite", "like", "meh"):
+        if favorite and favorite in ("favorite", "like"):
             conditions.append("favorite = ?")
             params.append(favorite)
+
+        if perfect:
+            conditions.append("COALESCE(perfect, 0) = 1")
 
         if ref_strength:
             conditions.append("ref_strength = ?")
@@ -631,6 +657,7 @@ class WardrobeDatabase:
         exclude_persona: str = "",
         shot_size: Optional[str] = None,
         favorite: Optional[str] = None,
+        perfect: Optional[bool] = None,
         ref_strength: Optional[str] = None,
         desc_max_len: Optional[int] = None,
         unanalyzed: Optional[bool] = None,
@@ -645,7 +672,7 @@ class WardrobeDatabase:
             persona=persona, exclude_persona=exclude_persona,
             shot_size=shot_size, favorite=favorite,
             ref_strength=ref_strength, desc_max_len=desc_max_len,
-            unanalyzed=unanalyzed,
+            unanalyzed=unanalyzed, perfect=perfect,
         )
 
         where_clause = ""
@@ -658,7 +685,7 @@ class WardrobeDatabase:
         if sort_by == "use_count":
             order_clause = "use_count DESC, created_at DESC, id DESC"
         elif sort_by == "favorite":
-            order_clause = "CASE favorite WHEN 'favorite' THEN 1 WHEN 'like' THEN 2 WHEN 'meh' THEN 3 ELSE 4 END, created_at DESC, id DESC"
+            order_clause = "CASE favorite WHEN 'favorite' THEN 1 WHEN 'like' THEN 2 ELSE 3 END, created_at DESC, id DESC"
         elif sort_by == "last_used_at":
             order_clause = "COALESCE(last_used_at, '') DESC, created_at DESC, id DESC"
         elif sort_by == "random":
@@ -687,6 +714,7 @@ class WardrobeDatabase:
         exclude_persona: str = "",
         shot_size: Optional[str] = None,
         favorite: Optional[str] = None,
+        perfect: Optional[bool] = None,
         ref_strength: Optional[str] = None,
         desc_max_len: Optional[int] = None,
         unanalyzed: Optional[bool] = None,
@@ -698,7 +726,7 @@ class WardrobeDatabase:
             persona=persona, exclude_persona=exclude_persona,
             shot_size=shot_size, favorite=favorite,
             ref_strength=ref_strength, desc_max_len=desc_max_len,
-            unanalyzed=unanalyzed,
+            unanalyzed=unanalyzed, perfect=perfect,
         )
 
         where_clause = ""
@@ -865,7 +893,7 @@ class WardrobeDatabase:
         if persona:
             conditions.append("persona = ?")
             params.append(persona)
-        if favorite and favorite in ("favorite", "like", "meh"):
+        if favorite and favorite in ("favorite", "like"):
             conditions.append("favorite = ?")
             params.append(favorite)
         where_clause = ""
@@ -930,7 +958,7 @@ class WardrobeDatabase:
         if persona:
             conditions.append("persona = ?")
             params.append(persona)
-        if favorite and favorite in ("favorite", "like", "meh"):
+        if favorite and favorite in ("favorite", "like"):
             conditions.append("favorite = ?")
             params.append(favorite)
         where_clause = ""
@@ -972,6 +1000,7 @@ class WardrobeDatabase:
         shot_size: Optional[str] = None,
         persona: Optional[str] = None,
         favorite: Optional[str] = None,
+        perfect: Optional[bool] = None,
         ref_strength: Optional[str] = None,
         desc_max_len: Optional[int] = None,
         unanalyzed: Optional[bool] = None,
@@ -1000,9 +1029,11 @@ class WardrobeDatabase:
             else:
                 conditions.append("persona = ?")
                 params.append(persona)
-        if favorite and favorite in ("favorite", "like", "meh"):
+        if favorite and favorite in ("favorite", "like"):
             conditions.append("favorite = ?")
             params.append(favorite)
+        if perfect:
+            conditions.append("COALESCE(perfect, 0) = 1")
         if ref_strength:
             conditions.append("ref_strength = ?")
             params.append(ref_strength)
@@ -1013,7 +1044,7 @@ class WardrobeDatabase:
         if sort_by == "use_count":
             order_clause = "use_count DESC, created_at DESC, id DESC"
         elif sort_by == "favorite":
-            order_clause = "CASE favorite WHEN 'favorite' THEN 1 WHEN 'like' THEN 2 WHEN 'meh' THEN 3 ELSE 4 END, created_at DESC, id DESC"
+            order_clause = "CASE favorite WHEN 'favorite' THEN 1 WHEN 'like' THEN 2 ELSE 3 END, created_at DESC, id DESC"
         elif sort_by == "last_used_at":
             order_clause = "COALESCE(last_used_at, '') DESC, created_at DESC, id DESC"
         elif sort_by == "random":
@@ -1035,6 +1066,7 @@ class WardrobeDatabase:
         persona: Optional[str] = None,
         exclude_persona: str = "",
         favorite: Optional[str] = None,
+        perfect: Optional[bool] = None,
         ref_strength: Optional[str] = None,
         desc_max_len: Optional[int] = None,
         unanalyzed: Optional[bool] = None,
@@ -1066,9 +1098,11 @@ class WardrobeDatabase:
         if exclude_persona:
             conditions.append("persona != ?")
             params.append(exclude_persona)
-        if favorite and favorite in ("favorite", "like", "meh"):
+        if favorite and favorite in ("favorite", "like"):
             conditions.append("favorite = ?")
             params.append(favorite)
+        if perfect:
+            conditions.append("COALESCE(perfect, 0) = 1")
         if ref_strength:
             conditions.append("ref_strength = ?")
             params.append(ref_strength)
@@ -1079,7 +1113,7 @@ class WardrobeDatabase:
         if sort_by == "use_count":
             order_clause = "use_count DESC, created_at DESC, id DESC"
         elif sort_by == "favorite":
-            order_clause = "CASE favorite WHEN 'favorite' THEN 1 WHEN 'like' THEN 2 WHEN 'meh' THEN 3 ELSE 4 END, created_at DESC, id DESC"
+            order_clause = "CASE favorite WHEN 'favorite' THEN 1 WHEN 'like' THEN 2 ELSE 3 END, created_at DESC, id DESC"
         elif sort_by == "last_used_at":
             order_clause = "COALESCE(last_used_at, '') DESC, created_at DESC, id DESC"
         elif sort_by == "random":
@@ -1088,7 +1122,7 @@ class WardrobeDatabase:
             order_clause = "created_at DESC, id DESC"
         async with self._connect() as db:
             db.row_factory = aiosqlite.Row
-            sql = f"SELECT id, category, style, persona, image_path, created_at, favorite, use_count, ref_strength, last_used_at FROM images {where_clause} ORDER BY {order_clause} LIMIT ? OFFSET ?"
+            sql = f"SELECT id, category, style, persona, image_path, created_at, favorite, perfect, use_count, ref_strength, last_used_at FROM images {where_clause} ORDER BY {order_clause} LIMIT ? OFFSET ?"
             async with db.execute(sql, params) as cursor:
                 rows = await cursor.fetchall()
                 results = []
@@ -1212,8 +1246,8 @@ class WardrobeDatabase:
                                 dynamic_level, action_style, shot_size, camera_angle,
                                 expression, color_tone, composition, background,
                                 description, user_tags, exposure_features, key_features, prop_objects, allure_features, body_focus,
-                                persona, image_path, created_at, updated_at, created_by, favorite, use_count, file_hash, ref_strength, ref_strength_reason, daily_selfie_use_count, ai_prompt, ai_comment
-                            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+                                persona, image_path, created_at, updated_at, created_by, favorite, perfect, use_count, file_hash, ref_strength, ref_strength_reason, daily_selfie_use_count, ai_prompt, ai_comment
+                            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
                             (
                                 rec.get("id", str(uuid.uuid4())),
                                 rec.get("category", "人物"),
@@ -1245,6 +1279,7 @@ class WardrobeDatabase:
                                 rec.get("updated_at", datetime.now(timezone.utc).isoformat()),
                                 rec.get("created_by", ""),
                                 rec.get("favorite", "none"),
+                                int(rec.get("perfect", 0) or 0),
                                 rec.get("use_count", 0),
                                 rec.get("file_hash", ""),
                                 rec.get("ref_strength", "style"),
@@ -1574,17 +1609,6 @@ class WardrobeDatabase:
             ) as cursor:
                 rows = await cursor.fetchall()
                 return [dict(row) for row in rows]
-
-    async def get_expired_meh_images(self, max_age_days: int) -> list[dict[str, Any]]:
-        cutoff = (datetime.now(timezone.utc) - timedelta(days=max_age_days)).isoformat()
-        async with aiosqlite.connect(self.db_path) as db:
-            db.row_factory = aiosqlite.Row
-            async with db.execute(
-                "SELECT * FROM images WHERE favorite = ? AND created_at < ?",
-                ("meh", cutoff),
-            ) as cursor:
-                rows = await cursor.fetchall()
-                return [self._row_to_dict(row) for row in rows]
 
     async def import_video_records(self, records: list[dict[str, Any]], skip_existing: bool = True) -> int:
         existing_ids = set()

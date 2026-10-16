@@ -61,6 +61,7 @@ _KEYWORD_IDF_WEIGHT = 1.0      # 区分度加成系数
 _KEYWORD_IDF_MAX = 3.0         # IDF 上限，防止极稀有噪声词被抬上天
 _KEYWORD_MIN_DF = 2            # 命中数低于此值不享受 IDF 加成（多半是噪声）
 _KEYWORD_BONUS = 0.5           # 字面分归一化后可加成的最大相似度
+_PERFECT_RECALL_BONUS = 0.08   # 「完美」标签的召回加权：只抬排名，不放宽相似度门槛
 _KEYWORD_MAX_TERMS = 6         # 全局只保留区分度最高的词元数（压泛词、控开销）
 _KEYWORD_TERMS_PER_IMAGE = 3   # 每张图最多累计几个词元
 _KEYWORD_TERM_DECAY = (1.0, 0.5, 0.25)  # 第 2、3 个词元边际衰减：
@@ -386,6 +387,7 @@ class WardrobeVectorSearcher:
         persona: Optional[str] = None,
         exclude_persona: str = "",
         min_similarity: float | None = None,
+        prefer_perfect: bool = False,
     ) -> list[tuple[str, float]]:
         if not self.available:
             return []
@@ -456,6 +458,24 @@ class WardrobeVectorSearcher:
                 # 只留一行 warning 的话表面上"功能已上线"、实际整条失效，很难发现。
                 logger.warning("[Wardrobe] 关键词召回失败（回退纯向量）: %s", e, exc_info=True)
                 kw_scores, focus_hits = {}, set()
+
+            # 完美标签召回加权：只给已经过了相似度门槛的完美图加分，让它在候选截断时更靠前。
+            # 门槛不放宽——与本次需求不沾边的完美图照样进不了候选池。
+            if prefer_perfect:
+                try:
+                    perfect_ids = await self.db.get_perfect_ids() if self.db else set()
+                except Exception as e:
+                    logger.warning("[Wardrobe] 完美图查询失败（跳过召回加权）: %s", e)
+                    perfect_ids = set()
+                boosted = sum(1 for f in filtered if f[0] in perfect_ids)
+                if boosted:
+                    filtered = [
+                        (wid, sim + _PERFECT_RECALL_BONUS if wid in perfect_ids else sim, content)
+                        for wid, sim, content in filtered
+                    ]
+                    logger.debug(
+                        "[Wardrobe] 完美图召回加权: %d 张 +%.2f", boosted, _PERFECT_RECALL_BONUS
+                    )
 
             if kw_scores:
                 max_kw = max(v[0] for v in kw_scores.values()) or 1.0

@@ -1280,8 +1280,8 @@ html, body {
   background:#E4ECFF; border-color:var(--lavender);
 }
 
-.btn-fav.active-meh {
-  background:#F0F0F0; border-color:#999;
+.btn-fav.active-perfect {
+  background:#FFF3D6; border-color:#E8A33D;
 }
 
 .batch-fav-group {
