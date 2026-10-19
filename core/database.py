@@ -435,6 +435,20 @@ class WardrobeDatabase:
                 await db.commit()
                 return cursor.rowcount > 0
 
+    async def mark_used(self, image_id: str) -> None:
+        """只记「最近被取过」，不动热度、不写按人格记录。
+
+        冷却账本要用 last_used_at，而 increment_use_count_by_persona 在人格为空时
+        直接 return（空人格不记热度），空人格取图后 last_used_at 不会更新、冷却失效。
+        """
+        now = datetime.now(timezone.utc).isoformat()
+        async with self._lock:
+            async with aiosqlite.connect(self.db_path) as db:
+                await db.execute(
+                    "UPDATE images SET last_used_at = ? WHERE id = ?", (now, image_id)
+                )
+                await db.commit()
+
     async def increment_use_count_by_persona(
         self, image_id: str, persona: str
     ) -> None:

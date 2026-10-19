@@ -1,6 +1,7 @@
 import asyncio
 import json
 import time
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Optional
 
@@ -25,6 +26,52 @@ _DAILY_SELFIE_COLD_SEATS = 3   # 补拍冷图配额席位
 # 原因：全量检索时"看着像 cos 但并非 cos"的图会被取走，导致取图错误。
 _COS_QUERY_KEYWORD = "cos"
 _COSPLAY_STYLE_KEYWORD = "cosplay"
+
+# 冷却：近 N 天取过的图不进候选池，避免「翻来覆去就那几张」。
+# 兜底下限：过滤后剩下的图少于这个数时，按最久未用把冷却图放回来——
+# 图库小或需求太具体时不能因为冷却直接取不到图。
+_COOLDOWN_MIN_KEEP = 3
+
+# 相似度随机扰动幅度：同一句 query 每次召回的都是同一批图，冷却一过又回到原样。
+# 加一点噪声让「刚好在第 20 名内外」那批图有机会轮到。
+_RECALL_JITTER = 0.10
+
+
+def _days_since_used(cand: dict[str, Any], now: Optional[datetime] = None) -> float:
+    """这张图距今多少天没被取过。从未取过返回 inf（永不冷却）。"""
+    raw = str(cand.get("last_used_at", "") or "")
+    if not raw:
+        return float("inf")
+    try:
+        used_at = datetime.fromisoformat(raw)
+    except (TypeError, ValueError):
+        return float("inf")
+    if used_at.tzinfo is None:
+        used_at = used_at.replace(tzinfo=timezone.utc)
+    base = now or datetime.now(timezone.utc)
+    return (base - used_at).total_seconds() / 86400.0
+
+
+def _apply_cooldown(
+    candidates: list[dict[str, Any]],
+    cooldown_days: float,
+    now: Optional[datetime] = None,
+    min_keep: int = _COOLDOWN_MIN_KEEP,
+) -> list[dict[str, Any]]:
+    """剔除冷却期内的图；剩余不足 min_keep 时按最久未用放回补够。"""
+    if cooldown_days <= 0 or not candidates:
+        return candidates
+    fresh: list[dict[str, Any]] = []
+    cooled: list[dict[str, Any]] = []
+    for c in candidates:
+        if _days_since_used(c, now) < cooldown_days:
+            cooled.append(c)
+        else:
+            fresh.append(c)
+    if not cooled or len(fresh) >= min_keep:
+        return fresh if cooled else candidates
+    cooled.sort(key=lambda c: -_days_since_used(c, now))
+    return fresh + cooled[: min_keep - len(fresh)]
 
 
 def _is_cosplay_style(record: dict[str, Any]) -> bool:
@@ -394,10 +441,15 @@ class ImageSearcher:
         persona_scope: str = "",
         deprioritize_ids: Optional[list[str]] = None,
         reference_mode: bool = False,
+        cooldown_days: float = 0.0,
     ) -> tuple[list[dict[str, Any]], dict[str, Any]]:
         meta = {"persona_mismatch": False, "searched_persona": persona, "persona_scope": "global"}
         # 完美加权只对「拍照取参考图」生效：补拍走确定性冷梯队，普通取图不受影响
         _prefer_perfect = reference_mode and not daily_selfie_mode
+        # 冷却同理，补拍自己有冷梯队，再叠加冷却只会把池子砍空
+        _cooldown_days = cooldown_days if not daily_selfie_mode else 0.0
+        # 扰动幅度固定，与完美加权同范围，不额外开配置（想调改这个常量）
+        _recall_jitter = _RECALL_JITTER if _prefer_perfect else 0.0
 
         # 补拍召回扩池：拉大候选数量，让更多相关但低热度/未用图进入候选池。
         # 这里只放宽候选数量，不改相似度阈值。
@@ -439,7 +491,7 @@ class ImageSearcher:
             recall_bypassed = True
         elif self.vector_searcher and self.vector_searcher.available and exclude_current_persona and current_persona:
             if persona_mode == "no_persona_only":
-                candidates = await self._vector_search(user_query, k=candidate_limit, persona="", min_similarity=min_similarity, prefer_perfect=_prefer_perfect)
+                candidates = await self._vector_search(user_query, k=candidate_limit, persona="", min_similarity=min_similarity, prefer_perfect=_prefer_perfect, jitter=_recall_jitter)
                 logger.debug(
                     "[Wardrobe] 向量检索（no_persona_only）: %d张 persona=无人格",
                     len(candidates),
@@ -451,7 +503,7 @@ class ImageSearcher:
                     logger.debug("[Wardrobe] 无人格池无结果，no_persona_only模式不回退其他人格")
                     return [], meta
             else:
-                candidates = await self._vector_search(user_query, k=candidate_limit, persona="", min_similarity=min_similarity, prefer_perfect=_prefer_perfect)
+                candidates = await self._vector_search(user_query, k=candidate_limit, persona="", min_similarity=min_similarity, prefer_perfect=_prefer_perfect, jitter=_recall_jitter)
                 logger.debug(
                     "[Wardrobe] 向量检索（fallback_other优先无人格）: %d张 persona=无人格",
                     len(candidates),
@@ -460,7 +512,7 @@ class ImageSearcher:
                     candidates = self._sort_by_favorite(candidates)
                     meta["searched_persona"] = ""
                 else:
-                    candidates = await self._vector_search(user_query, k=candidate_limit, exclude_persona=current_persona, min_similarity=min_similarity, prefer_perfect=_prefer_perfect)
+                    candidates = await self._vector_search(user_query, k=candidate_limit, exclude_persona=current_persona, min_similarity=min_similarity, prefer_perfect=_prefer_perfect, jitter=_recall_jitter)
                     logger.debug(
                         "[Wardrobe] 向量检索（fallback_other回退）: %d张 exclude=%s",
                         len(candidates), current_persona,
@@ -492,6 +544,7 @@ class ImageSearcher:
                 current_persona=current_persona,
                 persona_scope=persona_scope,
                 prefer_perfect=_prefer_perfect,
+                jitter=_recall_jitter,
             )
             meta.update(scope_meta)
             logger.debug(
@@ -564,6 +617,20 @@ class ImageSearcher:
             )
             if not candidates:
                 logger.debug("[Wardrobe] 风格排除后无候选图片")
+                return [], meta
+
+        # 冷却：近 N 天取过的图不进池。放在热度注入之前，被冷却的图不计入后续统计。
+        # 兜底在 _apply_cooldown 里：剩余不足 3 张时按最久未用把冷却图放回来，
+        # 图库小或需求太具体时不至于因为冷却直接取不到图。
+        if _cooldown_days > 0:
+            before_cooldown = len(candidates)
+            candidates = _apply_cooldown(candidates, _cooldown_days)
+            logger.debug(
+                "[Wardrobe] 冷却过滤: %d -> %d (近 %.1f 天内取过的图不进池)",
+                before_cooldown, len(candidates), _cooldown_days,
+            )
+            if not candidates:
+                logger.debug("[Wardrobe] 冷却过滤后无候选图片")
                 return [], meta
 
         # 按当前人格注入 use_count（按人格独立热度）
@@ -796,6 +863,7 @@ class ImageSearcher:
         current_persona: str = "",
         persona_scope: str = "",
         prefer_perfect: bool = False,
+        jitter: float = 0.0,
     ) -> tuple[list[dict[str, Any]], dict[str, Any]]:
         """按人格范围做向量检索。persona_scope 为空时沿用传入的 persona（旧行为）。"""
         meta: dict[str, Any] = {}
@@ -803,7 +871,7 @@ class ImageSearcher:
 
         if scope == "other":
             # 别人的：无人格池优先，没有再排除当前人格后检索
-            candidates = await self._vector_search(user_query, k=k, persona="", min_similarity=min_similarity, prefer_perfect=prefer_perfect)
+            candidates = await self._vector_search(user_query, k=k, persona="", min_similarity=min_similarity, prefer_perfect=prefer_perfect, jitter=jitter)
             if candidates:
                 meta["searched_persona"] = ""
                 meta["persona_scope"] = "other"
@@ -813,6 +881,7 @@ class ImageSearcher:
                     user_query, k=k, persona=None,
                     exclude_persona=current_persona, min_similarity=min_similarity,
                     prefer_perfect=prefer_perfect,
+                    jitter=jitter,
                 )
                 if candidates:
                     meta["searched_persona"] = f"非{current_persona}"
@@ -822,30 +891,30 @@ class ImageSearcher:
             return [], meta
 
         if scope == "global":
-            candidates = await self._vector_search(user_query, k=k, persona=None, min_similarity=min_similarity, prefer_perfect=prefer_perfect)
+            candidates = await self._vector_search(user_query, k=k, persona=None, min_similarity=min_similarity, prefer_perfect=prefer_perfect, jitter=jitter)
             meta["searched_persona"] = "全局"
             meta["persona_scope"] = "global"
             return candidates, meta
 
         if scope == "self":
             target = current_persona or persona
-            candidates = await self._vector_search(user_query, k=k, persona=target, min_similarity=min_similarity, prefer_perfect=prefer_perfect)
+            candidates = await self._vector_search(user_query, k=k, persona=target, min_similarity=min_similarity, prefer_perfect=prefer_perfect, jitter=jitter)
             meta["searched_persona"] = target or "全局"
             meta["persona_scope"] = "self"
             return candidates, meta
 
         if scope == "named" and persona:
-            candidates = await self._vector_search(user_query, k=k, persona=persona, min_similarity=min_similarity, prefer_perfect=prefer_perfect)
+            candidates = await self._vector_search(user_query, k=k, persona=persona, min_similarity=min_similarity, prefer_perfect=prefer_perfect, jitter=jitter)
             meta["searched_persona"] = persona
             meta["persona_scope"] = "named"
             return candidates, meta
 
-        candidates = await self._vector_search(user_query, k=k, persona=persona, min_similarity=min_similarity, prefer_perfect=prefer_perfect)
+        candidates = await self._vector_search(user_query, k=k, persona=persona, min_similarity=min_similarity, prefer_perfect=prefer_perfect, jitter=jitter)
         meta["searched_persona"] = persona or "全局"
         meta["persona_scope"] = "vector"
         return candidates, meta
 
-    async def _vector_search(self, user_query: str, k: int, persona: Optional[str] = None, exclude_persona: str = "", min_similarity: float | None = None, prefer_perfect: bool = False) -> list[dict[str, Any]]:
+    async def _vector_search(self, user_query: str, k: int, persona: Optional[str] = None, exclude_persona: str = "", min_similarity: float | None = None, prefer_perfect: bool = False, jitter: float = 0.0) -> list[dict[str, Any]]:
         if not self.vector_searcher or not self.vector_searcher.available:
             logger.debug("[Wardrobe] 向量检索不可用: vector_searcher=%s available=%s",
                         self.vector_searcher is not None,
@@ -861,6 +930,7 @@ class ImageSearcher:
             exclude_persona=exclude_persona,
             min_similarity=min_similarity,
             prefer_perfect=prefer_perfect,
+            jitter=jitter,
         )
         if not wardrobe_results:
             logger.debug("[Wardrobe] 向量检索无结果: query=%s", user_query[:100])

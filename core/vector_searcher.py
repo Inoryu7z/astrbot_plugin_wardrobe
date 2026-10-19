@@ -1,6 +1,7 @@
 import json
 import math
 import os
+import random
 import re
 import time
 from pathlib import Path
@@ -62,6 +63,8 @@ _KEYWORD_IDF_MAX = 3.0         # IDF 上限，防止极稀有噪声词被抬上�
 _KEYWORD_MIN_DF = 2            # 命中数低于此值不享受 IDF 加成（多半是噪声）
 _KEYWORD_BONUS = 0.5           # 字面分归一化后可加成的最大相似度
 _PERFECT_RECALL_BONUS = 0.08   # 「完美」标签的召回加权：只抬排名，不放宽相似度门槛
+# 扰动幅度由调用方（searcher._RECALL_JITTER）传入，这里不另存一份，避免两处数值打架
+_RECALL_OVERSCAN = 10          # 扰动/加权前多召回的张数（否则改分数不改变池子成员）
 _KEYWORD_MAX_TERMS = 6         # 全局只保留区分度最高的词元数（压泛词、控开销）
 _KEYWORD_TERMS_PER_IMAGE = 3   # 每张图最多累计几个词元
 _KEYWORD_TERM_DECAY = (1.0, 0.5, 0.25)  # 第 2、3 个词元边际衰减：
@@ -388,6 +391,7 @@ class WardrobeVectorSearcher:
         exclude_persona: str = "",
         min_similarity: float | None = None,
         prefer_perfect: bool = False,
+        jitter: float = 0.0,
     ) -> list[tuple[str, float]]:
         if not self.available:
             return []
@@ -419,16 +423,23 @@ class WardrobeVectorSearcher:
             if filter_no_persona or exclude_persona:
                 fetch_k = max(fetch_k, k * 5)
 
+            # 多召回一批（overscan）：扰动与完美加权要在"比 k 更大的池子"上做才有意义。
+            # 只取回 top-k 的话，改分数不改变池子成员——第 21 名根本不在列表里，
+            # 扰动再大也换不进来，完美加分也白加。多召回的这部分在最后截断时再淘汰。
+            _need_overscan = jitter > 0 or prefer_perfect
+            _overscan = _RECALL_OVERSCAN if _need_overscan else 0
+            recall_k = k + _overscan
+
             # 主路：完整 query 检索
             filtered = await self._retrieve_and_filter(
-                processed_query, k, fetch_k, min_similarity,
+                processed_query, recall_k, fetch_k, min_similarity,
                 metadata_filters, filter_no_persona, exclude_persona,
             )
 
             # 焦点路：用 X 单独检索，融合两路结果（焦点路加权）
             if focus_term and 1 <= len(focus_term) <= 100:
                 focus_filtered = await self._retrieve_and_filter(
-                    focus_term, k, fetch_k, min_similarity,
+                    focus_term, recall_k, fetch_k, min_similarity,
                     metadata_filters, filter_no_persona, exclude_persona,
                 )
                 if focus_filtered:
@@ -459,6 +470,17 @@ class WardrobeVectorSearcher:
                 logger.warning("[Wardrobe] 关键词召回失败（回退纯向量）: %s", e, exc_info=True)
                 kw_scores, focus_hits = {}, set()
 
+            _resort = False
+
+            # 相似度扰动：每次召回给分数加一点随机噪声，让「刚好在第 20 名内外」那批图
+            # 有机会轮到。不加扰动时同一句 query 每次召回的都是同一批，冷却一过就又回到原样。
+            if jitter > 0:
+                filtered = [
+                    (wid, sim * (1.0 + random.uniform(-jitter, jitter)), content)
+                    for wid, sim, content in filtered
+                ]
+                _resort = True
+
             # 完美标签召回加权：只给已经过了相似度门槛的完美图加分，让它在候选截断时更靠前。
             # 门槛不放宽——与本次需求不沾边的完美图照样进不了候选池。
             if prefer_perfect:
@@ -473,9 +495,15 @@ class WardrobeVectorSearcher:
                         (wid, sim + _PERFECT_RECALL_BONUS if wid in perfect_ids else sim, content)
                         for wid, sim, content in filtered
                     ]
+                    _resort = True
                     logger.debug(
                         "[Wardrobe] 完美图召回加权: %d 张 +%.2f", boosted, _PERFECT_RECALL_BONUS
                     )
+
+            if _resort:
+                # 改完分数必须重排：FAISS 返回的是原始相似度序，只改分数不重排的话
+                # 成员顺序没变，最后截断淘汰的仍是原来那批——扰动和加分都等于没做。
+                filtered.sort(key=lambda x: -x[1])
 
             if kw_scores:
                 max_kw = max(v[0] for v in kw_scores.values()) or 1.0
@@ -506,6 +534,11 @@ class WardrobeVectorSearcher:
                 # 候选池回到 k 张的规模：字面路不再是不受 search_candidate_limit 约束的第二池子
                 if len(filtered) > k:
                     filtered = filtered[:k]
+
+            # 统一截断到 k：overscan 多召回的那批在这里淘汰。
+            # 字面路分支里已有一次截断，这里兜住「无字面命中」时扩召回导致的池子变大。
+            if len(filtered) > k:
+                filtered = filtered[:k]
 
             if not filtered:
                 return []

@@ -48,7 +48,7 @@ _MIGRATION_STATE_FILE = "migration_state.json"
     "astrbot_plugin_wardrobe",
     "Inoryu7z",
     "图片衣柜管理插件，支持智能分类、语义检索和参考图接口",
-    "3.2.3",
+    "3.2.4",
 )
 class WardrobePlugin(Star):
     def __init__(self, context: Context, config: AstrBotConfig = None):
@@ -2038,6 +2038,8 @@ Args:
             exclude_style_keywords=exclude_style_keywords,
             # 拍照取参考图：只有这条路径给「完美」标签加权（召回加分 + 选图打分混合）
             reference_mode=True,
+            # 冷却天数：近 N 天取过的图不进候选池，0 为关闭。补拍走冷梯队，search 内部会忽略
+            cooldown_days=float(self._cfg("search_cooldown_days", 7) or 0),
         )
 
         if not results:
@@ -2054,6 +2056,12 @@ Args:
             "[Wardrobe] 参考图搜索完成: ID=%s 描述=%s",
             best["id"], best.get("description", ""),
         )
+
+        # 冷却账本：无论人格是否为空都要记，否则空人格取图后 last_used_at 不更新
+        try:
+            await self.db.mark_used(best["id"])
+        except Exception:
+            pass
 
         try:
             await self.db.increment_use_count_by_persona(best["id"], resolved_persona)
